@@ -826,6 +826,60 @@ class MotionCommand(CommandTerm):
 
         self._reset_envs_to_current_reference(env_ids)
 
+    def reset_to_motion(
+        self,
+        env_ids: torch.Tensor,
+        motion_ids: torch.Tensor,
+        motion_times: torch.Tensor,
+    ) -> None:
+        """Reset selected environments to exact motion clips/times.
+
+        This is intended for deterministic benchmark rollouts. Normal training
+        and playback should continue using the configured sampling mode.
+        """
+        if env_ids.ndim != 1:
+            raise ValueError(f"env_ids must be 1-D, got {tuple(env_ids.shape)}")
+        if motion_ids.ndim != 1 or motion_times.ndim != 1:
+            raise ValueError(
+                "motion_ids and motion_times must be 1-D, got "
+                f"{tuple(motion_ids.shape)} and {tuple(motion_times.shape)}"
+            )
+        if not (len(env_ids) == len(motion_ids) == len(motion_times)):
+            raise ValueError(
+                "env_ids, motion_ids, and motion_times must have matching lengths, got "
+                f"{len(env_ids)}, {len(motion_ids)}, {len(motion_times)}"
+            )
+        if len(env_ids) == 0:
+            return
+
+        env_ids = env_ids.to(device=self.device, dtype=torch.long)
+        motion_ids = motion_ids.to(device=self.device, dtype=torch.long)
+        motion_times = motion_times.to(device=self.device, dtype=self.motion_times.dtype)
+        if torch.any(motion_ids < 0) or torch.any(motion_ids >= self.motion.num_clips):
+            raise ValueError(
+                f"motion_ids out of range [0, {self.motion.num_clips}): "
+                f"{motion_ids.detach().cpu().tolist()}"
+            )
+
+        sample_starts = self.motion.clip_sample_start_s[motion_ids]
+        sample_ends = self.motion.clip_sample_end_s[motion_ids]
+        invalid_times = (motion_times < sample_starts) | (motion_times >= sample_ends)
+        if torch.any(invalid_times):
+            bad = torch.where(invalid_times)[0]
+            first = int(bad[0].item())
+            raise ValueError(
+                "motion_times must be inside each clip's valid sample range; "
+                f"motion_id={int(motion_ids[first].item())}, "
+                f"time={float(motion_times[first].item()):.6f}, "
+                f"range=[{float(sample_starts[first].item()):.6f}, "
+                f"{float(sample_ends[first].item()):.6f})"
+            )
+
+        self.motion_ids[env_ids] = motion_ids
+        self.motion_times[env_ids] = motion_times
+        self.time_left[env_ids] = float(self.cfg.resampling_time_range[1])
+        self._reset_envs_to_current_reference(env_ids)
+
     def _reset_envs_to_current_reference(self, env_ids: torch.Tensor) -> None:
         if env_ids.numel() == 0:
             return
@@ -920,8 +974,13 @@ class MotionCommand(CommandTerm):
         exceeded = self.motion_times >= end_times
 
         env_ids = torch.where(exceeded)[0]
-        if env_ids.numel() > 0:
+        if env_ids.numel() > 0 and self.cfg.resample_on_clip_end:
             self._resample_command(env_ids)
+        elif env_ids.numel() > 0:
+            self.motion_times[env_ids] = torch.nextafter(
+                end_times[env_ids],
+                self.motion.clip_sample_start_s[self.motion_ids[env_ids]],
+            )
 
         self._refresh_frame_cache()
 
@@ -1037,6 +1096,7 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = field(default_factory=dict)
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
     sampling_mode: Literal["uniform", "start", "rewind"] = "rewind"
+    resample_on_clip_end: bool = True
     window_steps: tuple[int, ...] = (0,)
     rewind_prob: float = 0.8
     rewind_min_steps: int = 25

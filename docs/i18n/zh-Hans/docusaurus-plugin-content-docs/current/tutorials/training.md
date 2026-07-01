@@ -114,19 +114,10 @@ python train_mimic/scripts/play.py \
 python train_mimic/scripts/benchmark.py \
     --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
     --motion_file data/datasets_precomputed \
-    --num_envs 1
+    --num_envs 32
 ```
 
-### 带视频的定量评估
-
-```bash
-python train_mimic/scripts/benchmark.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets_precomputed \
-    --num_envs 1 \
-    --video \
-    --video_length 600
-```
+benchmark 使用 OmniXtreme 风格协议：10 秒 clip、每个合格 clip 进行一次确定性 rollout，并输出 `MPJPE(mm)`、`delta_vel(mm/frame)`、`delta_acc(mm/frame^2)` 和 `success_rate(%)`。它使用无训练噪声的 play-mode 观测，并固定精确 clip id/起始时间且禁用 clip 末尾重采样。`--motion_file` 必须指向预计算训练数据集；所有长度足够满足配置 clip 时长的 clip 都会参与评测。
 
 ## 训练架构
 
@@ -141,4 +132,4 @@ train_mimic/scripts
 - `train_mimic/app.py` - 训练/播放/评估的统一入口
 - `train_mimic/tasks/tracking/config/env.py` - General-Tracking-G1 环境构建器
 - `train_mimic/tasks/tracking/config/rl.py` - TemporalCNN PPO 配置
-- `train_mimic/tasks/tracking/mdp/commands.py` - 支持 `uniform`、`start` 和 `rewind` 采样模式。训练默认使用 `rewind`；播放/评估使用 `start`。
+- `train_mimic/tasks/tracking/mdp/commands.py` - 支持 `uniform`、`start` 和 `rewind` 采样模式。训练默认使用 `rewind`；播放使用 `start`；benchmark 会固定精确的 clip id 和起始时间。

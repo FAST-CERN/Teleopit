@@ -78,7 +78,7 @@ train_mimic/              # Training package
 └── scripts/
     ├── train.py          # Training entry point
     ├── play.py           # Checkpoint playback
-    ├── benchmark.py      # Policy evaluation with tracking errors
+    ├── benchmark.py      # OmniXtreme-style policy benchmark
     └── save_onnx.py      # Export TemporalCNN ONNX
 ```
 
@@ -203,7 +203,7 @@ The single supported training task is `General-Tracking-G1` (experiment name: `g
 - Training env uses `sampling_mode="rewind"`
 - Tracking rewards include root position/orientation/linear velocity/angular velocity, body pose/velocity, joint position/velocity, survival, action-rate, joint-limit, self-collision, and ankle acceleration terms
 - Supported motion sampling modes are `uniform`, `start`, and `rewind`; `rewind` restarts failed environments from the same clip after stepping back `rewind_min_steps..rewind_max_steps` with probability `rewind_prob`, otherwise it falls back to uniform sampling
-- Playback/benchmark use `play=True`, which switches motion sampling to `start`
+- Playback and benchmark use `play=True`, which switches motion sampling to `start`; benchmark pins exact clip ids/start times, disables clip-end resampling, and reports `MPJPE(mm)`, `delta_vel(mm/frame)`, `delta_acc(mm/frame^2)`, and `success_rate(%)`
 - `window_steps=[0]`
 - `save_onnx.py` exports dual-input TemporalCNN ONNX
 

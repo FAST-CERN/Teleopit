@@ -117,38 +117,7 @@ Only modifying the robot XML is insufficient - the simulation-level `njmax` in m
 
 ---
 
-## Issue 5: Benchmark Video Problems
-
-### Video has only 1 frame
-
-Ensure `num_eval_steps >= video_length`:
-
-```bash
-python train_mimic/scripts/benchmark.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets/<dataset>_precomputed \
-    --num_envs 1 --num_eval_steps 2000 \
-    --video --video_length 600
-```
-
-### EGL/OpenGL errors
-
-Install OpenGL/EGL dependencies:
-
-```bash
-conda install -c conda-forge libopengl libglx libegl libglvnd pyopengl
-```
-
-If GPU EGL is unavailable, try CPU rendering:
-
-```bash
-MUJOCO_GL=osmesa PYOPENGL_PLATFORM=osmesa \
-    python train_mimic/scripts/benchmark.py ... --video
-```
-
----
-
-## Issue 6: Foot Sliding in Sim2Sim (Benchmark OK but ONNX Inference Slides)
+## Issue 5: Foot Sliding in Sim2Sim (Benchmark OK but ONNX Inference Slides)
 
 ### Root Cause
 

@@ -117,38 +117,7 @@ self.sim.nconmax = 150_000
 
 ---
 
-## 问题 5：Benchmark 视频问题
-
-### 视频只有 1 帧
-
-确保 `num_eval_steps >= video_length`：
-
-```bash
-python train_mimic/scripts/benchmark.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets/<dataset>_precomputed \
-    --num_envs 1 --num_eval_steps 2000 \
-    --video --video_length 600
-```
-
-### EGL/OpenGL 错误
-
-安装 OpenGL/EGL 依赖：
-
-```bash
-conda install -c conda-forge libopengl libglx libegl libglvnd pyopengl
-```
-
-如果 GPU EGL 不可用，尝试 CPU 渲染：
-
-```bash
-MUJOCO_GL=osmesa PYOPENGL_PLATFORM=osmesa \
-    python train_mimic/scripts/benchmark.py ... --video
-```
-
----
-
-## 问题 6：Sim2Sim 脚滑（Benchmark 正常但 ONNX 推理脚打滑）
+## 问题 5：Sim2Sim 脚滑（Benchmark 正常但 ONNX 推理脚打滑）
 
 ### 根本原因
 

@@ -115,19 +115,10 @@ python train_mimic/scripts/play.py \
 python train_mimic/scripts/benchmark.py \
     --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
     --motion_file data/datasets_precomputed \
-    --num_envs 1
+    --num_envs 32
 ```
 
-### Benchmark with Video
-
-```bash
-python train_mimic/scripts/benchmark.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets_precomputed \
-    --num_envs 1 \
-    --video \
-    --video_length 600
-```
+The benchmark uses an OmniXtreme-style protocol: 10-second clips, one deterministic rollout per eligible clip, and `MPJPE(mm)`, `delta_vel(mm/frame)`, `delta_acc(mm/frame^2)`, and `success_rate(%)` outputs. It uses play-mode observations without training noise and pins exact clip ids/start times without clip-end resampling. `--motion_file` must point to a precomputed training dataset; all clips long enough for the configured clip length are evaluated.
 
 ## Training Architecture
 
@@ -142,4 +133,4 @@ Key files:
 - `train_mimic/app.py` - Shared entry point for train/play/benchmark
 - `train_mimic/tasks/tracking/config/env.py` - General-Tracking-G1 env builder
 - `train_mimic/tasks/tracking/config/rl.py` - TemporalCNN PPO config
-- `train_mimic/tasks/tracking/mdp/commands.py` - Supports `uniform`, `start`, and `rewind` sampling modes. Training defaults to `rewind`; playback/benchmark use `start`.
+- `train_mimic/tasks/tracking/mdp/commands.py` - Supports `uniform`, `start`, and `rewind` sampling modes. Training defaults to `rewind`; playback uses `start`; benchmark pins exact clip ids and start times.

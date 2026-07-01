@@ -58,7 +58,7 @@ train_mimic/scripts/data
 | Inference observation | `velcmd_history` (167D) |
 | ONNX signature | Dual-input `obs` (167D) + `obs_history` |
 | Actor/Critic | TemporalCNN (2048, 1024, 512, 256, 128) |
-| Training sampling | Default `rewind`; also supports `uniform`; playback/benchmark use `start` |
+| Training sampling | Default `rewind`; also supports `uniform`; playback uses `start`; benchmark pins exact clips and disables clip-end resampling |
 | Training `window_steps` | `[0]` |
 | Data format | Minimal recursive HDF5 shards (`shard_*.h5`) |
 

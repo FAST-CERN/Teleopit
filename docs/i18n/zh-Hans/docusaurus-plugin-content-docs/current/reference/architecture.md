@@ -58,7 +58,7 @@ train_mimic/scripts/data
 | 推理观测 | `velcmd_history`（167D） |
 | ONNX 签名 | 双输入 `obs`（167D）+ `obs_history` |
 | Actor/Critic | TemporalCNN（2048、1024、512、256、128） |
-| 训练采样 | 默认 `rewind`；也支持 `uniform`；播放/评估使用 `start` |
+| 训练采样 | 默认 `rewind`；也支持 `uniform`；播放使用 `start`；benchmark 固定精确 clip 并禁用 clip 末尾重采样 |
 | 训练 `window_steps` | `[0]` |
 | 数据格式 | 可递归发现的最小 HDF5 shard（`shard_*.h5`） |
 

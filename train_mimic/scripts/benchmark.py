@@ -1,35 +1,33 @@
 #!/usr/bin/env python3
-"""Benchmark a trained tracking policy on motion clips.
+"""Benchmark a G1 motion tracking policy with an OmniXtreme-style protocol.
 
-Runs policy rollout for a fixed number of evaluation steps and reports
-distribution statistics for motion-tracking errors.
-
-Can optionally render and save benchmark videos for qualitative inspection.
+Default protocol:
+    * 10 second clips at the policy control rate (500 steps at 50 Hz)
+    * One deterministic rollout per eligible motion clip
+    * MPJPE, delta velocity, delta acceleration, and success rate
 
 Usage:
-    # Benchmark only (no video)
     python train_mimic/scripts/benchmark.py \
-        --checkpoint logs/rsl_rl/g1_tracking/.../model_30000.pt \
+        --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
         --motion_file data/datasets_precomputed \
-        --num_envs 1
-
-    # Single video (one continuous clip)
-    python train_mimic/scripts/benchmark.py ... --video --video_length 500
-
-    # Multiple separate clip videos
-    python train_mimic/scripts/benchmark.py ... --video --num_clips 10 --video_length 250
+        --num_envs 32
 """
 
 from __future__ import annotations
 
 import argparse
-import json
+import copy
 import os
+import sys
 from pathlib import Path
+from typing import Sequence
 
-import h5py
 import numpy as np
-from tensordict import TensorDictBase
+from tensordict import TensorDict
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from train_mimic.app import (
     DEFAULT_TASK,
@@ -40,207 +38,272 @@ from train_mimic.app import (
     validate_checkpoint_path,
     validate_motion_file,
 )
-from train_mimic.data.dataset_lib import find_precomputed_motion_shards
-from teleopit.debug.rollout_trace import RolloutTraceWriter
+from train_mimic.benchmarking import (
+    BenchmarkJob,
+    RolloutResult,
+    build_benchmark_plan,
+    compute_tracking_metrics,
+    load_clip_specs,
+    summarize_rollouts,
+    write_benchmark_outputs,
+)
 
 
-def _render_frame(unwrapped: object, split: bool = False, _cmd: object = None) -> np.ndarray:
-    """Render a frame using the environment's offline renderer (ghost included).
-
-    Args:
-        unwrapped: The unwrapped ManagerBasedRlEnv.
-        split: If True, render split-screen with camera lookat on ref (left)
-               and robot (right). Same scene, different camera targets.
-        _cmd: MotionCommand term (required when split=True).
-    """
-    if not split:
-        frame = unwrapped.render()
-        if frame is None:
-            raise RuntimeError("render() returned None; ensure render_mode='rgb_array'")
-        return frame
-
-    import mujoco
-
-    renderer = unwrapped._offline_renderer
-    cam = renderer._cam
-    env_idx = max(0, min(int(renderer._cfg.env_idx), int(unwrapped.sim.data.nworld) - 1))
-
-    # Full scene update (robot + ghost via debug vis).
-    debug_callback = (
-        unwrapped.update_visualizers if hasattr(unwrapped, "update_visualizers") else None
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="OmniXtreme-style benchmark for the G1 tracking policy."
     )
-    renderer.update(unwrapped.sim.data, debug_vis_callback=debug_callback)
-
-    # Save original camera state.
-    orig_type = cam.type
-    orig_trackbodyid = cam.trackbodyid
-    orig_lookat = cam.lookat.copy()
-
-    # --- Left: camera follows ref pose ---
-    ref_pos = _cmd.body_pos_w[env_idx, 0].cpu().numpy()
-    cam.type = mujoco.mjtCamera.mjCAMERA_FREE.value
-    cam.trackbodyid = -1
-    cam.lookat[:] = [ref_pos[0], ref_pos[1], 0.8]
-    renderer._renderer.update_scene(renderer._data, camera=cam)
-    # Re-apply ghost geoms after update_scene reset.
-    if debug_callback is not None:
-        from mjlab.viewer.native.visualizer import MujocoNativeDebugVisualizer
-        vis = MujocoNativeDebugVisualizer(
-            renderer._renderer.scene, renderer._model, env_idx=renderer._cfg.env_idx
-        )
-        debug_callback(vis)
-    frame_ref = renderer._renderer.render()
-
-    # --- Right: camera follows robot ---
-    robot_pos = unwrapped.sim.data.qpos[env_idx, :3].cpu().numpy()
-    cam.lookat[:] = [robot_pos[0], robot_pos[1], 0.8]
-    renderer._renderer.update_scene(renderer._data, camera=cam)
-    if debug_callback is not None:
-        vis = MujocoNativeDebugVisualizer(
-            renderer._renderer.scene, renderer._model, env_idx=renderer._cfg.env_idx
-        )
-        debug_callback(vis)
-    frame_robot = renderer._renderer.render()
-
-    # Restore camera.
-    cam.type = orig_type
-    cam.trackbodyid = orig_trackbodyid
-    cam.lookat[:] = orig_lookat
-
-    return np.concatenate([frame_ref, frame_robot], axis=1)
-
-
-def _to_float(value: object, torch_module: object) -> float:
-    if isinstance(value, torch_module.Tensor):
-        if value.numel() == 0:
-            return 0.0
-        return float(value.float().mean().item())
-    if isinstance(value, (float, int)):
-        return float(value)
-    raise TypeError(f"Unsupported value type: {type(value)}")
-
-
-def _stats(values: list[float]) -> dict[str, float]:
-    if not values:
-        return {
-            "mean": float("nan"),
-            "std": float("nan"),
-            "p50": float("nan"),
-            "p95": float("nan"),
-            "min": float("nan"),
-            "max": float("nan"),
-        }
-    arr = np.asarray(values, dtype=np.float64)
-    return {
-        "mean": float(arr.mean()),
-        "std": float(arr.std()),
-        "p50": float(np.percentile(arr, 50)),
-        "p95": float(np.percentile(arr, 95)),
-        "min": float(arr.min()),
-        "max": float(arr.max()),
-    }
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Benchmark G1 tracking policy.")
     parser.add_argument("--checkpoint", type=str, required=True)
-    parser.add_argument("--motion_file", type=str, required=True, help="Path to precomputed training dataset root containing Teleopit shard_*.h5 files")
-    parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--num_eval_steps", type=int, default=2000,
-                        help="Number of rollout steps for evaluation (default: 2000)")
-    parser.add_argument("--warmup_steps", type=int, default=100,
-                        help="Warmup steps ignored from metric aggregation (default: 100)")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--video", action="store_true",
-                        help="Record benchmark video(s)")
-    parser.add_argument("--num_clips", type=int, default=1,
-                        help="Number of separate video clips to render (default: 1)")
-    parser.add_argument("--video_length", type=int, default=None,
-                        help="Steps per video clip (default: longest clip in motion file)")
-    parser.add_argument("--video_folder", type=str, default=None,
-                        help="Output folder for benchmark video(s)")
-    parser.add_argument("--split", action="store_true",
-                        help="Render split-screen video with two camera angles")
-    parser.add_argument("--device", type=str, default=None)
-    parser.add_argument("--task", type=str, default=DEFAULT_TASK,
-                        help="Task id to benchmark (default: %(default)s)")
     parser.add_argument(
-        "--debug_trace",
+        "--motion_file",
         type=str,
-        default=None,
-        help="Optional .npz path to dump per-step benchmark trace for comparison",
+        required=True,
+        help="Precomputed training dataset root or shard produced by precompute_dataset.py",
     )
-    return parser.parse_args()
+    parser.add_argument("--num_envs", type=int, default=32)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--clip_seconds", type=float, default=10.0)
+    parser.add_argument("--output_dir", type=str, default="benchmark_results")
+    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument(
+        "--task",
+        type=str,
+        default=DEFAULT_TASK,
+        help="Task id to benchmark (default: %(default)s)",
+    )
+    return parser.parse_args(argv)
 
 
-def _load_motion_dir_video_metadata(motion_dir: str) -> tuple[float, int]:
-    clip_fps: float | None = None
-    max_clip_frames = 0
-    for shard_path in find_precomputed_motion_shards(motion_dir):
-        with h5py.File(shard_path, "r") as h5:
-            fps_arr = np.asarray(h5["clip_fps"], dtype=np.float32)
-            if fps_arr.size == 0:
-                continue
-            cur_fps = float(fps_arr[0])
-            if np.any(fps_arr != cur_fps):
-                raise ValueError(f"inconsistent fps within HDF5 shard: {shard_path}")
-            if clip_fps is None:
-                clip_fps = cur_fps
-            elif clip_fps != cur_fps:
-                raise ValueError(
-                    f"inconsistent fps across shards: {shard_path} has {cur_fps}, expected {clip_fps}"
+def _chunked(seq: Sequence[BenchmarkJob], size: int) -> list[Sequence[BenchmarkJob]]:
+    return [seq[i : i + size] for i in range(0, len(seq), size)]
+
+
+def _obs_tensordict(obs_dict: object, num_envs: int) -> TensorDict:
+    return TensorDict(obs_dict, batch_size=[num_envs])
+
+
+def _configure_benchmark_env_cfg(
+    base_cfg: object,
+    *,
+    motion_file: str,
+    clip_seconds: float,
+) -> object:
+    cfg = copy.deepcopy(base_cfg)
+    cfg.commands["motion"].motion_file = motion_file
+    cfg.commands["motion"].sampling_mode = "start"
+    cfg.commands["motion"].resample_on_clip_end = False
+    cfg.commands["motion"].pose_range = {}
+    cfg.commands["motion"].velocity_range = {}
+    cfg.commands["motion"].joint_position_range = (0.0, 0.0)
+    cfg.events = {}
+    cfg.episode_length_s = clip_seconds
+    cfg.auto_reset = False
+    return cfg
+
+
+def _reset_to_jobs(
+    env: object,
+    jobs: Sequence[BenchmarkJob],
+    torch_module: object,
+) -> TensorDict:
+    obs_dict, _extras = env.reset()
+    cmd = env.command_manager.get_term("motion")
+    env_ids = torch_module.arange(len(jobs), dtype=torch_module.long, device=env.device)
+    motion_ids = torch_module.tensor(
+        [job.clip_id for job in jobs],
+        dtype=torch_module.long,
+        device=env.device,
+    )
+    motion_times = torch_module.tensor(
+        [job.start_time_s for job in jobs],
+        dtype=torch_module.float32,
+        device=env.device,
+    )
+    cmd.reset_to_motion(env_ids, motion_ids, motion_times)
+    env.observation_manager.reset(env_ids)
+    env.scene.write_data_to_sim()
+    env.sim.forward()
+    env.command_manager.compute(dt=0.0)
+    env.sim.sense()
+    obs_dict = env.observation_manager.compute(update_history=True)
+    env.obs_buf = obs_dict
+    return _obs_tensordict(obs_dict, len(jobs))
+
+
+def _aligned_keybody_positions(cmd: object) -> tuple[np.ndarray, np.ndarray]:
+    from mjlab.utils.lab_api.math import quat_apply, quat_inv
+
+    ref_anchor_pos = cmd.anchor_pos_w[:, None, :]
+    robot_anchor_pos = cmd.robot_anchor_pos_w[:, None, :]
+    num_bodies = cmd.body_pos_w.shape[1]
+
+    ref_anchor_inv = quat_inv(cmd.anchor_quat_w)[:, None, :].expand(-1, num_bodies, -1)
+    robot_anchor_inv = quat_inv(cmd.robot_anchor_quat_w)[:, None, :].expand(
+        -1, num_bodies, -1
+    )
+    ref_aligned = quat_apply(ref_anchor_inv, cmd.body_pos_w - ref_anchor_pos)
+    robot_aligned = quat_apply(robot_anchor_inv, cmd.robot_body_pos_w - robot_anchor_pos)
+    return (
+        ref_aligned.detach().cpu().numpy().astype(np.float32, copy=False),
+        robot_aligned.detach().cpu().numpy().astype(np.float32, copy=False),
+    )
+
+
+def _failure_reason(env: object, env_index: int) -> str:
+    manager = env.termination_manager
+    for term_name in manager.active_terms:
+        term_cfg = manager.get_term_cfg(term_name)
+        if term_cfg.time_out:
+            continue
+        if bool(manager.get_term(term_name)[env_index].item()):
+            return term_name
+    for term_name in manager.active_terms:
+        term_cfg = manager.get_term_cfg(term_name)
+        if term_cfg.time_out and bool(manager.get_term(term_name)[env_index].item()):
+            return term_name
+    return "done"
+
+
+def _run_batch(
+    *,
+    batch_index: int,
+    jobs: Sequence[BenchmarkJob],
+    base_env_cfg: object,
+    agent_cfg: object,
+    runner_cls: object,
+    fallback_runner_cls: object,
+    checkpoint: str,
+    log_dir: str,
+    device: str,
+    torch_module: object,
+    ManagerBasedRlEnv: object,
+    RslRlVecEnvWrapper: object,
+    clip_seconds: float,
+    control_steps: int,
+    seed: int,
+) -> list[RolloutResult]:
+    env_cfg = _configure_benchmark_env_cfg(
+        base_env_cfg,
+        motion_file=base_env_cfg.commands["motion"].motion_file,
+        clip_seconds=clip_seconds,
+    )
+    env_cfg.seed = seed + batch_index
+    env_cfg.scene.num_envs = len(jobs)
+
+    env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
+    wrapped_env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+    agent_dict = build_runner_cfg_dict(agent_cfg, force_tensorboard=True)
+    RunnerCls = runner_cls or fallback_runner_cls
+    runner = RunnerCls(wrapped_env, agent_dict, log_dir=log_dir, device=device)
+    runner.load(checkpoint, map_location=device)
+    policy = runner.get_inference_policy(device=device)
+
+    aligned_ref_by_env: list[list[np.ndarray]] = [[] for _ in jobs]
+    aligned_robot_by_env: list[list[np.ndarray]] = [[] for _ in jobs]
+    active = np.ones(len(jobs), dtype=bool)
+    finished: dict[int, tuple[bool, int, int | None, str | None]] = {}
+
+    try:
+        obs = _reset_to_jobs(env, jobs, torch_module)
+        cmd = env.command_manager.get_term("motion")
+        for step in range(control_steps):
+            ref_aligned, robot_aligned = _aligned_keybody_positions(cmd)
+            for env_index, is_active in enumerate(active):
+                if is_active:
+                    aligned_ref_by_env[env_index].append(ref_aligned[env_index])
+                    aligned_robot_by_env[env_index].append(robot_aligned[env_index])
+
+            with torch_module.no_grad():
+                actions = policy(obs)
+            if agent_cfg.clip_actions is not None:
+                actions = torch_module.clamp(
+                    actions,
+                    -agent_cfg.clip_actions,
+                    agent_cfg.clip_actions,
                 )
-            max_clip_frames = max(max_clip_frames, int(np.asarray(h5["clip_lengths"]).max()))
-    if clip_fps is None:
-        raise ValueError(f"failed reading HDF5 shard metadata from {motion_dir}")
-    return clip_fps, max_clip_frames
 
+            obs_dict, _rewards, terminated, truncated, _extras = env.step(actions)
+            obs = _obs_tensordict(obs_dict, len(jobs))
 
-def _tensor_to_numpy(value: object, torch_module: object) -> np.ndarray:
-    if isinstance(value, torch_module.Tensor):
-        return value.detach().cpu().numpy()
-    return np.asarray(value)
+            done = (terminated | truncated).detach().cpu().numpy().astype(bool)
+            terminated_np = terminated.detach().cpu().numpy().astype(bool)
+            truncated_np = truncated.detach().cpu().numpy().astype(bool)
+            done_envs = [int(env_index) for env_index, is_done in enumerate(done) if is_done]
+            for env_index, is_done in enumerate(done):
+                if not active[env_index] or not is_done:
+                    continue
+                reached_horizon = step + 1 >= control_steps
+                success = bool(
+                    truncated_np[env_index]
+                    and reached_horizon
+                    and not terminated_np[env_index]
+                )
+                failure_step = None if success else step + 1
+                failure_reason = None if success else _failure_reason(env, env_index)
+                finished[env_index] = (success, step + 1, failure_step, failure_reason)
+                active[env_index] = False
 
+            if step + 1 < control_steps and done_envs:
+                env_ids = torch_module.tensor(
+                    done_envs,
+                    dtype=torch_module.long,
+                    device=env.device,
+                )
+                obs_dict, _extras = env.reset(env_ids=env_ids)
+                obs = _obs_tensordict(obs_dict, len(jobs))
 
-def _first_env_numpy(value: object, torch_module: object) -> np.ndarray:
-    array = _tensor_to_numpy(value, torch_module)
-    if array.ndim == 0:
-        return array.reshape(1)
-    return array[0].copy()
+            if not active.any():
+                break
+    finally:
+        env.close()
 
-
-def _extract_obs_for_trace(obs: object, torch_module: object) -> tuple[np.ndarray, np.ndarray | None]:
-    if isinstance(obs, TensorDictBase):
-        actor = _first_env_numpy(obs["actor"], torch_module).astype(np.float32, copy=False)
-        actor_history = None
-        if "actor_history" in obs.keys():
-            actor_history = _first_env_numpy(obs["actor_history"], torch_module).astype(
-                np.float32, copy=False
+    results: list[RolloutResult] = []
+    for env_index, job in enumerate(jobs):
+        success, steps, failure_step, failure_reason = finished.get(
+            env_index,
+            (True, control_steps, None, None),
+        )
+        metrics = compute_tracking_metrics(
+            np.stack(aligned_ref_by_env[env_index], axis=0),
+            np.stack(aligned_robot_by_env[env_index], axis=0),
+        )
+        if not success:
+            metrics = {
+                "mpjpe_mm": float("nan"),
+                "delta_vel_mm_per_frame": float("nan"),
+                "delta_acc_mm_per_frame2": float("nan"),
+            }
+        results.append(
+            RolloutResult(
+                job_id=job.job_id,
+                clip_id=job.clip_id,
+                rollout_index=job.rollout_index,
+                success=success,
+                steps=steps,
+                failure_step=failure_step,
+                failure_reason=failure_reason,
+                mpjpe_mm=metrics["mpjpe_mm"],
+                delta_vel_mm_per_frame=metrics["delta_vel_mm_per_frame"],
+                delta_acc_mm_per_frame2=metrics["delta_acc_mm_per_frame2"],
             )
-        return actor, actor_history
-    raise TypeError(f"Unsupported observation container for debug trace: {type(obs)}")
+        )
+    return results
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
 
-    if args.warmup_steps < 0:
-        raise ValueError("--warmup_steps must be >= 0")
-    if not args.video and args.num_eval_steps <= args.warmup_steps:
-        raise ValueError("--num_eval_steps must be greater than --warmup_steps")
-    if args.video and args.num_envs != 1:
-        raise ValueError("--video currently requires --num_envs 1")
-    if args.debug_trace is not None and args.num_envs != 1:
-        raise ValueError("--debug_trace currently requires --num_envs 1")
+    if args.num_envs <= 0:
+        raise ValueError("--num_envs must be > 0")
+    if args.clip_seconds <= 0.0:
+        raise ValueError("--clip_seconds must be > 0")
+
     validate_motion_file(args.motion_file)
-
-    # Set render backend before importing modules that may initialize MuJoCo/GL.
-    if args.video and "MUJOCO_GL" not in os.environ:
-        os.environ["MUJOCO_GL"] = "egl"
-        print("[INFO] --video enabled, MUJOCO_GL not set. Defaulting to MUJOCO_GL=egl.")
-    if args.video and "PYOPENGL_PLATFORM" not in os.environ:
-        os.environ["PYOPENGL_PLATFORM"] = "egl"
-        print("[INFO] --video enabled, PYOPENGL_PLATFORM not set. Defaulting to PYOPENGL_PLATFORM=egl.")
+    try:
+        validate_checkpoint_path(args.checkpoint)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        return 1
 
     (
         torch,
@@ -252,328 +315,98 @@ def main() -> int:
         _load_runner_cls,
         configure_torch_backends,
     ) = import_training_stack()
-
-    try:
-        validate_checkpoint_path(args.checkpoint)
-    except FileNotFoundError as exc:
-        print(f"Error: {exc}")
-        return 1
-
     configure_torch_backends()
 
-    # Load configs (play=True disables corruption, push_robot, etc.)
-    task_name, env_cfg, agent_cfg, runner_cls = load_task_components(
+    task_name, base_env_cfg, agent_cfg, runner_cls = load_task_components(
         args.task,
         play=True,
         load_env_cfg=_load_env_cfg,
         load_rl_cfg=_load_rl_cfg,
         load_runner_cls=_load_runner_cls,
     )
-
-    # Configure for benchmark
-    env_cfg.seed = args.seed
-    env_cfg.scene.num_envs = args.num_envs
-    env_cfg.commands["motion"].motion_file = args.motion_file
-    env_cfg.commands["motion"].pose_range = {}
-    env_cfg.commands["motion"].velocity_range = {}
-
-    # Use uniform sampling so each reset picks a different motion segment.
-    if args.video and args.num_clips > 1:
-        env_cfg.commands["motion"].sampling_mode = "uniform"
-
-    step_dt = float(env_cfg.decimation) * float(env_cfg.sim.mujoco.timestep)
-    required_episode_s = args.num_eval_steps * step_dt + 1.0
-    if float(env_cfg.episode_length_s) < required_episode_s:
-        env_cfg.episode_length_s = required_episode_s
-    if args.video:
-        env_cfg.terminations.pop("time_out", None)
-        env_cfg.terminations.pop("anchor_pos", None)
-        env_cfg.terminations.pop("anchor_ori", None)
-        env_cfg.terminations.pop("ee_body_pos", None)
-        env_cfg.terminations.pop("body_z_tracking_failure", None)
-        env_cfg.terminations.pop("gravity_tracking_failure", None)
+    base_env_cfg.commands["motion"].motion_file = args.motion_file
+    benchmark_env_cfg = _configure_benchmark_env_cfg(
+        base_env_cfg,
+        motion_file=args.motion_file,
+        clip_seconds=args.clip_seconds,
+    )
+    step_dt = float(benchmark_env_cfg.decimation) * float(
+        benchmark_env_cfg.sim.mujoco.timestep
+    )
+    clips = load_clip_specs(
+        args.motion_file,
+        window_steps=benchmark_env_cfg.commands["motion"].window_steps,
+    )
+    plan = build_benchmark_plan(
+        clips,
+        clip_seconds=args.clip_seconds,
+        step_dt=step_dt,
+    )
 
     device = resolve_device(args.device, torch)
-
-    # Create env
-    render_mode = "rgb_array" if args.video else None
-    try:
-        env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=render_mode)
-    except Exception as exc:
-        if args.video:
-            raise RuntimeError(
-                "Video renderer initialization failed. "
-                "Try setting MUJOCO_GL=egl (or osmesa) and make sure the corresponding "
-                "OpenGL backend libraries are available on this machine."
-            ) from exc
-        else:
-            raise
-
-    env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
-
-    # Auto-resolve video_length from motion file if not specified.
-    if args.video and args.video_length is None:
-        clip_fps, max_clip_frames = _load_motion_dir_video_metadata(args.motion_file)
-        step_dt = env.unwrapped.step_dt
-        args.video_length = int(max_clip_frames / clip_fps / step_dt)
-        print(f"[INFO] Auto video_length={args.video_length} steps "
-              f"({max_clip_frames} frames / {clip_fps} fps / {step_dt} step_dt = "
-              f"{args.video_length * step_dt:.1f}s)")
-    elif args.video_length is None:
-        args.video_length = 600
-
-    # Auto-adjust num_eval_steps to cover all video clips.
-    if args.video:
-        min_steps = args.num_clips * args.video_length + args.warmup_steps
-        if args.num_eval_steps < min_steps:
-            print(f"[INFO] Increasing --num_eval_steps from {args.num_eval_steps} to {min_steps} "
-                  f"to cover {args.num_clips} clips x {args.video_length} steps + {args.warmup_steps} warmup.")
-            args.num_eval_steps = min_steps
-
+    batches = _chunked(plan.jobs, args.num_envs)
     log_dir = os.path.dirname(args.checkpoint)
-    agent_dict = build_runner_cfg_dict(agent_cfg, force_tensorboard=True)
-    RunnerCls = runner_cls or MjlabOnPolicyRunner
-    runner = RunnerCls(env, agent_dict, log_dir=log_dir, device=device)
-    runner.load(args.checkpoint, map_location=device)
-    policy = runner.get_inference_policy(device=device)
+    results: list[RolloutResult] = []
 
-    # --- Video recording setup ---
-    video_writer = None
-    video_folder: Path | None = None
-    video_paths: list[Path] = []
-    clip_step_counter = 0
-    clip_idx = 0
-
-    if args.video:
-        import imageio.v2 as imageio
-
-        video_folder = Path(args.video_folder or "benchmark_results/videos")
-        video_folder.mkdir(parents=True, exist_ok=True)
-        video_fps = max(1, int(round(1.0 / env.unwrapped.step_dt)))
-
-        def _open_clip_writer(idx: int):
-            nonlocal video_writer, clip_step_counter
-            if args.num_clips == 1:
-                path = video_folder / "benchmark.mp4"
-            else:
-                path = video_folder / f"clip_{idx:03d}.mp4"
-            video_paths.append(path)
-            video_writer = imageio.get_writer(str(path), fps=video_fps, quality=8)
-            clip_step_counter = 0
-            print(f"[INFO] Recording clip {idx + 1}/{args.num_clips}: {path}")
-
-        _open_clip_writer(0)
-
-    # --- Benchmark loop ---
-    obs = env.get_observations()
-    unwrapped = env.unwrapped
-    cmd = unwrapped.command_manager.get_term("motion")
-    metric_keys = sorted(cmd.metrics.keys())
-    metric_series: dict[str, list[float]] = {k: [] for k in metric_keys}
-    reward_series: list[float] = []
-    reset_log_series: dict[str, list[float]] = {}
-    trace_writer: RolloutTraceWriter | None = None
-    if args.debug_trace is not None:
-        trace_writer = RolloutTraceWriter(
-            args.debug_trace,
-            metadata={
-                "source": "benchmark",
-                "task": args.task,
-                "checkpoint": args.checkpoint,
-                "motion_file": args.motion_file,
-                "num_envs": args.num_envs,
-                "step_dt": float(env.unwrapped.step_dt),
-            },
+    print(
+        "Running OmniXtreme-style benchmark: "
+        f"{len(plan.eligible_clips)} clips, {len(plan.jobs)} rollouts, "
+        f"{plan.control_steps} steps/rollout, batch size {args.num_envs}."
+    )
+    if plan.skipped_short_clips:
+        print(
+            f"Skipping {len(plan.skipped_short_clips)} clips shorter than "
+            f"{args.clip_seconds:.2f}s."
         )
 
-    done_events = 0
-    timeout_events = 0
-    ep_len_buf = torch.zeros(args.num_envs, dtype=torch.long, device=device)
-    completed_episode_lengths: list[int] = []
-
-    try:
-        for step in range(args.num_eval_steps):
-            actor_obs, actor_history = _extract_obs_for_trace(obs, torch)
-            with torch.no_grad():
-                actions = policy(obs)
-            obs, rewards, dones, extras = env.step(actions)
-            ep_len_buf += 1
-
-            # Record video frame.
-            if video_writer is not None and clip_idx < args.num_clips:
-                frame = _render_frame(env.unwrapped, split=args.split, _cmd=cmd)
-                video_writer.append_data(frame)
-                clip_step_counter += 1
-
-                # Close current clip and open next one.
-                if clip_step_counter >= args.video_length:
-                    video_writer.close()
-                    video_writer = None
-                    clip_idx += 1
-                    if clip_idx < args.num_clips:
-                        # Reset env to sample a new motion segment.
-                        obs, _ = env.reset()
-                        ep_len_buf[:] = 0
-                        _open_clip_writer(clip_idx)
-
-            done_mask = dones > 0
-            num_done = int(done_mask.sum().item())
-            if num_done > 0:
-                done_events += num_done
-                completed_episode_lengths.extend(ep_len_buf[done_mask].detach().cpu().tolist())
-                ep_len_buf[done_mask] = 0
-                extras_log = extras.get("log", {}) if isinstance(extras, dict) else {}
-                if isinstance(extras_log, dict):
-                    for key, value in extras_log.items():
-                        if key.startswith(("Episode_Reward/", "Episode_Termination/", "Metrics/motion/")):
-                            reset_log_series.setdefault(key, []).append(_to_float(value, torch))
-
-            if step < args.warmup_steps:
-                continue
-
-            reward_series.append(_to_float(rewards, torch))
-            for key in metric_keys:
-                metric_series[key].append(_to_float(cmd.metrics[key], torch))
-
-            if isinstance(extras, dict) and "time_outs" in extras and isinstance(extras["time_outs"], torch.Tensor):
-                timeout_events += int(extras["time_outs"].sum().item())
-
-            if trace_writer is not None:
-                trace_writer.add_step(
-                    step=np.int64(step),
-                    policy_time=np.float64(step * env.unwrapped.step_dt),
-                    obs=actor_obs,
-                    obs_history=actor_history,
-                    action=_first_env_numpy(actions, torch).astype(np.float32, copy=False),
-                    reward=np.asarray(_to_float(rewards, torch), dtype=np.float32),
-                    motion_joint_pos=_first_env_numpy(cmd.joint_pos, torch).astype(np.float32, copy=False),
-                    motion_joint_vel=_first_env_numpy(cmd.joint_vel, torch).astype(np.float32, copy=False),
-                    motion_anchor_pos_w=_first_env_numpy(cmd.anchor_pos_w, torch).astype(np.float32, copy=False),
-                    motion_anchor_quat_w=_first_env_numpy(cmd.anchor_quat_w, torch).astype(np.float32, copy=False),
-                    motion_anchor_lin_vel_w=_first_env_numpy(cmd.anchor_lin_vel_w, torch).astype(np.float32, copy=False),
-                    motion_anchor_ang_vel_w=_first_env_numpy(cmd.anchor_ang_vel_w, torch).astype(np.float32, copy=False),
-                    robot_joint_pos=_first_env_numpy(cmd.robot_joint_pos, torch).astype(np.float32, copy=False),
-                    robot_joint_vel=_first_env_numpy(cmd.robot_joint_vel, torch).astype(np.float32, copy=False),
-                    robot_anchor_pos_w=_first_env_numpy(cmd.robot_anchor_pos_w, torch).astype(np.float32, copy=False),
-                    robot_anchor_quat_w=_first_env_numpy(cmd.robot_anchor_quat_w, torch).astype(np.float32, copy=False),
-                    done=np.asarray(bool(dones[0].item()), dtype=np.bool_),
-                )
-    finally:
-        if video_writer is not None:
-            video_writer.close()
-        if trace_writer is not None:
-            trace_writer.save()
-        env.close()
-
-    # --- Report ---
-    effective_steps = args.num_eval_steps - args.warmup_steps
-    if effective_steps <= 0:
-        raise RuntimeError("No effective evaluation steps. Increase --num_eval_steps or decrease --warmup_steps.")
-
-    metric_stats = {key: _stats(vals) for key, vals in metric_series.items()}
-    reward_stats = _stats(reward_series)
-    reset_log_stats = {key: _stats(vals) for key, vals in reset_log_series.items()}
-
-    anchor_pos = metric_stats.get("error_anchor_pos", {}).get("mean", float("nan"))
-    anchor_rot = metric_stats.get("error_anchor_rot", {}).get("mean", float("nan"))
-    body_pos = metric_stats.get("error_body_pos", {}).get("mean", float("nan"))
-    total = anchor_pos + anchor_rot + body_pos
-
-    eval_transitions = args.num_eval_steps * args.num_envs
-    done_rate = done_events / max(eval_transitions, 1)
-    timeout_rate = timeout_events / max(eval_transitions, 1)
-    ep_len_stats = _stats([float(v) for v in completed_episode_lengths])
-
-    print(f"\nBenchmark Results ({effective_steps} effective steps, warmup {args.warmup_steps}):")
-    print(f"  total_error(anchor_pos+anchor_rot+body_pos): {total:.4f}")
-    print(f"  error_anchor_pos: {anchor_pos:.4f}")
-    print(f"  error_anchor_rot: {anchor_rot:.4f}")
-    print(f"  error_body_pos: {body_pos:.4f}")
-    print(f"  mean_step_reward: {reward_stats['mean']:.4f}")
-    print(f"  done_rate: {done_rate:.4f}")
-    print(f"  timeout_rate: {timeout_rate:.4f}")
-    print(f"  completed_episodes: {len(completed_episode_lengths)}")
-    print(f"  mean_episode_length: {ep_len_stats['mean']:.2f}")
-
-    print("\nMetric distributions (mean / p50 / p95):")
-    for key in (
-        "error_anchor_pos",
-        "error_anchor_rot",
-        "error_anchor_lin_vel",
-        "error_anchor_ang_vel",
-        "error_body_pos",
-        "error_body_rot",
-        "error_body_lin_vel",
-        "error_body_ang_vel",
-        "error_joint_pos",
-        "error_joint_vel",
-    ):
-        if key not in metric_stats:
-            continue
-        stats = metric_stats[key]
-        print(f"  {key}: {stats['mean']:.4f} / {stats['p50']:.4f} / {stats['p95']:.4f}")
-
-    Path("benchmark_results").mkdir(exist_ok=True)
-    output_path = Path("benchmark_results") / f"{args.task}-{Path(args.checkpoint).stem}.txt"
-    json_path = Path("benchmark_results") / f"{args.task}-{Path(args.checkpoint).stem}.json"
-
-    lines = [
-        f"checkpoint: {args.checkpoint}",
-        f"motion_file: {args.motion_file}",
-        f"num_envs: {args.num_envs}",
-        f"num_eval_steps: {args.num_eval_steps}",
-        f"warmup_steps: {args.warmup_steps}",
-        f"effective_steps: {effective_steps}",
-        "",
-        f"total_error(anchor_pos+anchor_rot+body_pos): {total:.6f}",
-        f"error_anchor_pos_mean: {anchor_pos:.6f}",
-        f"error_anchor_rot_mean: {anchor_rot:.6f}",
-        f"error_body_pos_mean: {body_pos:.6f}",
-        f"mean_step_reward: {reward_stats['mean']:.6f}",
-        f"done_rate: {done_rate:.6f}",
-        f"timeout_rate: {timeout_rate:.6f}",
-        f"completed_episodes: {len(completed_episode_lengths)}",
-        f"mean_episode_length: {ep_len_stats['mean']:.6f}",
-        "",
-        "metric_stats(mean,std,p50,p95,min,max):",
-    ]
-    for key in sorted(metric_stats.keys()):
-        s = metric_stats[key]
-        lines.append(
-            f"{key}: {s['mean']:.6f}, {s['std']:.6f}, {s['p50']:.6f}, {s['p95']:.6f}, {s['min']:.6f}, {s['max']:.6f}"
+    for batch_index, batch_jobs in enumerate(batches):
+        print(
+            f"[{batch_index + 1}/{len(batches)}] "
+            f"rollouts {batch_jobs[0].job_id}..{batch_jobs[-1].job_id}"
         )
-    if reset_log_stats:
-        lines.append("")
-        lines.append("reset_log_stats(mean,std,p50,p95,min,max):")
-        for key in sorted(reset_log_stats.keys()):
-            s = reset_log_stats[key]
-            lines.append(
-                f"{key}: {s['mean']:.6f}, {s['std']:.6f}, {s['p50']:.6f}, {s['p95']:.6f}, {s['min']:.6f}, {s['max']:.6f}"
+        results.extend(
+            _run_batch(
+                batch_index=batch_index,
+                jobs=batch_jobs,
+                base_env_cfg=benchmark_env_cfg,
+                agent_cfg=agent_cfg,
+                runner_cls=runner_cls,
+                fallback_runner_cls=MjlabOnPolicyRunner,
+                checkpoint=args.checkpoint,
+                log_dir=log_dir,
+                device=device,
+                torch_module=torch,
+                ManagerBasedRlEnv=ManagerBasedRlEnv,
+                RslRlVecEnvWrapper=RslRlVecEnvWrapper,
+                clip_seconds=args.clip_seconds,
+                control_steps=plan.control_steps,
+                seed=args.seed,
             )
-    output_path.write_text("\n".join(lines) + "\n")
+        )
 
-    report = {
-        "checkpoint": args.checkpoint,
-        "motion_file": args.motion_file,
-        "num_envs": args.num_envs,
-        "num_eval_steps": args.num_eval_steps,
-        "warmup_steps": args.warmup_steps,
-        "effective_steps": effective_steps,
-        "total_error": total,
-        "mean_step_reward": reward_stats["mean"],
-        "done_rate": done_rate,
-        "timeout_rate": timeout_rate,
-        "completed_episodes": len(completed_episode_lengths),
-        "mean_episode_length": ep_len_stats["mean"],
-        "metric_stats": metric_stats,
-        "reset_log_stats": reset_log_stats,
-    }
-    json_path.write_text(json.dumps(report, indent=2))
+    output_stem = f"{task_name}-{Path(args.checkpoint).stem}-omnixtreme"
+    paths = write_benchmark_outputs(
+        args.output_dir,
+        text_stem=output_stem,
+        metadata={
+            "task": task_name,
+            "checkpoint": args.checkpoint,
+            "motion_file": args.motion_file,
+            "seed": args.seed,
+            "num_envs": args.num_envs,
+        },
+        plan=plan,
+        results=results,
+    )
 
-    print(f"\nSaved summary to: {output_path}")
-    print(f"Saved detailed json to: {json_path}")
-    for vp in video_paths:
-        print(f"Saved video: {vp}")
+    summary = summarize_rollouts(results)["global"]
+    print("\nBenchmark Results:")
+    print(f"  MPJPE(mm): {summary['mpjpe_mm']:.4f}")
+    print(f"  delta_vel(mm/frame): {summary['delta_vel_mm_per_frame']:.4f}")
+    print(f"  delta_acc(mm/frame^2): {summary['delta_acc_mm_per_frame2']:.4f}")
+    print(f"  success_rate(%): {summary['success_rate']:.2f}")
+    for label, path in paths.items():
+        print(f"Saved {label}: {path}")
     return 0
 
 
