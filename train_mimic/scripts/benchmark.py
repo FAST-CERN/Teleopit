@@ -4,7 +4,7 @@
 Default protocol:
     * 10 second clips at the policy control rate (500 steps at 50 Hz)
     * One deterministic rollout per eligible motion clip
-    * MPJPE, delta velocity, delta acceleration, and success rate
+    * MPJPE, root tracking errors, and success rate
 
 Usage:
     python train_mimic/scripts/benchmark.py \
@@ -149,6 +149,23 @@ def _aligned_keybody_positions(cmd: object) -> tuple[np.ndarray, np.ndarray]:
     )
 
 
+def _root_tracking_errors(cmd: object) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    from mjlab.utils.lab_api.math import quat_error_magnitude
+    import torch
+
+    root_pos_error = torch.norm(cmd.anchor_pos_w - cmd.robot_anchor_pos_w, dim=-1)
+    root_rot_error = quat_error_magnitude(cmd.anchor_quat_w, cmd.robot_anchor_quat_w)
+    root_vel_error = torch.norm(
+        cmd.anchor_lin_vel_w - cmd.robot_anchor_lin_vel_w,
+        dim=-1,
+    )
+    return (
+        root_pos_error.detach().cpu().numpy().astype(np.float32, copy=False),
+        root_rot_error.detach().cpu().numpy().astype(np.float32, copy=False),
+        root_vel_error.detach().cpu().numpy().astype(np.float32, copy=False),
+    )
+
+
 def _failure_reason(env: object, env_index: int) -> str:
     manager = env.termination_manager
     for term_name in manager.active_terms:
@@ -200,6 +217,9 @@ def _run_batch(
 
     aligned_ref_by_env: list[list[np.ndarray]] = [[] for _ in jobs]
     aligned_robot_by_env: list[list[np.ndarray]] = [[] for _ in jobs]
+    root_pos_error_by_env: list[list[float]] = [[] for _ in jobs]
+    root_rot_error_by_env: list[list[float]] = [[] for _ in jobs]
+    root_vel_error_by_env: list[list[float]] = [[] for _ in jobs]
     active = np.ones(len(jobs), dtype=bool)
     finished: dict[int, tuple[bool, int, int | None, str | None]] = {}
 
@@ -208,10 +228,20 @@ def _run_batch(
         cmd = env.command_manager.get_term("motion")
         for step in range(control_steps):
             ref_aligned, robot_aligned = _aligned_keybody_positions(cmd)
+            root_pos_error, root_rot_error, root_vel_error = _root_tracking_errors(cmd)
             for env_index, is_active in enumerate(active):
                 if is_active:
                     aligned_ref_by_env[env_index].append(ref_aligned[env_index])
                     aligned_robot_by_env[env_index].append(robot_aligned[env_index])
+                    root_pos_error_by_env[env_index].append(
+                        float(root_pos_error[env_index])
+                    )
+                    root_rot_error_by_env[env_index].append(
+                        float(root_rot_error[env_index])
+                    )
+                    root_vel_error_by_env[env_index].append(
+                        float(root_vel_error[env_index])
+                    )
 
             with torch_module.no_grad():
                 actions = policy(obs)
@@ -266,12 +296,16 @@ def _run_batch(
         metrics = compute_tracking_metrics(
             np.stack(aligned_ref_by_env[env_index], axis=0),
             np.stack(aligned_robot_by_env[env_index], axis=0),
+            np.asarray(root_pos_error_by_env[env_index], dtype=np.float32),
+            np.asarray(root_rot_error_by_env[env_index], dtype=np.float32),
+            np.asarray(root_vel_error_by_env[env_index], dtype=np.float32),
         )
         if not success:
             metrics = {
-                "mpjpe_mm": float("nan"),
-                "delta_vel_mm_per_frame": float("nan"),
-                "delta_acc_mm_per_frame2": float("nan"),
+                "mpjpe_m": float("nan"),
+                "root_pos_error_m": float("nan"),
+                "root_rot_error_rad": float("nan"),
+                "root_vel_error_m_s": float("nan"),
             }
         results.append(
             RolloutResult(
@@ -282,9 +316,10 @@ def _run_batch(
                 steps=steps,
                 failure_step=failure_step,
                 failure_reason=failure_reason,
-                mpjpe_mm=metrics["mpjpe_mm"],
-                delta_vel_mm_per_frame=metrics["delta_vel_mm_per_frame"],
-                delta_acc_mm_per_frame2=metrics["delta_acc_mm_per_frame2"],
+                mpjpe_m=metrics["mpjpe_m"],
+                root_pos_error_m=metrics["root_pos_error_m"],
+                root_rot_error_rad=metrics["root_rot_error_rad"],
+                root_vel_error_m_s=metrics["root_vel_error_m_s"],
             )
         )
     return results
@@ -401,9 +436,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     summary = summarize_rollouts(results)["global"]
     print("\nBenchmark Results:")
-    print(f"  MPJPE(mm): {summary['mpjpe_mm']:.4f}")
-    print(f"  delta_vel(mm/frame): {summary['delta_vel_mm_per_frame']:.4f}")
-    print(f"  delta_acc(mm/frame^2): {summary['delta_acc_mm_per_frame2']:.4f}")
+    print(f"  MPJPE(m): {summary['mpjpe_m']:.4f}")
+    print(f"  root_pos_error(m): {summary['root_pos_error_m']:.4f}")
+    print(f"  root_rot_error(rad): {summary['root_rot_error_rad']:.4f}")
+    print(f"  root_vel_error(m/s): {summary['root_vel_error_m_s']:.4f}")
     print(f"  success_rate(%): {summary['success_rate']:.2f}")
     for label, path in paths.items():
         print(f"Saved {label}: {path}")

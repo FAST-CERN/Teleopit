@@ -118,7 +118,7 @@ python train_mimic/scripts/benchmark.py \
     --num_envs 32
 ```
 
-The benchmark uses an OmniXtreme-style protocol: 10-second clips, one deterministic rollout per eligible clip, and `MPJPE(mm)`, `delta_vel(mm/frame)`, `delta_acc(mm/frame^2)`, and `success_rate(%)` outputs. It uses play-mode observations without training noise and pins exact clip ids/start times without clip-end resampling. `--motion_file` must point to a precomputed training dataset; all clips long enough for the configured clip length are evaluated.
+The benchmark uses an OmniXtreme-style protocol: 10-second clips, one deterministic rollout per eligible clip, and `MPJPE(m)`, `root_pos_error(m)`, `root_rot_error(rad)`, `root_vel_error(m/s)`, and `success_rate(%)` outputs. Root errors use the same anchor position, rotation, and linear velocity definitions as the tracking command metrics. It uses play-mode observations without training noise and pins exact clip ids/start times without clip-end resampling. `--motion_file` must point to a precomputed training dataset; all clips long enough for the configured clip length are evaluated.
 
 ## Training Architecture
 

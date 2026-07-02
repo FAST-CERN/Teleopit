@@ -81,16 +81,23 @@ def test_compute_tracking_metrics() -> None:
         dtype=np.float32,
     )
 
-    metrics = compute_tracking_metrics(ref, robot)
+    metrics = compute_tracking_metrics(
+        ref,
+        robot,
+        root_pos_error_m=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+        root_rot_error_rad=np.array([0.01, 0.02, 0.03], dtype=np.float32),
+        root_vel_error_m_s=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+    )
 
-    assert metrics["mpjpe_mm"] == pytest.approx((0.0 + 0.1 + 0.4) / 3.0 * 1000.0)
-    assert metrics["delta_vel_mm_per_frame"] == pytest.approx((0.1 + 0.3) / 2.0 * 1000.0)
-    assert metrics["delta_acc_mm_per_frame2"] == pytest.approx(0.2 * 1000.0)
+    assert metrics["mpjpe_m"] == pytest.approx((0.0 + 0.1 + 0.4) / 3.0)
+    assert metrics["root_pos_error_m"] == pytest.approx(0.2)
+    assert metrics["root_rot_error_rad"] == pytest.approx(0.02)
+    assert metrics["root_vel_error_m_s"] == pytest.approx(2.0)
 
 
 def test_summarize_rollouts_aggregates_success_and_metrics() -> None:
     results = [
-        RolloutResult(0, 0, 0, True, 500, None, None, 10.0, 2.0, 1.0),
+        RolloutResult(0, 0, 0, True, 500, None, None, 0.01, 0.1, 0.01, 1.0),
         RolloutResult(
             1,
             0,
@@ -102,16 +109,20 @@ def test_summarize_rollouts_aggregates_success_and_metrics() -> None:
             float("nan"),
             float("nan"),
             float("nan"),
+            float("nan"),
         ),
-        RolloutResult(2, 1, 0, True, 500, None, None, 30.0, 6.0, 5.0),
+        RolloutResult(2, 1, 0, True, 500, None, None, 0.03, 0.3, 0.03, 3.0),
     ]
 
     summary = summarize_rollouts(results)
 
     assert summary["global"]["success_rate"] == pytest.approx(200.0 / 3.0)
-    assert summary["global"]["mpjpe_mm"] == pytest.approx(20.0)
+    assert summary["global"]["mpjpe_m"] == pytest.approx(0.02)
+    assert summary["global"]["root_pos_error_m"] == pytest.approx(0.2)
+    assert summary["global"]["root_rot_error_rad"] == pytest.approx(0.02)
+    assert summary["global"]["root_vel_error_m_s"] == pytest.approx(2.0)
     assert summary["per_clip"][0]["success_rate"] == pytest.approx(50.0)
-    assert summary["per_clip"][0]["mpjpe_mm"] == pytest.approx(10.0)
+    assert summary["per_clip"][0]["mpjpe_m"] == pytest.approx(0.01)
     assert summary["per_clip"][1]["success_rate"] == pytest.approx(100.0)
 
 
@@ -211,9 +222,10 @@ def test_write_benchmark_outputs_serializes_failed_metrics_as_null(tmp_path) -> 
         steps=120,
         failure_step=120,
         failure_reason="anchor_pos",
-        mpjpe_mm=float("nan"),
-        delta_vel_mm_per_frame=float("nan"),
-        delta_acc_mm_per_frame2=float("nan"),
+        mpjpe_m=float("nan"),
+        root_pos_error_m=float("nan"),
+        root_rot_error_rad=float("nan"),
+        root_vel_error_m_s=float("nan"),
     )
 
     paths = write_benchmark_outputs(
@@ -231,8 +243,9 @@ def test_write_benchmark_outputs_serializes_failed_metrics_as_null(tmp_path) -> 
     data = paths["summary_json"].read_text()
     assert "NaN" not in data
     report = __import__("json").loads(data)
-    assert report["global"]["mpjpe_mm"] is None
-    assert report["per_rollout"][0]["mpjpe_mm"] is None
+    assert report["global"]["mpjpe_m"] is None
+    assert report["global"]["root_pos_error_m"] is None
+    assert report["per_rollout"][0]["mpjpe_m"] is None
 
 
 def test_run_batch_resets_inactive_done_envs_and_excludes_failed_metrics(monkeypatch) -> None:
@@ -381,7 +394,15 @@ def test_run_batch_resets_inactive_done_envs_and_excludes_failed_metrics(monkeyp
         robot = np.zeros((2, 1, 3), dtype=np.float32)
         return ref, robot
 
+    def fake_root_errors(_cmd):
+        return (
+            np.zeros(2, dtype=np.float32),
+            np.zeros(2, dtype=np.float32),
+            np.zeros(2, dtype=np.float32),
+        )
+
     monkeypatch.setattr(benchmark_script, "_aligned_keybody_positions", fake_aligned)
+    monkeypatch.setattr(benchmark_script, "_root_tracking_errors", fake_root_errors)
 
     motion = SimpleNamespace(motion_file="dataset")
     base_env_cfg = SimpleNamespace(
@@ -420,4 +441,4 @@ def test_run_batch_resets_inactive_done_envs_and_excludes_failed_metrics(monkeyp
     assert env.observation_manager.reset_calls == [[0, 1]]
     assert results[0].success is True
     assert results[1].success is False
-    assert np.isnan(results[1].mpjpe_mm)
+    assert np.isnan(results[1].mpjpe_m)

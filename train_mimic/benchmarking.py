@@ -57,9 +57,10 @@ class RolloutResult:
     steps: int
     failure_step: int | None
     failure_reason: str | None
-    mpjpe_mm: float
-    delta_vel_mm_per_frame: float
-    delta_acc_mm_per_frame2: float
+    mpjpe_m: float
+    root_pos_error_m: float
+    root_rot_error_rad: float
+    root_vel_error_m_s: float
 
 
 def _json_safe(value: Any) -> Any:
@@ -177,11 +178,18 @@ def build_benchmark_plan(
     )
 
 
-def compute_tracking_metrics(aligned_ref_pos: np.ndarray, aligned_robot_pos: np.ndarray) -> dict[str, float]:
-    """Compute MPJPE, delta velocity, and delta acceleration from aligned key bodies.
+def compute_tracking_metrics(
+    aligned_ref_pos: np.ndarray,
+    aligned_robot_pos: np.ndarray,
+    root_pos_error_m: np.ndarray,
+    root_rot_error_rad: np.ndarray,
+    root_vel_error_m_s: np.ndarray,
+) -> dict[str, float]:
+    """Compute benchmark tracking metrics from aligned key bodies and root errors.
 
-    Inputs are ``(T, B, 3)`` arrays in root/anchor coordinates. Velocity and
-    acceleration are frame differences, matching the paper's mm/frame units.
+    Key-body inputs are ``(T, B, 3)`` arrays in root/anchor coordinates. Root
+    error inputs are per-frame values computed with the same anchor metrics used
+    by ``MotionCommand``.
     """
     ref = np.asarray(aligned_ref_pos, dtype=np.float64)
     robot = np.asarray(aligned_robot_pos, dtype=np.float64)
@@ -190,29 +198,29 @@ def compute_tracking_metrics(aligned_ref_pos: np.ndarray, aligned_robot_pos: np.
     if ref.ndim != 3 or ref.shape[-1] != 3:
         raise ValueError(f"aligned positions must be (T,B,3), got {ref.shape}")
     if ref.shape[0] == 0 or ref.shape[1] == 0:
-        raise ValueError(f"aligned positions must have non-empty T and B dimensions, got {ref.shape}")
+        raise ValueError(
+            f"aligned positions must have non-empty T and B dimensions, got {ref.shape}"
+        )
+
+    root_pos = np.asarray(root_pos_error_m, dtype=np.float64)
+    root_rot = np.asarray(root_rot_error_rad, dtype=np.float64)
+    root_vel = np.asarray(root_vel_error_m_s, dtype=np.float64)
+    for name, values in (
+        ("root_pos_error_m", root_pos),
+        ("root_rot_error_rad", root_rot),
+        ("root_vel_error_m_s", root_vel),
+    ):
+        if values.size == 0:
+            raise ValueError(f"{name} must be non-empty")
 
     pos_error = np.linalg.norm(ref - robot, axis=-1)
-    mpjpe = float(pos_error.mean() * 1000.0)
-
-    if ref.shape[0] >= 2:
-        ref_vel = np.diff(ref, axis=0)
-        robot_vel = np.diff(robot, axis=0)
-        delta_vel = float(np.linalg.norm(ref_vel - robot_vel, axis=-1).mean() * 1000.0)
-    else:
-        delta_vel = float("nan")
-
-    if ref.shape[0] >= 3:
-        ref_acc = np.diff(np.diff(ref, axis=0), axis=0)
-        robot_acc = np.diff(np.diff(robot, axis=0), axis=0)
-        delta_acc = float(np.linalg.norm(ref_acc - robot_acc, axis=-1).mean() * 1000.0)
-    else:
-        delta_acc = float("nan")
+    mpjpe = float(pos_error.mean())
 
     return {
-        "mpjpe_mm": mpjpe,
-        "delta_vel_mm_per_frame": delta_vel,
-        "delta_acc_mm_per_frame2": delta_acc,
+        "mpjpe_m": mpjpe,
+        "root_pos_error_m": float(root_pos.mean()),
+        "root_rot_error_rad": float(root_rot.mean()),
+        "root_vel_error_m_s": float(root_vel.mean()),
     }
 
 
@@ -238,12 +246,15 @@ def summarize_rollouts(results: Sequence[RolloutResult]) -> dict[str, Any]:
                 "success_rate": 100.0
                 * sum(1 for result in clip_results if result.success)
                 / len(clip_results),
-                "mpjpe_mm": finite_mean(result.mpjpe_mm for result in clip_results),
-                "delta_vel_mm_per_frame": finite_mean(
-                    result.delta_vel_mm_per_frame for result in clip_results
+                "mpjpe_m": finite_mean(result.mpjpe_m for result in clip_results),
+                "root_pos_error_m": finite_mean(
+                    result.root_pos_error_m for result in clip_results
                 ),
-                "delta_acc_mm_per_frame2": finite_mean(
-                    result.delta_acc_mm_per_frame2 for result in clip_results
+                "root_rot_error_rad": finite_mean(
+                    result.root_rot_error_rad for result in clip_results
+                ),
+                "root_vel_error_m_s": finite_mean(
+                    result.root_vel_error_m_s for result in clip_results
                 ),
             }
         )
@@ -252,13 +263,18 @@ def summarize_rollouts(results: Sequence[RolloutResult]) -> dict[str, Any]:
         "global": {
             "clips": len(clip_ids),
             "rollouts": len(results),
-            "success_rate": 100.0 * sum(1 for result in results if result.success) / len(results),
-            "mpjpe_mm": finite_mean(result.mpjpe_mm for result in results),
-            "delta_vel_mm_per_frame": finite_mean(
-                result.delta_vel_mm_per_frame for result in results
+            "success_rate": 100.0
+            * sum(1 for result in results if result.success)
+            / len(results),
+            "mpjpe_m": finite_mean(result.mpjpe_m for result in results),
+            "root_pos_error_m": finite_mean(
+                result.root_pos_error_m for result in results
             ),
-            "delta_acc_mm_per_frame2": finite_mean(
-                result.delta_acc_mm_per_frame2 for result in results
+            "root_rot_error_rad": finite_mean(
+                result.root_rot_error_rad for result in results
+            ),
+            "root_vel_error_m_s": finite_mean(
+                result.root_vel_error_m_s for result in results
             ),
         },
         "per_clip": per_clip,
@@ -292,9 +308,10 @@ def write_benchmark_outputs(
         f"eligible_clips: {len(plan.eligible_clips)}",
         f"skipped_short_clips: {len(plan.skipped_short_clips)}",
         "",
-        f"MPJPE(mm): {global_summary['mpjpe_mm']:.6f}",
-        f"delta_vel(mm/frame): {global_summary['delta_vel_mm_per_frame']:.6f}",
-        f"delta_acc(mm/frame^2): {global_summary['delta_acc_mm_per_frame2']:.6f}",
+        f"MPJPE(m): {global_summary['mpjpe_m']:.6f}",
+        f"root_pos_error(m): {global_summary['root_pos_error_m']:.6f}",
+        f"root_rot_error(rad): {global_summary['root_rot_error_rad']:.6f}",
+        f"root_vel_error(m/s): {global_summary['root_vel_error_m_s']:.6f}",
         f"success_rate(%): {global_summary['success_rate']:.6f}",
     ]
     txt_path.write_text("\n".join(lines) + "\n")
@@ -321,9 +338,10 @@ def write_benchmark_outputs(
                 "clip_id",
                 "rollouts",
                 "success_rate",
-                "mpjpe_mm",
-                "delta_vel_mm_per_frame",
-                "delta_acc_mm_per_frame2",
+                "mpjpe_m",
+                "root_pos_error_m",
+                "root_rot_error_rad",
+                "root_vel_error_m_s",
             ],
         )
         writer.writeheader()

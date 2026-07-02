@@ -117,7 +117,7 @@ python train_mimic/scripts/benchmark.py \
     --num_envs 32
 ```
 
-benchmark 使用 OmniXtreme 风格协议：10 秒 clip、每个合格 clip 进行一次确定性 rollout，并输出 `MPJPE(mm)`、`delta_vel(mm/frame)`、`delta_acc(mm/frame^2)` 和 `success_rate(%)`。它使用无训练噪声的 play-mode 观测，并固定精确 clip id/起始时间且禁用 clip 末尾重采样。`--motion_file` 必须指向预计算训练数据集；所有长度足够满足配置 clip 时长的 clip 都会参与评测。
+benchmark 使用 OmniXtreme 风格协议：10 秒 clip、每个合格 clip 进行一次确定性 rollout，并输出 `MPJPE(m)`、`root_pos_error(m)`、`root_rot_error(rad)`、`root_vel_error(m/s)` 和 `success_rate(%)`。root error 使用与 tracking command metrics 相同的 anchor 位置、旋转和线速度定义。它使用无训练噪声的 play-mode 观测，并固定精确 clip id/起始时间且禁用 clip 末尾重采样。`--motion_file` 必须指向预计算训练数据集；所有长度足够满足配置 clip 时长的 clip 都会参与评测。
 
 ## 训练架构
 
