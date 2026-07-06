@@ -31,6 +31,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from train_mimic.app import (
     DEFAULT_TASK,
+    HISTORY_ENCODER_CHOICES,
+    HISTORY_ENCODER_TEMPORAL_CNN,
+    apply_history_encoder_config,
     build_runner_cfg_dict,
     import_training_stack,
     load_task_components,
@@ -70,6 +73,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=str,
         default=DEFAULT_TASK,
         help="Task id to benchmark (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--history_encoder",
+        type=str,
+        default=HISTORY_ENCODER_TEMPORAL_CNN,
+        choices=HISTORY_ENCODER_CHOICES,
+        help=(
+            "Policy history encoder variant used by the checkpoint. Use none for "
+            "MLP checkpoints trained without actor_history/critic_history."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -359,6 +372,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         load_rl_cfg=_load_rl_cfg,
         load_runner_cls=_load_runner_cls,
     )
+    apply_history_encoder_config(base_env_cfg, agent_cfg, args.history_encoder)
     base_env_cfg.commands["motion"].motion_file = args.motion_file
     benchmark_env_cfg = _configure_benchmark_env_cfg(
         base_env_cfg,
@@ -429,6 +443,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "motion_file": args.motion_file,
             "seed": args.seed,
             "num_envs": args.num_envs,
+            "history_encoder": args.history_encoder,
         },
         plan=plan,
         results=results,

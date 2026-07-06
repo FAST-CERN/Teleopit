@@ -14,6 +14,10 @@ from train_mimic.tasks.tracking.config.constants import (
 from train_mimic.data.dataset_lib import find_precomputed_motion_shards, validate_precomputed_motion_dataset
 
 DEFAULT_TASK = GENERAL_TRACKING_TASK
+HISTORY_ENCODER_TEMPORAL_CNN = "temporal_cnn"
+HISTORY_ENCODER_NONE = "none"
+HISTORY_ENCODER_CHOICES = (HISTORY_ENCODER_TEMPORAL_CNN, HISTORY_ENCODER_NONE)
+_MLP_MODEL_CLASS = "rsl_rl.models.mlp_model:MLPModel"
 
 
 def validate_motion_file(motion_file: str) -> None:
@@ -91,6 +95,37 @@ def build_runner_cfg_dict(agent_cfg: Any, *, force_tensorboard: bool = False) ->
     if force_tensorboard:
         agent_dict["logger"] = "tensorboard"
     return agent_dict
+
+
+def apply_history_encoder_config(
+    env_cfg: Any,
+    agent_cfg: Any,
+    history_encoder: str,
+) -> None:
+    """Apply the training/eval observation-model variant for history ablations."""
+    if history_encoder not in HISTORY_ENCODER_CHOICES:
+        raise ValueError(
+            f"Unsupported history_encoder={history_encoder!r}. "
+            f"Supported values are: {', '.join(HISTORY_ENCODER_CHOICES)}."
+        )
+
+    agent_cfg.history_encoder = history_encoder
+    if history_encoder == HISTORY_ENCODER_TEMPORAL_CNN:
+        return
+
+    observations = getattr(env_cfg, "observations", None)
+    if observations is not None:
+        observations.pop("actor_history", None)
+        observations.pop("critic_history", None)
+
+    agent_cfg.obs_groups = {
+        "actor": ("actor",),
+        "critic": ("critic",),
+    }
+    agent_cfg.actor.class_name = _MLP_MODEL_CLASS
+    agent_cfg.actor.cnn_cfg = None
+    agent_cfg.critic.class_name = _MLP_MODEL_CLASS
+    agent_cfg.critic.cnn_cfg = None
 
 
 def resolve_device(requested_device: str | None, torch_module: Any) -> str:

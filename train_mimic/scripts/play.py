@@ -28,10 +28,19 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 from train_mimic.app import (
     DEFAULT_TASK,
+    HISTORY_ENCODER_CHOICES,
+    HISTORY_ENCODER_TEMPORAL_CNN,
+    apply_history_encoder_config,
     build_runner_cfg_dict,
     import_training_stack,
     load_task_components,
@@ -54,6 +63,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--task", type=str, default=DEFAULT_TASK,
                         help="Task id to play (default: %(default)s)")
+    parser.add_argument(
+        "--history_encoder",
+        type=str,
+        default=HISTORY_ENCODER_TEMPORAL_CNN,
+        choices=HISTORY_ENCODER_CHOICES,
+        help=(
+            "Policy history encoder variant used by the checkpoint. Use none for "
+            "MLP checkpoints trained without actor_history/critic_history."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -90,6 +109,7 @@ def main() -> None:
     )
 
     # Override for playback
+    apply_history_encoder_config(env_cfg, agent_cfg, args.history_encoder)
     env_cfg.scene.num_envs = args.num_envs
     env_cfg.commands["motion"].motion_file = args.motion_file
 

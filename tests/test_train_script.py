@@ -12,7 +12,13 @@ import h5py
 import numpy as np
 import pytest
 
-from train_mimic.app import DEFAULT_TASK, validate_checkpoint_path, validate_motion_file
+from train_mimic.app import (
+    DEFAULT_TASK,
+    HISTORY_ENCODER_TEMPORAL_CNN,
+    apply_history_encoder_config,
+    validate_checkpoint_path,
+    validate_motion_file,
+)
 from train_mimic.data.dataset_lib import PRECOMPUTED_MOTION_VERSION
 from train_mimic.scripts import train
 from train_mimic.tasks.tracking.config.rl import make_general_tracking_ppo_runner_cfg
@@ -42,6 +48,7 @@ def _args(**overrides: object) -> argparse.Namespace:
         "rewind_prob": None,
         "rewind_min_steps": None,
         "rewind_max_steps": None,
+        "history_encoder": HISTORY_ENCODER_TEMPORAL_CNN,
         "device": None,
         "gpu_ids": None,
         "master_port": 29500,
@@ -57,6 +64,7 @@ class TestTrainLauncherHelpers:
     def test_parse_args_defaults_to_tensorboard_logger(self) -> None:
         args = train.parse_args([])
         assert args.logger == "tensorboard"
+        assert args.history_encoder == HISTORY_ENCODER_TEMPORAL_CNN
 
     def test_parse_args_accepts_logger_choice(self) -> None:
         args = train.parse_args(["--logger", "swanlab"])
@@ -74,6 +82,10 @@ class TestTrainLauncherHelpers:
     def test_parse_args_accepts_robot_xml(self) -> None:
         args = train.parse_args(["--robot_xml", "assets/robots/unitree_g1/g1_29dof_dex3.xml"])
         assert args.robot_xml == "assets/robots/unitree_g1/g1_29dof_dex3.xml"
+
+    def test_parse_args_accepts_history_encoder_none(self) -> None:
+        args = train.parse_args(["--history_encoder", "none"])
+        assert args.history_encoder == "none"
 
     def test_should_launch_multi_gpu(self) -> None:
         args = _args(gpu_ids=[0, 1, 2, 3])
@@ -219,6 +231,7 @@ class TestTrainLauncherHelpers:
                         "rewind_prob": 0.8,
                         "rewind_min_steps": 25,
                         "rewind_max_steps": 75,
+                        "history_encoder": HISTORY_ENCODER_TEMPORAL_CNN,
                     },
                 },
             ),
@@ -248,6 +261,50 @@ class TestTrainLauncherHelpers:
 
 def test_tracking_runner_configs_disable_model_upload() -> None:
     assert make_general_tracking_ppo_runner_cfg().upload_model is False
+
+
+def test_apply_history_encoder_none_switches_runner_to_current_frame_mlp() -> None:
+    actor_marker = object()
+    critic_marker = object()
+    env_cfg = types.SimpleNamespace(
+        observations={
+            "actor": actor_marker,
+            "critic": critic_marker,
+            "actor_history": object(),
+            "critic_history": object(),
+        }
+    )
+    agent_cfg = make_general_tracking_ppo_runner_cfg()
+
+    apply_history_encoder_config(env_cfg, agent_cfg, "none")
+
+    assert env_cfg.observations == {
+        "actor": actor_marker,
+        "critic": critic_marker,
+    }
+    assert agent_cfg.history_encoder == "none"
+    assert agent_cfg.obs_groups == {
+        "actor": ("actor",),
+        "critic": ("critic",),
+    }
+    assert agent_cfg.actor.class_name == "rsl_rl.models.mlp_model:MLPModel"
+    assert agent_cfg.actor.cnn_cfg is None
+    assert agent_cfg.critic.class_name == "rsl_rl.models.mlp_model:MLPModel"
+    assert agent_cfg.critic.cnn_cfg is None
+
+
+def test_apply_history_encoder_temporal_cnn_keeps_default_runner_cfg() -> None:
+    env_cfg = types.SimpleNamespace(observations={"actor_history": object()})
+    agent_cfg = make_general_tracking_ppo_runner_cfg()
+    actor_class_name = agent_cfg.actor.class_name
+    obs_groups = agent_cfg.obs_groups
+
+    apply_history_encoder_config(env_cfg, agent_cfg, HISTORY_ENCODER_TEMPORAL_CNN)
+
+    assert env_cfg.observations.keys() == {"actor_history"}
+    assert agent_cfg.history_encoder == HISTORY_ENCODER_TEMPORAL_CNN
+    assert agent_cfg.actor.class_name == actor_class_name
+    assert agent_cfg.obs_groups == obs_groups
 
 
 def test_make_g1_training_robot_cfg_uses_requested_xml() -> None:

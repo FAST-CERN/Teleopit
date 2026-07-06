@@ -23,6 +23,11 @@ Usage:
         --motion_file data/datasets_precomputed \
         --logger swanlab
 
+    # Ablate temporal history encoder
+    python train_mimic/scripts/train.py \
+        --history_encoder none \
+        --motion_file data/datasets_precomputed
+
     # Resume for additional iterations
     python train_mimic/scripts/train.py \
         --resume logs/rsl_rl/g1_general_tracking/<run>/model_12000.pt \
@@ -40,10 +45,18 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Sequence
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from train_mimic.app import (
     DEFAULT_TASK,
+    HISTORY_ENCODER_CHOICES,
+    HISTORY_ENCODER_TEMPORAL_CNN,
+    apply_history_encoder_config,
     build_runner_cfg_dict,
     import_training_stack,
     load_task_components,
@@ -106,6 +119,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="Minimum policy steps to rewind for rewind sampling")
     parser.add_argument("--rewind_max_steps", type=int, default=None,
                         help="Maximum policy steps to rewind for rewind sampling")
+    parser.add_argument(
+        "--history_encoder",
+        type=str,
+        default=HISTORY_ENCODER_TEMPORAL_CNN,
+        choices=HISTORY_ENCODER_CHOICES,
+        help=(
+            "History observation encoder variant. temporal_cnn uses actor_history/"
+            "critic_history with the TemporalCNN model; none uses current-frame "
+            "actor/critic observations with a single-input MLP."
+        ),
+    )
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument(
         "--gpu_ids",
@@ -307,6 +331,9 @@ def _configure_experiment_logger(
             "rewind_prob": env_cfg.commands["motion"].rewind_prob,
             "rewind_min_steps": env_cfg.commands["motion"].rewind_min_steps,
             "rewind_max_steps": env_cfg.commands["motion"].rewind_max_steps,
+            "history_encoder": getattr(
+                agent_cfg, "history_encoder", HISTORY_ENCODER_TEMPORAL_CNN
+            ),
         },
     )
     swanlab.sync_tensorboard_torch(types=["scalar", "scalars", "image", "text"])
@@ -404,6 +431,7 @@ def _run_worker(args: argparse.Namespace) -> None:
         agent_cfg.max_iterations = args.max_iterations
     if args.experiment_name is not None:
         agent_cfg.experiment_name = args.experiment_name
+    apply_history_encoder_config(env_cfg, agent_cfg, args.history_encoder)
 
     device = _resolve_device(args, torch)
 
