@@ -152,6 +152,32 @@ calling somehand 0.2.0 through `somehand.api` only.
 | `hands.somehand.temporal_filter_alpha` | somehand input landmark smoothing alpha; `1.0` disables smoothing delay | `1.0` |
 | `hands.somehand.output_alpha` | somehand qpos output smoothing alpha; `1.0` disables smoothing delay | `1.0` |
 
+### OpenNeck Active Vision (Pico sim2real)
+
+`neck.enabled=true` requires `input.provider=pico4` and the `openneck` extra. The
+neck worker reuses Teleopit's existing Pico body-frame stream and does not start
+a second `PicoBridge` or RealSense pipeline. OpenNeck runs as a non-critical
+sim2real worker and does not change the policy observation.
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `neck.enabled` | Enable optional OpenNeck worker | `false` |
+| `neck.driver` | Neck driver plugin; currently `openneck` | `openneck` |
+| `neck.config_path` | Optional OpenNeck calibration config path | `null` |
+| `neck.port` | Optional serial port override, for example `/dev/ttyACM0` | `null` |
+| `neck.rate_hz` | Maximum neck command rate in Hz | `60.0` |
+| `neck.frame_timeout_s` | Pico body-frame staleness threshold | `0.2` |
+| `neck.active_modes` | Sim2real modes that allow neck motion | `[standing, mocap, arms, pause]` |
+| `neck.head_joint` / `body_reference_joint` | Pico body joints used for relative head mapping | `Head` / `Spine3` |
+| `neck.use_body_reference` | Map head motion relative to the body reference joint | `true` |
+| `neck.dead_zone_deg` | Yaw/pitch dead zone in degrees | `0.5` |
+| `neck.smoothing_alpha` | EMA alpha for normalized yaw/pitch commands | `0.35` |
+| `neck.yaw_range_deg` / `pitch_range_deg` | Degrees mapped to normalized command magnitude `1.0` | `90.0` / `60.0` |
+| `neck.invert_yaw` / `invert_pitch` | Invert OpenNeck command direction per axis | `true` / `true` |
+| `neck.center_on_start` / `center_on_shutdown` | Center the gimbal at worker startup/shutdown | `true` / `true` |
+| `neck.release_on_shutdown` | Release servo torque after shutdown when supported | `false` |
+| `neck.dry_run` | Compute commands without opening OpenNeck hardware | `false` |
+
 ### HDF5 Recording (Pico sim2real)
 
 `recording.enabled=true` is supported only with `input.provider=pico4`,

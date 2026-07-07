@@ -73,6 +73,15 @@ scripts/setup/download_somehand_l6_assets.sh
 
 These packages are only required when `hands.enabled=true`.
 
+Optional OpenNeck active-vision control for Pico sim2real uses the remote
+OpenNeck package:
+
+```bash
+pip install -e '.[openneck]'
+```
+
+This extra includes the Pico stack and is only required when `neck.enabled=true`.
+
 ### Sim2Real Recording
 
 ```bash

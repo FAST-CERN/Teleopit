@@ -105,6 +105,29 @@ hands:
     temporal_filter_alpha: 1.0
     output_alpha: 1.0
 
+# Optional OpenNeck active-vision gimbal control. Use only with input.provider=pico4.
+neck:
+  enabled: false
+  driver: openneck
+  config_path: null
+  port: null
+  rate_hz: 60.0
+  frame_timeout_s: 0.2
+  active_modes: [standing, mocap, arms, pause]
+  head_joint: Head
+  body_reference_joint: Spine3
+  use_body_reference: true
+  dead_zone_deg: 0.5
+  smoothing_alpha: 0.35
+  yaw_range_deg: 90.0
+  pitch_range_deg: 60.0
+  invert_yaw: true
+  invert_pitch: true
+  center_on_start: true
+  center_on_shutdown: true
+  release_on_shutdown: false
+  dry_run: false
+
 # Physical robot SDK configuration
 real_robot:
   network_interface: "eth0"

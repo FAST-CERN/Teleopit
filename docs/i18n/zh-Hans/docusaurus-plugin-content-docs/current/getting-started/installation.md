@@ -73,6 +73,14 @@ scripts/setup/download_somehand_l6_assets.sh
 
 只有在 `hands.enabled=true` 时才需要安装这些包。
 
+Pico sim2real 可选的 OpenNeck 主动视觉控制使用远程 OpenNeck 包：
+
+```bash
+pip install -e '.[openneck]'
+```
+
+该 extra 包含 Pico 栈，只有在 `neck.enabled=true` 时才需要安装。
+
 ### Sim2Real 录制
 
 ```bash

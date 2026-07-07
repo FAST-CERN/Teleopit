@@ -170,6 +170,31 @@ Teleopit 会先将 Pico 手部状态转成 21 个 landmarks，再只通过 someh
 | `hands.somehand.temporal_filter_alpha` | somehand 输入 landmarks 平滑 alpha；`1.0` 表示关闭平滑延时 | `1.0` |
 | `hands.somehand.output_alpha` | somehand qpos 输出平滑 alpha；`1.0` 表示关闭平滑延时 | `1.0` |
 
+### OpenNeck 主动视觉（Pico sim2real）
+
+`neck.enabled=true` 要求 `input.provider=pico4` 和 `openneck` extra。neck worker
+复用 Teleopit 已有的 Pico body frame 数据流，不会启动第二个 `PicoBridge` 或 RealSense
+管线。OpenNeck 作为非关键 sim2real worker 运行，不会改变策略观测。
+
+| 字段 | 说明 | 默认值 |
+|---|---|---|
+| `neck.enabled` | 启用可选 OpenNeck worker | `false` |
+| `neck.driver` | 头颈设备驱动插件；当前为 `openneck` | `openneck` |
+| `neck.config_path` | 可选 OpenNeck 校准配置路径 | `null` |
+| `neck.port` | 可选串口覆盖，例如 `/dev/ttyACM0` | `null` |
+| `neck.rate_hz` | 最大头颈命令频率（Hz） | `60.0` |
+| `neck.frame_timeout_s` | Pico body frame 过期阈值 | `0.2` |
+| `neck.active_modes` | 允许头颈运动的 sim2real 模式 | `[standing, mocap, arms, pause]` |
+| `neck.head_joint` / `body_reference_joint` | 用于相对头部映射的 Pico body 关节 | `Head` / `Spine3` |
+| `neck.use_body_reference` | 相对于 body reference 关节映射头部运动 | `true` |
+| `neck.dead_zone_deg` | yaw/pitch 死区（度） | `0.5` |
+| `neck.smoothing_alpha` | 归一化 yaw/pitch 命令的 EMA alpha | `0.35` |
+| `neck.yaw_range_deg` / `pitch_range_deg` | 映射到归一化命令幅值 `1.0` 的角度 | `90.0` / `60.0` |
+| `neck.invert_yaw` / `invert_pitch` | 按轴反转 OpenNeck 命令方向 | `true` / `true` |
+| `neck.center_on_start` / `center_on_shutdown` | worker 启动/关闭时回中云台 | `true` / `true` |
+| `neck.release_on_shutdown` | 关闭后在支持时释放舵机扭矩 | `false` |
+| `neck.dry_run` | 只计算命令，不打开 OpenNeck 硬件 | `false` |
+
 ### HDF5 录制（Pico sim2real）
 
 `recording.enabled=true` 只支持 `input.provider=pico4`、

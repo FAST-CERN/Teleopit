@@ -81,6 +81,16 @@ def test_sim2real_runtime_rejects_hands_without_pico_provider() -> None:
         Sim2RealRuntime(cfg)
 
 
+def test_sim2real_runtime_rejects_neck_without_pico_provider() -> None:
+    cfg = {
+        "input": {"provider": "bvh"},
+        "runtime": {"shutdown_timeout_s": 0.01},
+        "neck": {"enabled": True, "driver": "openneck"},
+    }
+    with pytest.raises(ValueError, match="neck.enabled=true requires input.provider=pico4"):
+        Sim2RealRuntime(cfg)
+
+
 def test_sim2real_runtime_rejects_recording_without_pico_provider() -> None:
     cfg = {
         "input": {"provider": "bvh"},
@@ -289,6 +299,79 @@ def test_recording_enabled_adds_recording_worker(monkeypatch) -> None:
     runtime._start_processes()
 
     assert started_names == ["pico_input", "reference", "robot_control", "recording_worker"]
+
+
+def test_neck_enabled_adds_neck_worker() -> None:
+    started_names: list[str] = []
+
+    class FakeProcess:
+        def __init__(self, *, name: str, target: object, args: tuple[object, ...]) -> None:
+            del target, args
+            self.name = name
+            self.exitcode = 0
+
+        def start(self) -> None:
+            started_names.append(self.name)
+
+    class FakeContext:
+        def Event(self) -> object:
+            return SimpleNamespace(set=lambda: None, is_set=lambda: False)
+
+        def Process(self, *, name: str, target: object, args: tuple[object, ...]) -> FakeProcess:
+            return FakeProcess(name=name, target=target, args=args)
+
+    cfg = {
+        "input": {"provider": "pico4"},
+        "runtime": {"shutdown_timeout_s": 0.01},
+        "neck": {"enabled": True, "driver": "openneck", "dry_run": True},
+    }
+    runtime = Sim2RealRuntime(cfg)
+    runtime._ctx = FakeContext()  # type: ignore[assignment]
+
+    runtime._start_processes()
+
+    assert started_names == ["pico_input", "reference", "robot_control", "neck_worker"]
+
+
+def test_noncritical_worker_exit_warning_is_not_repeated(monkeypatch, caplog) -> None:
+    class FakeStopEvent:
+        def __init__(self) -> None:
+            self.polls = 0
+            self.stopped = False
+
+        def is_set(self) -> bool:
+            self.polls += 1
+            if self.polls >= 4:
+                self.stopped = True
+            return self.stopped
+
+        def set(self) -> None:
+            self.stopped = True
+
+    class FakeProcess:
+        name = "neck_worker"
+        exitcode = 1
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+
+    cfg = {
+        "input": {"provider": "pico4"},
+        "runtime": {"shutdown_timeout_s": 0.01},
+        "neck": {"enabled": True, "driver": "openneck", "dry_run": True},
+    }
+    runtime = Sim2RealRuntime(cfg)
+    runtime._stop_event = FakeStopEvent()  # type: ignore[assignment]
+    monkeypatch.setattr(runtime, "_start_processes", lambda: runtime._processes.append(FakeProcess()))  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING, logger="teleopit.operator"):
+        runtime.run()
+
+    warnings = [message for message in caplog.messages if "non-critical worker exited" in message]
+    assert warnings == ["non-critical worker exited: neck_worker"]
 
 
 def test_recording_key_mapping() -> None:

@@ -62,6 +62,8 @@ from teleopit.sim2real.hands.worker import build_hand_runtime
 from teleopit.sim2real.hands.base import HandPoseCommand
 from teleopit.sim2real.hands.linkerhand_l6 import parse_linkerhand_l6_config
 from teleopit.sim2real.hands.linkerhand_o6 import parse_linkerhand_o6_config
+from teleopit.sim2real.neck.config import parse_neck_config
+from teleopit.sim2real.neck.worker import body_packet_frame, build_neck_runtime, mode_packet_active
 from teleopit.sim2real.mp.ipc import (
     BODY_TOPIC,
     COMMAND_TOPIC,
@@ -314,6 +316,12 @@ def _validate_new_runtime_config(cfg: Any) -> None:
     hands_cfg = cfg_get(cfg, "hands", {}) or {}
     if bool(cfg_get(hands_cfg, "enabled", False)) and provider != "pico4":
         raise ValueError("hands.enabled=true requires input.provider=pico4")
+    neck_cfg = parse_neck_config(cfg)
+    if neck_cfg.enabled:
+        if provider != "pico4":
+            raise ValueError("neck.enabled=true requires input.provider=pico4")
+        if neck_cfg.driver != "openneck":
+            raise ValueError(f"Unsupported neck.driver={neck_cfg.driver!r}; supported drivers: openneck")
     if _recording_enabled(cfg):
         if provider != "pico4":
             raise ValueError("recording.enabled=true requires input.provider=pico4")
@@ -412,6 +420,7 @@ class Sim2RealRuntime:
                 self._command_pub = ZmqPublisher(self._endpoints.command_pub)
                 self._keyboard = TerminalKeyboardReader()
                 operator_logger.info("keyboard recording controls active: R start, S save, D discard, Q shutdown, H help")
+            reported_noncritical_dead: set[str] = set()
             while not self._stop_event.is_set():
                 self._poll_terminal_recording_controls()
                 time.sleep(0.2)
@@ -435,9 +444,11 @@ class Sim2RealRuntime:
                     if not process.is_alive()
                     and process.exitcode not in (None, 0)
                     and process.name not in critical_names
+                    and process.name not in reported_noncritical_dead
                 ]
                 if noncritical_dead:
                     operator_logger.warning("non-critical worker exited: %s", ", ".join(noncritical_dead))
+                    reported_noncritical_dead.update(noncritical_dead)
         except KeyboardInterrupt:
             operator_logger.info("keyboard interrupt -> shutting down")
             self._stop_event.set()
@@ -479,6 +490,9 @@ class Sim2RealRuntime:
         hands_cfg = cfg_get(self.cfg, "hands", {}) or {}
         if bool(cfg_get(hands_cfg, "enabled", False)):
             specs.append(("hand_worker", _run_hand_worker))
+        neck_cfg = parse_neck_config(self.cfg)
+        if neck_cfg.enabled:
+            specs.append(("neck_worker", _run_neck_worker))
         if _recording_enabled(self.cfg):
             specs.append(("recording_worker", _run_recording_worker))
         video_cfg = parse_pico_video_config(cfg_get(self.cfg, "input", {}))
@@ -1997,6 +2011,72 @@ def _run_recording_worker(
         worker.run()
 
     _worker_loop("recording_worker", cfg, _main)
+
+
+def _run_neck_worker(
+    cfg: dict[str, Any],
+    endpoints: Sim2RealIpcEndpoints,
+    stop_event: MpEvent,
+) -> None:
+    def _main() -> None:
+        neck_cfg = parse_neck_config(cfg)
+        runtime = build_neck_runtime(neck_cfg)
+        body_sub = LatestSubscriber(endpoints.body_pub, BODY_TOPIC)
+        mode_sub = LatestSubscriber(endpoints.mode_pub, MODE_TOPIC)
+        command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
+        latest_frame: Any | None = None
+        latest_frame_timestamp_s: float | None = None
+        latest_body_seq = -1
+        latest_mode: ModeStatePacket | None = None
+        command_count = 0
+        sleep_s = 1.0 / max(float(neck_cfg.rate_hz), 1.0)
+        last_status_s = 0.0
+        try:
+            runtime.start()
+            while not stop_event.is_set():
+                command = command_sub.recv_latest()
+                if isinstance(command, CommandPacket) and command.command == "shutdown":
+                    stop_event.set()
+                    break
+                body_packet = body_sub.recv_latest()
+                frame, frame_timestamp_s, body_seq = body_packet_frame(body_packet)
+                if frame is not None:
+                    latest_frame = frame
+                    latest_frame_timestamp_s = frame_timestamp_s
+                    latest_body_seq = body_seq
+                mode_packet = mode_sub.recv_latest()
+                if isinstance(mode_packet, ModeStatePacket):
+                    latest_mode = mode_packet
+                now_s = time.monotonic()
+                try:
+                    moved = runtime.tick(
+                        frame=latest_frame,
+                        frame_timestamp_s=latest_frame_timestamp_s,
+                        active=mode_packet_active(latest_mode, neck_cfg),
+                        now_s=now_s,
+                    )
+                    if moved:
+                        command_count += 1
+                except Exception:
+                    logger.exception("OpenNeck worker tick failed; neck control continues")
+                if now_s - last_status_s >= 5.0:
+                    logger.debug(
+                        "OpenNeck worker status | body_seq=%s commands=%s active=%s",
+                        latest_body_seq,
+                        command_count,
+                        mode_packet_active(latest_mode, neck_cfg),
+                    )
+                    last_status_s = now_s
+                time.sleep(sleep_s)
+        finally:
+            try:
+                runtime.close()
+            finally:
+                body_sub.close()
+                mode_sub.close()
+                command_sub.close()
+
+    _worker_loop("neck_worker", cfg, _main)
 
 
 class _HandSnapshotProxy:

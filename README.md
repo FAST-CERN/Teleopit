@@ -108,6 +108,23 @@ sync metadata in the HDF5 episode. The low-dimensional HDF5 schema records
 reference qpos sent to the policy path, and `action.hand(12)` as the latest
 LinkerHand left/right 6D pose commands.
 
+## OpenNeck Active Vision
+
+Pico sim2real can drive the optional OpenNeck two-axis active-vision gimbal from
+the same Pico body tracking stream used for whole-body control:
+
+```bash
+pip install -e '.[openneck]'
+python scripts/run/run_sim2real.py --config-name pico4_sim2real \
+    controller.policy_path=track.onnx \
+    neck.enabled=true \
+    neck.port=/dev/ttyACM0
+```
+
+`neck.enabled=true` requires `input.provider=pico4`. The neck worker reuses the
+existing Teleopit Pico receiver and does not start another `PicoBridge` or
+camera pipeline.
+
 ## Documentation
 
 Full docs at **[BotRunner64.github.io/Teleopit](https://BotRunner64.github.io/Teleopit/)**, covering installation profiles, all tutorials, configuration reference, and architecture.
