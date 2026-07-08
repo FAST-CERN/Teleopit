@@ -89,7 +89,9 @@ def parse_linkerhand_l6_config(cfg: Any) -> LinkerHandL6Config:
         close_pose=tuple(close_pose),
         fixed_thumb_yaw=thumb_yaw,
         print_input=bool(cfg_get(l6_cfg, "print_input", False)),
-        somehand_config_path=str(cfg_get(somehand_cfg, "config_path", DEFAULT_SOMEHAND_CONFIG)),
+        somehand_config_path=str(
+            cfg_get(somehand_cfg, "l6_config_path", cfg_get(somehand_cfg, "config_path", DEFAULT_SOMEHAND_CONFIG))
+        ),
         somehand_rate_hz=_positive_float(cfg_get(somehand_cfg, "rate_hz", cfg_get(somehand_cfg, "rate", 60.0)), "somehand.rate_hz"),
         somehand_max_iterations=_optional_positive_int(cfg_get(somehand_cfg, "max_iterations", None), "somehand.max_iterations"),
         somehand_temporal_filter_alpha=_optional_alpha(cfg_get(somehand_cfg, "temporal_filter_alpha", None), "somehand.temporal_filter_alpha"),
@@ -204,13 +206,24 @@ class GripperMapper(HandInputMapper):
         pass
 
 
-class SomehandL6Mapper(HandInputMapper):
-    def __init__(self, config: LinkerHandL6Config):
+class SomehandRetargetMapper(HandInputMapper):
+    def __init__(
+        self,
+        config: Any,
+        *,
+        family: str,
+        joint_order: Sequence[str],
+        config_path: str,
+        config_label: str,
+    ):
         self.config = config
-        self._engine: Any | None = None
+        self.family = family.upper()
+        self.joint_order = tuple(joint_order)
+        self.config_path = config_path
+        self.config_label = config_label
+        self._engine: dict[str, Any] = {}
         self._hand_frame_cls: Any | None = None
-        self._bihand_frame_cls: Any | None = None
-        self._mappers: dict[str, L6RetargetPoseMapper] = {}
+        self._mappers: dict[str, RetargetPoseMapper] = {}
         self._next_tick_s = 0.0
         self._active = False
 
@@ -218,19 +231,26 @@ class SomehandL6Mapper(HandInputMapper):
         _require_somehand_020()
         from somehand.api import HandFrame, RetargetingEngine, load_bihand_config, load_retargeting_config
 
-        config_path = _resolve_project_path(self.config.somehand_config_path)
+        config_path = _resolve_project_path(self.config_path)
         if not config_path.exists():
-            raise FileNotFoundError(f"somehand L6 config not found: {config_path}")
+            raise FileNotFoundError(f"{self.config_label} not found: {config_path}")
         bihand_config = load_bihand_config(str(config_path))
         self._engine = {}
-        for side, path in (("left", bihand_config.left_config_path), ("right", bihand_config.right_config_path)):
+        self._mappers = {}
+        config_paths = {"left": bihand_config.left_config_path, "right": bihand_config.right_config_path}
+        for side in self.config.sides:
+            path = config_paths[side]
             retarget_cfg = load_retargeting_config(path)
             self._apply_low_latency_overrides(retarget_cfg)
             self._engine[side] = RetargetingEngine(retarget_cfg)
         self._hand_frame_cls = HandFrame
         for side, engine in self._engine.items():
-            if side in self.config.sides:
-                self._mappers[side] = L6RetargetPoseMapper(getattr(engine, "hand_model", None), side=side)
+            self._mappers[side] = RetargetPoseMapper(
+                getattr(engine, "hand_model", None),
+                side=side,
+                family=self.family,
+                joint_order=self.joint_order,
+            )
 
     def map(self, *, controller_snapshot: object | None, hand_snapshot: object | None, active: bool, now_s: float) -> tuple[HandPoseCommand, ...]:
         del controller_snapshot
@@ -277,21 +297,42 @@ class SomehandL6Mapper(HandInputMapper):
             cfg.preprocess.temporal_filter_alpha = float(self.config.somehand_temporal_filter_alpha)
 
 
+class SomehandL6Mapper(SomehandRetargetMapper):
+    def __init__(self, config: LinkerHandL6Config):
+        super().__init__(
+            config,
+            family="L6",
+            joint_order=L6_SDK_JOINT_ORDER,
+            config_path=config.somehand_config_path,
+            config_label="somehand L6 config",
+        )
+
+
 class L6RetargetPoseMapper:
     def __init__(self, hand_model: Any | None, *, side: str):
+        self._delegate = RetargetPoseMapper(hand_model, side=side, family="L6", joint_order=L6_SDK_JOINT_ORDER)
+
+    def qpos_to_pose(self, qpos: object) -> list[int]:
+        return self._delegate.qpos_to_pose(qpos)
+
+
+class RetargetPoseMapper:
+    def __init__(self, hand_model: Any | None, *, side: str, family: str, joint_order: Sequence[str]):
         if hand_model is None:
-            raise ValueError("somehand L6 hand model is missing")
+            raise ValueError(f"somehand {family} hand model is missing")
         get_index = getattr(hand_model, "get_joint_name_to_qpos_index", None)
         if not callable(get_index):
-            raise ValueError("somehand L6 hand model does not expose get_joint_name_to_qpos_index()")
+            raise ValueError(f"somehand {family} hand model does not expose get_joint_name_to_qpos_index()")
         joint_index = get_index()
-        self._indices = np.asarray([_resolve_l6_joint_index(joint_index, name, side=side) for name in L6_SDK_JOINT_ORDER], dtype=np.int64)
+        self.family = family.upper()
+        self._indices = np.asarray([_resolve_joint_index(joint_index, name, side=side, family=self.family) for name in joint_order], dtype=np.int64)
         mapping = _load_linkerhand_mapping_module()
         side_key = "l" if side == "left" else "r"
         self._mapping = mapping
-        self._arc_min = np.asarray(getattr(mapping, f"l6_{side_key}_min"), dtype=np.float64)
-        self._arc_max = np.asarray(getattr(mapping, f"l6_{side_key}_max"), dtype=np.float64)
-        self._direction = np.asarray(getattr(mapping, f"l6_{side_key}_derict"), dtype=np.int8)
+        mapping_prefix = self.family.lower()
+        self._arc_min = np.asarray(getattr(mapping, f"{mapping_prefix}_{side_key}_min"), dtype=np.float64)
+        self._arc_max = np.asarray(getattr(mapping, f"{mapping_prefix}_{side_key}_max"), dtype=np.float64)
+        self._direction = np.asarray(getattr(mapping, f"{mapping_prefix}_{side_key}_derict"), dtype=np.int8)
 
     def qpos_to_pose(self, qpos: object) -> list[int]:
         values = np.asarray(qpos, dtype=np.float64).reshape(-1)
@@ -303,7 +344,7 @@ class L6RetargetPoseMapper:
                 scaled = self._mapping.scale_value(arc, float(self._arc_min[index]), float(self._arc_max[index]), 255.0, 0.0)
             else:
                 scaled = self._mapping.scale_value(arc, float(self._arc_min[index]), float(self._arc_max[index]), 0.0, 255.0)
-            pose.append(_uint8(round(float(scaled)), "somehand.pose"))
+            pose.append(_retarget_uint8(round(float(scaled)), "somehand.pose"))
         return pose
 
 
@@ -342,26 +383,42 @@ def _require_somehand_020() -> None:
 
 
 def _resolve_l6_joint_index(joint_index: dict[str, int], semantic_name: str, *, side: str) -> int:
-    for candidate in _l6_joint_candidates(semantic_name, side=side):
+    return _resolve_joint_index(joint_index, semantic_name, side=side, family="L6")
+
+
+def _resolve_joint_index(joint_index: dict[str, int], semantic_name: str, *, side: str, family: str) -> int:
+    for candidate in _joint_candidates(semantic_name, side=side, family=family):
         if candidate in joint_index:
             return int(joint_index[candidate])
-    suffixes = tuple(f"_{alias}" for alias in _l6_aliases(semantic_name))
+    aliases = _joint_aliases(semantic_name, family=family)
+    suffixes = tuple(f"_{alias}" for alias in aliases)
     for name, index in joint_index.items():
-        if name in _l6_aliases(semantic_name) or any(name.endswith(suffix) for suffix in suffixes):
+        if name in aliases or any(name.endswith(suffix) for suffix in suffixes):
             return int(index)
-    raise ValueError(f"Cannot resolve LinkerHand L6 SDK joint {semantic_name!r} in somehand hand model")
+    raise ValueError(f"Cannot resolve LinkerHand {family} SDK joint {semantic_name!r} in somehand hand model")
 
 
 def _l6_joint_candidates(semantic_name: str, *, side: str) -> tuple[str, ...]:
+    return _joint_candidates(semantic_name, side=side, family="L6")
+
+
+def _joint_candidates(semantic_name: str, *, side: str, family: str) -> tuple[str, ...]:
     prefixes = ("", f"{side}_", f"{side[0]}_", f"{side[0].upper()}_", f"{'lh' if side == 'left' else 'rh'}_")
-    return tuple(f"{prefix}{alias}" for alias in _l6_aliases(semantic_name) for prefix in prefixes)
+    return tuple(f"{prefix}{alias}" for alias in _joint_aliases(semantic_name, family=family) for prefix in prefixes)
 
 
 def _l6_aliases(semantic_name: str) -> tuple[str, ...]:
+    return _joint_aliases(semantic_name, family="L6")
+
+
+def _joint_aliases(semantic_name: str, *, family: str) -> tuple[str, ...]:
+    del family
     if semantic_name == "thumb_cmc_pitch":
         return ("thumb_cmc_pitch", "thumb_pitch")
     if semantic_name == "thumb_cmc_roll":
         return ("thumb_cmc_roll", "thumb_roll")
+    if semantic_name == "thumb_cmc_yaw":
+        return ("thumb_cmc_yaw", "thumb_yaw")
     aliases = [semantic_name]
     if semantic_name.endswith("_mcp_pitch"):
         finger = semantic_name[: -len("_mcp_pitch")]
@@ -404,6 +461,13 @@ def _uint8(value: object, field_name: str) -> int:
     parsed = int(value)
     if parsed < 0 or parsed > 255:
         raise ValueError(f"hands.linkerhand_l6.{field_name} must be in 0-255, got {value!r}")
+    return parsed
+
+
+def _retarget_uint8(value: object, field_name: str) -> int:
+    parsed = int(value)
+    if parsed < 0 or parsed > 255:
+        raise ValueError(f"{field_name} must be in 0-255, got {value!r}")
     return parsed
 
 

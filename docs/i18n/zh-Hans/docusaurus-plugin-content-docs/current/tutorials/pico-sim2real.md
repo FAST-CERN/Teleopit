@@ -172,9 +172,9 @@ Pico sim2real 可以用 Pico 输入控制 LinkerHand：
 - `gripper`：按住同侧 grip 作为 deadman，同侧 trigger 控制对应手闭合。
   该模式支持 `hands.driver=linkerhand_l6` 和 `hands.driver=linkerhand_o6`；
   速度和张开/闭合姿态来自对应 driver 配置。
-- `vr_hand_pose`：只支持 L6，通过 somehand 重定向 Pico 手部 pose，并下发连续 L6 手部目标。
+- `vr_hand_pose`：通过 somehand 重定向 Pico 手部 pose，并下发连续 L6 或 O6 手部目标。
   如果某侧手部 pose 消失，该侧会保持上一条手势命令。这个模式使用 Teleopit 的
-  Pico landmark 适配器和 somehand 0.2.0 公开的 `somehand.api`，并始终将 L6
+  Pico landmark 适配器和 somehand 0.2.0 公开的 `somehand.api`，并始终将所选手的
   速度设为最大值。默认配置使用 60 Hz 的低延时 somehand 路径并减少平滑，所以响应会更快，
   但可能比标准 somehand 设置更抖。
 
@@ -186,7 +186,7 @@ Pico sim2real 可以用 Pico 输入控制 LinkerHand：
 git submodule update --init --recursive
 pip install -e third_party/linkerhand-python-sdk
 pip install -e third_party/somehand
-scripts/setup/download_somehand_l6_assets.sh
+scripts/setup/download_somehand_assets.sh
 ```
 
 测试或运行手控前，先开启 CAN 接口：
@@ -215,7 +215,8 @@ python scripts/dev/test_linkerhand_l6.py \
     --right-can can1
 ```
 
-如果要用实时 Pico gripper 输入测试 O6，再加 `--mode gripper`。
+如果要用实时 Pico gripper 输入测试 O6，再加 `--mode gripper`。如果要用实时 Pico
+手部 pose 重定向测试 O6，再加 `--mode vr_hand_pose`。
 
 然后在 Pico sim2real 中启用 L6 gripper 控制：
 
@@ -237,7 +238,7 @@ hands.linkerhand_o6.left_can=can0
 hands.linkerhand_o6.right_can=can1
 ```
 
-连续 VR 手部 pose 控制使用：
+连续 L6 VR 手部 pose 控制使用：
 
 ```bash
 hands.enabled=true
@@ -245,6 +246,16 @@ hands.driver=linkerhand_l6
 hands.mode=vr_hand_pose
 hands.linkerhand_l6.left_can=can0
 hands.linkerhand_l6.right_can=can1
+```
+
+连续 O6 VR 手部 pose 控制切换 driver 和 CAN 配置键：
+
+```bash
+hands.enabled=true
+hands.driver=linkerhand_o6
+hands.mode=vr_hand_pose
+hands.linkerhand_o6.left_can=can0
+hands.linkerhand_o6.right_can=can1
 ```
 
 ## 可选 RealSense 预览

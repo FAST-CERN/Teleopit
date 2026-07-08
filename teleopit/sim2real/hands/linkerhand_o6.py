@@ -6,13 +6,28 @@ from typing import Any, Sequence
 
 from teleopit.runtime.common import cfg_get
 from teleopit.sim2real.hands.base import HAND_SIDES, HandDevice, HandInputMapper
-from teleopit.sim2real.hands.linkerhand_l6 import GripperMapper
+from teleopit.sim2real.hands.linkerhand_l6 import (
+    GripperMapper,
+    SomehandRetargetMapper,
+    _optional_alpha,
+    _optional_positive_int,
+)
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SOMEHAND_CONFIG = "third_party/somehand/configs/retargeting/bihand/linkerhand_o6_bihand.yaml"
 OPEN_POSE = (250, 250, 250, 250, 250, 250)
 CLOSE_POSE = (86, 73, 118, 111, 110, 111)
 DEFAULT_SPEED = (255, 255, 255, 255, 255, 255)
+VR_HAND_POSE_SPEED = (255, 255, 255, 255, 255, 255)
+O6_SDK_JOINT_ORDER = (
+    "thumb_cmc_pitch",
+    "thumb_cmc_yaw",
+    "index_mcp_pitch",
+    "middle_mcp_pitch",
+    "ring_mcp_pitch",
+    "pinky_mcp_pitch",
+)
 
 
 @dataclass(frozen=True)
@@ -31,17 +46,28 @@ class LinkerHandO6Config:
     close_pose: tuple[int, ...]
     fixed_thumb_yaw: int | None
     print_input: bool
+    somehand_config_path: str
+    somehand_rate_hz: float
+    somehand_max_iterations: int | None
+    somehand_temporal_filter_alpha: float | None
+    somehand_output_alpha: float | None
 
 
 def parse_linkerhand_o6_config(cfg: Any) -> LinkerHandO6Config:
     hands_cfg = cfg_get(cfg, "hands", {}) or {}
     o6_cfg = cfg_get(hands_cfg, "linkerhand_o6", {}) or {}
+    somehand_cfg = cfg_get(hands_cfg, "somehand", {}) or {}
     mode = str(cfg_get(hands_cfg, "mode", "gripper")).strip().lower()
-    if mode != "gripper":
-        raise ValueError(f"hands.driver=linkerhand_o6 supports only hands.mode=gripper, got {mode!r}")
+    if mode not in ("gripper", "vr_hand_pose"):
+        raise ValueError(f"hands.mode must be gripper or vr_hand_pose, got {mode!r}")
     sides = tuple(str(side).strip().lower() for side in cfg_get(hands_cfg, "sides", HAND_SIDES))
     if not sides or any(side not in HAND_SIDES for side in sides):
         raise ValueError("hands.sides must contain left, right, or both sides")
+    speed = (
+        VR_HAND_POSE_SPEED
+        if mode == "vr_hand_pose"
+        else tuple(_pose_values(cfg_get(o6_cfg, "speed", DEFAULT_SPEED), "speed"))
+    )
     return LinkerHandO6Config(
         mode=mode,
         sides=sides,
@@ -52,11 +78,25 @@ def parse_linkerhand_o6_config(cfg: Any) -> LinkerHandO6Config:
         frame_timeout_s=_positive_float(cfg_get(hands_cfg, "frame_timeout_s", 0.3), "frame_timeout_s"),
         trigger_deadzone=_deadzone(cfg_get(o6_cfg, "trigger_deadzone", 0.05)),
         deadman_threshold=_threshold(cfg_get(o6_cfg, "deadman_threshold", 0.5)),
-        speed=tuple(_pose_values(cfg_get(o6_cfg, "speed", DEFAULT_SPEED), "speed")),
+        speed=tuple(speed),
         open_pose=tuple(_pose_values(cfg_get(o6_cfg, "open_pose", OPEN_POSE), "open_pose")),
         close_pose=tuple(_pose_values(cfg_get(o6_cfg, "close_pose", CLOSE_POSE), "close_pose")),
         fixed_thumb_yaw=None,
         print_input=bool(cfg_get(o6_cfg, "print_input", False)),
+        somehand_config_path=str(cfg_get(somehand_cfg, "o6_config_path", DEFAULT_SOMEHAND_CONFIG)),
+        somehand_rate_hz=_positive_float(
+            cfg_get(somehand_cfg, "rate_hz", cfg_get(somehand_cfg, "rate", 60.0)),
+            "somehand.rate_hz",
+        ),
+        somehand_max_iterations=_optional_positive_int(
+            cfg_get(somehand_cfg, "max_iterations", None),
+            "somehand.max_iterations",
+        ),
+        somehand_temporal_filter_alpha=_optional_alpha(
+            cfg_get(somehand_cfg, "temporal_filter_alpha", None),
+            "somehand.temporal_filter_alpha",
+        ),
+        somehand_output_alpha=_optional_alpha(cfg_get(somehand_cfg, "output_alpha", None), "somehand.output_alpha"),
     )
 
 
@@ -125,7 +165,19 @@ class LinkerHandO6Device(HandDevice):
 
 def build_linkerhand_o6(cfg: Any) -> tuple[HandDevice, HandInputMapper]:
     config = parse_linkerhand_o6_config(cfg)
-    return LinkerHandO6Device(config), GripperMapper(config)
+    mapper: HandInputMapper = SomehandO6Mapper(config) if config.mode == "vr_hand_pose" else GripperMapper(config)
+    return LinkerHandO6Device(config), mapper
+
+
+class SomehandO6Mapper(SomehandRetargetMapper):
+    def __init__(self, config: LinkerHandO6Config):
+        super().__init__(
+            config,
+            family="O6",
+            joint_order=O6_SDK_JOINT_ORDER,
+            config_path=config.somehand_config_path,
+            config_label="somehand O6 config",
+        )
 
 
 def _uint8(value: object, field_name: str) -> int:

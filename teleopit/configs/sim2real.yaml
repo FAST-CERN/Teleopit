@@ -98,7 +98,8 @@ hands:
     close_pose: [86, 73, 118, 111, 110, 111]
     print_input: false
   somehand:
-    config_path: third_party/somehand/configs/retargeting/bihand/linkerhand_l6_bihand.yaml
+    l6_config_path: third_party/somehand/configs/retargeting/bihand/linkerhand_l6_bihand.yaml
+    o6_config_path: third_party/somehand/configs/retargeting/bihand/linkerhand_o6_bihand.yaml
     # Low-latency vr_hand_pose path. This favors response speed over smoothing.
     rate_hz: 60.0
     max_iterations: 12

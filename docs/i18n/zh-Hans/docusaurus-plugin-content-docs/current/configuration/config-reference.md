@@ -145,8 +145,9 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 `hands.enabled=true` 要求 `input.provider=pico4`，并以本地 editable 方式安装
 `third_party/linkerhand-python-sdk` 和 `third_party/somehand`。启用后，手控会在所有 sim2real 模式中保持生效。
 `gripper` 支持 `linkerhand_l6` 和 `linkerhand_o6`，会用 Pico trigger 在配置的张开和闭合姿态之间插值。
-`vr_hand_pose` 只支持 L6：手部 pose 消失时，对应侧会保持上一条命令；L6 速度会设为最大值；
-Teleopit 会先将 Pico 手部状态转成 21 个 landmarks，再只通过 somehand 0.2.0 公开的 `somehand.api` 调用。
+`vr_hand_pose` 支持 `linkerhand_l6` 和 `linkerhand_o6`：手部 pose 消失时，对应侧会保持上一条命令；
+所选手的速度会设为最大值；Teleopit 会先将 Pico 手部状态转成 21 个 landmarks，
+再只通过 somehand 0.2.0 公开的 `somehand.api` 调用。
 
 | 字段 | 说明 | 默认值 |
 |---|---|---|
@@ -162,9 +163,10 @@ Teleopit 会先将 Pico 手部状态转成 21 个 landmarks，再只通过 someh
 | `hands.linkerhand_l6.trigger_deadzone` | trigger 两端死区 | `0.05` |
 | `hands.linkerhand_l6.open_pose` / `close_pose` | L6 的 6 维张开/闭合姿态 | 见配置 |
 | `hands.linkerhand_o6.left_can` / `right_can` | 左右 O6 手 CAN 通道 | `can0` / `can1` |
-| `hands.linkerhand_o6.speed` | `gripper` 使用的 O6 速度 | 见配置 |
+| `hands.linkerhand_o6.speed` | `gripper` 使用的 O6 速度；`vr_hand_pose` 会覆盖为最大速度 | 见配置 |
 | `hands.linkerhand_o6.open_pose` / `close_pose` | O6 的 6 维张开/闭合姿态 | 见配置 |
-| `hands.somehand.config_path` | `vr_hand_pose` 使用的 somehand 双手 L6 配置 | 见配置 |
+| `hands.somehand.l6_config_path` | L6 `vr_hand_pose` 使用的 somehand 双手 L6 配置 | 见配置 |
+| `hands.somehand.o6_config_path` | O6 `vr_hand_pose` 使用的 somehand 双手 O6 配置 | 见配置 |
 | `hands.somehand.rate_hz` | 低延时 `vr_hand_pose` 命令频率（Hz） | `60.0` |
 | `hands.somehand.max_iterations` | `vr_hand_pose` 的 somehand solver 迭代上限 | `12` |
 | `hands.somehand.temporal_filter_alpha` | somehand 输入 landmarks 平滑 alpha；`1.0` 表示关闭平滑延时 | `1.0` |

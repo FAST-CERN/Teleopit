@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -10,6 +10,7 @@ from teleopit.inputs.pico4_provider import PicoControllerSnapshot, PicoControlle
 from teleopit.sim2real.hands.linkerhand_l6 import (
     GripperMapper,
     LinkerHandL6Device,
+    RetargetPoseMapper,
     SomehandL6Mapper,
     parse_linkerhand_l6_config,
     trigger_to_pose,
@@ -17,7 +18,10 @@ from teleopit.sim2real.hands.linkerhand_l6 import (
 from teleopit.sim2real.hands.base import HandPoseCommand
 from teleopit.sim2real.hands.linkerhand_o6 import (
     CLOSE_POSE as O6_CLOSE_POSE,
+    DEFAULT_SOMEHAND_CONFIG as O6_DEFAULT_SOMEHAND_CONFIG,
     LinkerHandO6Device,
+    O6_SDK_JOINT_ORDER,
+    SomehandO6Mapper,
     parse_linkerhand_o6_config,
 )
 from teleopit.sim2real.hands.pico_landmarks import pico_hand_to_landmarks
@@ -105,6 +109,12 @@ def _o6_cfg(mode: str = "gripper") -> dict[str, object]:
                 "modbus": "None",
                 "trigger_deadzone": 0.05,
                 "deadman_threshold": 0.5,
+            },
+            "somehand": {
+                "rate_hz": 60.0,
+                "max_iterations": 12,
+                "temporal_filter_alpha": 1.0,
+                "output_alpha": 1.0,
             },
         },
     }
@@ -244,9 +254,104 @@ def test_linkerhand_o6_device_starts_sdk(monkeypatch) -> None:
     assert [hand.hand.close_calls for hand in FakeLinkerHandApi.instances] == [0, 0]
 
 
-def test_linkerhand_o6_rejects_vr_hand_pose() -> None:
-    with pytest.raises(ValueError, match="supports only hands.mode=gripper"):
-        parse_linkerhand_o6_config(_o6_cfg(mode="vr_hand_pose"))
+def test_linkerhand_o6_accepts_vr_hand_pose() -> None:
+    cfg = parse_linkerhand_o6_config(_o6_cfg(mode="vr_hand_pose"))
+
+    assert cfg.mode == "vr_hand_pose"
+    assert cfg.speed == (255, 255, 255, 255, 255, 255)
+    assert cfg.somehand_config_path == O6_DEFAULT_SOMEHAND_CONFIG
+
+    mapper = SomehandO6Mapper(cfg)
+    assert mapper.map(controller_snapshot=None, hand_snapshot=None, active=False, now_s=10.0) == ()
+    mapper._active = True
+    first_inactive = mapper.map(controller_snapshot=None, hand_snapshot=None, active=False, now_s=10.1)
+    assert [command.force for command in first_inactive] == [True, True]
+
+
+def test_somehand_mapper_loads_only_configured_side(monkeypatch) -> None:
+    class FakeHandModel:
+        def get_joint_name_to_qpos_index(self) -> dict[str, int]:
+            return {
+                "lh_thumb_cmc_pitch": 0,
+                "lh_thumb_cmc_roll": 1,
+                "lh_index_mcp_pitch": 2,
+                "lh_middle_mcp_pitch": 3,
+                "lh_ring_mcp_pitch": 4,
+                "lh_pinky_mcp_pitch": 5,
+            }
+
+    class FakeRetargetingEngine:
+        def __init__(self, cfg: object) -> None:
+            self.cfg = cfg
+            self.hand_model = FakeHandModel()
+
+    loaded_paths: list[str] = []
+    somehand_api = ModuleType("somehand.api")
+    somehand_api.HandFrame = object
+    somehand_api.RetargetingEngine = FakeRetargetingEngine
+    somehand_api.load_bihand_config = lambda path: SimpleNamespace(
+        left_config_path="left-only.yaml",
+        right_config_path="right-should-not-load.yaml",
+    )
+
+    def load_retargeting_config(path: str):
+        loaded_paths.append(path)
+        if path != "left-only.yaml":
+            raise AssertionError(f"unexpected path loaded: {path}")
+        return SimpleNamespace(
+            solver=SimpleNamespace(max_iterations=30, output_alpha=0.7),
+            preprocess=SimpleNamespace(temporal_filter_alpha=0.35),
+        )
+
+    somehand_api.load_retargeting_config = load_retargeting_config
+    somehand_pkg = ModuleType("somehand")
+    somehand_pkg.__path__ = []
+    monkeypatch.setitem(sys.modules, "somehand", somehand_pkg)
+    monkeypatch.setitem(sys.modules, "somehand.api", somehand_api)
+    monkeypatch.setattr("teleopit.sim2real.hands.linkerhand_l6.version", lambda name: "0.2.0")
+    monkeypatch.setattr("teleopit.sim2real.hands.linkerhand_l6._resolve_project_path", lambda path: SimpleNamespace(exists=lambda: True))
+    monkeypatch.setattr(
+        "teleopit.sim2real.hands.linkerhand_l6._load_linkerhand_mapping_module",
+        lambda: SimpleNamespace(
+            l6_l_min=[0.0, -0.087266, 0.0, 0.0, 0.0, 0.0],
+            l6_l_max=[0.837758, 1.256637, 1.134464, 1.134464, 1.134464, 1.134464],
+            l6_l_derict=[-1, -1, -1, -1, -1, -1],
+        ),
+    )
+    config_dict = _cfg(mode="vr_hand_pose")
+    config_dict["hands"]["sides"] = ["left"]  # type: ignore[index]
+    mapper = SomehandL6Mapper(parse_linkerhand_l6_config(config_dict))
+
+    mapper.start()
+
+    assert loaded_paths == ["left-only.yaml"]
+
+
+def test_o6_retarget_pose_mapper_uses_o6_thumb_yaw_and_mapping(monkeypatch) -> None:
+    class FakeHandModel:
+        def get_joint_name_to_qpos_index(self) -> dict[str, int]:
+            return {
+                "lh_thumb_cmc_pitch": 0,
+                "lh_thumb_cmc_yaw": 1,
+                "lh_index_mcp_pitch": 2,
+                "lh_middle_mcp_pitch": 3,
+                "lh_ring_mcp_pitch": 4,
+                "lh_pinky_mcp_pitch": 5,
+            }
+
+    mapping = SimpleNamespace(
+        o6_l_min=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        o6_l_max=[0.58, 1.36, 1.6, 1.6, 1.6, 1.6],
+        o6_l_derict=[-1, -1, -1, -1, -1, -1],
+        is_within_range=lambda value, lower, upper: max(lower, min(upper, value)),
+        scale_value=lambda value, in_min, in_max, out_min, out_max: out_min
+        + (value - in_min) * (out_max - out_min) / (in_max - in_min),
+    )
+    monkeypatch.setattr("teleopit.sim2real.hands.linkerhand_l6._load_linkerhand_mapping_module", lambda: mapping)
+
+    mapper = RetargetPoseMapper(FakeHandModel(), side="left", family="O6", joint_order=O6_SDK_JOINT_ORDER)
+
+    assert mapper.qpos_to_pose(np.asarray([0.58, 0.0, 0.8, 1.6, 0.0, 1.6])) == [0, 255, 128, 0, 255, 0]
 
 
 def test_hand_runtime_closes_device_when_mapper_start_fails() -> None:

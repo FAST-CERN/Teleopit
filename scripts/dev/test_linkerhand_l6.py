@@ -34,7 +34,8 @@ DEFAULT_SPEED = [50, 50, 50, 50, 50, 50]
 O6_OPEN_POSE = [250, 250, 250, 250, 250, 250]
 O6_CLOSE_POSE = [86, 73, 118, 111, 110, 111]
 O6_DEFAULT_SPEED = [255, 255, 255, 255, 255, 255]
-DEFAULT_SOMEHAND_CONFIG_PATH = "third_party/somehand/configs/retargeting/bihand/linkerhand_l6_bihand.yaml"
+DEFAULT_L6_SOMEHAND_CONFIG_PATH = "third_party/somehand/configs/retargeting/bihand/linkerhand_l6_bihand.yaml"
+DEFAULT_O6_SOMEHAND_CONFIG_PATH = "third_party/somehand/configs/retargeting/bihand/linkerhand_o6_bihand.yaml"
 OPEN_CLOSE_HOLD_S = 1.0
 GRIPPER_RATE_HZ = 30.0
 VR_HAND_POSE_RATE_HZ = 60.0
@@ -56,7 +57,7 @@ def parse_args() -> argparse.Namespace:
         "--driver",
         choices=["linkerhand_l6", "linkerhand_o6"],
         default="linkerhand_l6",
-        help="Hand driver to test. O6 currently supports open_close and gripper only.",
+        help="Hand driver to test.",
     )
     parser.add_argument(
         "--mode",
@@ -77,8 +78,6 @@ def parse_args() -> argparse.Namespace:
         help='RS485 serial port such as /dev/ttyUSB0; "None" uses CAN',
     )
     args = parser.parse_args()
-    if args.driver == "linkerhand_o6" and args.mode == "vr_hand_pose":
-        raise SystemExit("hands.driver=linkerhand_o6 supports only --mode open_close or gripper")
     args.speed = list(O6_DEFAULT_SPEED if args.driver == "linkerhand_o6" else DEFAULT_SPEED)
     args.open_pose = list(O6_OPEN_POSE if args.driver == "linkerhand_o6" else OPEN_POSE)
     args.close_pose = list(O6_CLOSE_POSE if args.driver == "linkerhand_o6" else CLOSE_POSE)
@@ -113,7 +112,8 @@ def make_config(args: argparse.Namespace, *, mode: str) -> dict[str, object]:
             "frame_timeout_s": FRAME_TIMEOUT_S,
             driver_section: driver_cfg,
             "somehand": {
-                "config_path": DEFAULT_SOMEHAND_CONFIG_PATH,
+                "l6_config_path": DEFAULT_L6_SOMEHAND_CONFIG_PATH,
+                "o6_config_path": DEFAULT_O6_SOMEHAND_CONFIG_PATH,
                 "rate_hz": VR_HAND_POSE_RATE_HZ,
                 "max_iterations": 12,
                 "temporal_filter_alpha": 1.0,
@@ -260,9 +260,6 @@ def run_gripper(args: argparse.Namespace) -> None:
 
 
 def run_vr_hand_pose(args: argparse.Namespace) -> None:
-    if args.hand_type != "both":
-        raise SystemExit("hands.mode=vr_hand_pose currently requires --hand-type both")
-
     config = make_config(args, mode="vr_hand_pose")
     provider = make_pico_provider()
     device, mapper = build_driver_runtime(config, driver=args.driver)

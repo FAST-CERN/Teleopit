@@ -68,7 +68,7 @@ Install those packages directly after initializing the submodules:
 git submodule update --init --recursive
 pip install -e third_party/linkerhand-python-sdk
 pip install -e third_party/somehand
-scripts/setup/download_somehand_l6_assets.sh
+scripts/setup/download_somehand_assets.sh
 ```
 
 These packages are only required when `hands.enabled=true`.

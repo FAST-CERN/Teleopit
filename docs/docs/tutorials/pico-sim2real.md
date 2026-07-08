@@ -183,11 +183,11 @@ Pico sim2real can drive LinkerHand hands from Pico input:
   trigger closes that hand. This mode supports `hands.driver=linkerhand_l6` and
   `hands.driver=linkerhand_o6`; speed and open/close poses come from the matching
   driver config.
-- `vr_hand_pose`: L6-only mode that retargets Pico hand pose through somehand and
-  commands the continuous L6 hand target. If a hand pose disappears, that side
-  keeps its last commanded pose. This mode uses Teleopit's Pico landmark adapter
-  and the public `somehand.api` from somehand 0.2.0. It always sets L6 speed to
-  the maximum.
+- `vr_hand_pose`: retargets Pico hand pose through somehand and commands the
+  continuous L6 or O6 hand target. If a hand pose disappears, that side keeps its
+  last commanded pose. This mode uses Teleopit's Pico landmark adapter and the
+  public `somehand.api` from somehand 0.2.0. It always sets the selected hand
+  speed to the maximum.
 
 When `hands.enabled=true`, hand control remains active in all sim2real modes.
 Shutdown and hand-runtime failure send the configured open pose.
@@ -199,7 +199,7 @@ the main Pico profile:
 git submodule update --init --recursive
 pip install -e third_party/linkerhand-python-sdk
 pip install -e third_party/somehand
-scripts/setup/download_somehand_l6_assets.sh
+scripts/setup/download_somehand_assets.sh
 ```
 
 Bring up the CAN interfaces before testing or running hand control:
@@ -229,7 +229,8 @@ python scripts/dev/test_linkerhand_l6.py \
     --right-can can1
 ```
 
-To test O6 with live Pico gripper input, add `--mode gripper`.
+To test O6 with live Pico gripper input, add `--mode gripper`. To test O6 with
+live Pico hand-pose retargeting, add `--mode vr_hand_pose`.
 
 Then enable L6 gripper control in Pico sim2real:
 
@@ -251,7 +252,7 @@ hands.linkerhand_o6.left_can=can0
 hands.linkerhand_o6.right_can=can1
 ```
 
-For continuous VR hand-pose control, use:
+For continuous L6 VR hand-pose control, use:
 
 ```bash
 hands.enabled=true
@@ -259,6 +260,16 @@ hands.driver=linkerhand_l6
 hands.mode=vr_hand_pose
 hands.linkerhand_l6.left_can=can0
 hands.linkerhand_l6.right_can=can1
+```
+
+For continuous O6 VR hand-pose control, switch the driver and CAN keys:
+
+```bash
+hands.enabled=true
+hands.driver=linkerhand_o6
+hands.mode=vr_hand_pose
+hands.linkerhand_o6.left_can=can0
+hands.linkerhand_o6.right_can=can1
 ```
 
 ## Optional RealSense Preview
