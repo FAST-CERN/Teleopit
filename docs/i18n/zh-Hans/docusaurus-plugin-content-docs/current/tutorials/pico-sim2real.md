@@ -186,7 +186,7 @@ Pico sim2real 可以用 Pico 输入控制 LinkerHand：
 git submodule update --init --recursive
 pip install -e third_party/linkerhand-python-sdk
 pip install -e third_party/somehand
-scripts/setup/download_somehand_assets.sh
+bash scripts/setup/download_somehand_assets.sh
 ```
 
 测试或运行手控前，先开启 CAN 接口：
@@ -199,7 +199,7 @@ sudo /usr/sbin/ip link set can1 up type can bitrate 1000000
 启用完整 sim2real 前，先用独立开合测试验证灵巧手连接。测试默认一直运行到 Ctrl-C：
 
 ```bash
-python scripts/dev/test_linkerhand_l6.py \
+python scripts/dev/test_linkerhand.py \
     --hand-type both \
     --left-can can0 \
     --right-can can1
@@ -208,7 +208,7 @@ python scripts/dev/test_linkerhand_l6.py \
 O6 独立开合测试需要加上 O6 driver：
 
 ```bash
-python scripts/dev/test_linkerhand_l6.py \
+python scripts/dev/test_linkerhand.py \
     --driver linkerhand_o6 \
     --hand-type both \
     --left-can can0 \
@@ -309,5 +309,5 @@ input.video.enabled=true
 | 无法进入 debug mode | Unitree mode 释放失败 | 停止其他机器人模式后再次按 `Start` |
 | 机器人进入 `STANDING` 但不进入 `MOCAP` | 动捕验证失败 | 保持追踪稳定，查看 `mocap_switch.check_frames` 日志 |
 | Pico 暂停没有返回 `STANDING` | 这是预期行为 | Pico 暂停只冻结 mocap；按遥控器 `X` 返回 `STANDING` |
-| LinkerHand 不动 | `hands.enabled=false`、gripper deadman 未按住、SDK/资产未安装，或 CAN 通道错误 | 设置 `hands.enabled=true` 和 `hands.mode`，运行 `scripts/dev/test_linkerhand_l6.py`，并检查所选 driver 的 `left_can` / `right_can` |
+| LinkerHand 不动 | `hands.enabled=false`、gripper deadman 未按住、SDK/资产未安装，或 CAN 通道错误 | 设置 `hands.enabled=true` 和 `hands.mode`，运行 `scripts/dev/test_linkerhand.py`，并检查所选 driver 的 `left_can` / `right_can` |
 | 视频预览不可用 | RealSense 或视频源失败 | 检查相机权限、`input.video.source` 和日志 |

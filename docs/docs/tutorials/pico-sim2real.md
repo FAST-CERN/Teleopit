@@ -199,7 +199,7 @@ the main Pico profile:
 git submodule update --init --recursive
 pip install -e third_party/linkerhand-python-sdk
 pip install -e third_party/somehand
-scripts/setup/download_somehand_assets.sh
+bash scripts/setup/download_somehand_assets.sh
 ```
 
 Bring up the CAN interfaces before testing or running hand control:
@@ -213,7 +213,7 @@ Before enabling full sim2real, verify the hand connection with a standalone
 open/close test. The test runs until Ctrl-C:
 
 ```bash
-python scripts/dev/test_linkerhand_l6.py \
+python scripts/dev/test_linkerhand.py \
     --hand-type both \
     --left-can can0 \
     --right-can can1
@@ -222,7 +222,7 @@ python scripts/dev/test_linkerhand_l6.py \
 For an O6 standalone open/close test, add the O6 driver:
 
 ```bash
-python scripts/dev/test_linkerhand_l6.py \
+python scripts/dev/test_linkerhand.py \
     --driver linkerhand_o6 \
     --hand-type both \
     --left-can can0 \
@@ -323,5 +323,5 @@ input.video.enabled=true
 | Cannot enter debug mode | Unitree mode release failed | Stop other robot modes and press `Start` again |
 | Robot enters `STANDING` but not `MOCAP` | Mocap validation failed | Keep tracking active and stable; check `mocap_switch.check_frames` logs |
 | Pico pause does not return to `STANDING` | Expected behavior | Pico pause freezes mocap; press remote `X` for `STANDING` |
-| LinkerHand does not move | `hands.enabled=false`, gripper deadman released, SDK/assets not installed, or CAN channel wrong | Enable `hands.enabled`, set `hands.mode`, run `scripts/dev/test_linkerhand_l6.py`, and check the selected driver's `left_can` / `right_can` |
+| LinkerHand does not move | `hands.enabled=false`, gripper deadman released, SDK/assets not installed, or CAN channel wrong | Enable `hands.enabled`, set `hands.mode`, run `scripts/dev/test_linkerhand.py`, and check the selected driver's `left_can` / `right_can` |
 | Video preview is unavailable | RealSense or video source failed | Check camera permissions, `input.video.source`, and logs |
