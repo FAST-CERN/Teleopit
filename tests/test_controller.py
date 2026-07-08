@@ -79,6 +79,115 @@ class TestRLPolicyStaticHelpers:
         assert "CUDAExecutionProvider" in providers
         assert "CPUExecutionProvider" in providers
 
+    def test_normalize_cpu_affinity_list(self):
+        from teleopit.controllers.rl_policy import RLPolicyController
+        assert RLPolicyController._normalize_cpu_affinity(
+            [4, 5, 6, 7],
+            field_name="controller.cpu_affinity",
+        ) == (4, 5, 6, 7)
+
+    def test_normalize_cpu_affinity_string_range(self):
+        from teleopit.controllers.rl_policy import RLPolicyController
+        assert RLPolicyController._normalize_cpu_affinity(
+            "4-7",
+            field_name="controller.cpu_affinity",
+        ) == (4, 5, 6, 7)
+
+    def test_normalize_cpu_affinity_invalid_raises(self):
+        from teleopit.controllers.rl_policy import RLPolicyController
+        with pytest.raises(ValueError, match="non-negative integers"):
+            RLPolicyController._normalize_cpu_affinity(
+                [4, -1],
+                field_name="controller.cpu_affinity",
+            )
+
+    def test_create_session_options_sets_ort_threads(self):
+        from teleopit.controllers.rl_policy import RLPolicyController
+
+        class FakeSessionOptions:
+            def __init__(self):
+                self.intra_op_num_threads = 0
+                self.inter_op_num_threads = 0
+                self.entries = {}
+
+            def add_session_config_entry(self, key, value):
+                self.entries[key] = value
+
+        class FakeOrt:
+            SessionOptions = FakeSessionOptions
+
+        options = RLPolicyController._create_session_options(
+            FakeOrt(),
+            {
+                "intra_op_num_threads": 4,
+                "inter_op_num_threads": 1,
+                "intra_op_allow_spinning": False,
+            },
+        )
+        assert options is not None
+        assert options.intra_op_num_threads == 4
+        assert options.inter_op_num_threads == 1
+        assert options.entries["session.intra_op.allow_spinning"] == "0"
+
+    def test_create_session_options_caps_intra_threads_to_cpu_budget(self):
+        from teleopit.controllers.rl_policy import RLPolicyController
+
+        class FakeSessionOptions:
+            def __init__(self):
+                self.intra_op_num_threads = 0
+                self.inter_op_num_threads = 0
+
+        class FakeOrt:
+            SessionOptions = FakeSessionOptions
+
+        options = RLPolicyController._create_session_options(
+            FakeOrt(),
+            {
+                "intra_op_num_threads": 4,
+                "inter_op_num_threads": 1,
+            },
+            cpu_budget=2,
+        )
+        assert options is not None
+        assert options.intra_op_num_threads == 2
+        assert options.inter_op_num_threads == 1
+
+    def test_apply_cpu_affinity_returns_effective_cpus(self, monkeypatch):
+        from teleopit.controllers import rl_policy
+        from teleopit.controllers.rl_policy import RLPolicyController
+
+        calls = []
+
+        monkeypatch.setattr(rl_policy.os, "sched_getaffinity", lambda _pid: {4, 5})
+        monkeypatch.setattr(
+            rl_policy.os,
+            "sched_setaffinity",
+            lambda pid, cpus: calls.append((pid, set(cpus))),
+        )
+
+        effective = RLPolicyController._apply_cpu_affinity({"cpu_affinity": [4, 5, 6]})
+
+        assert effective == (4, 5)
+        assert calls == []
+
+    def test_apply_cpu_affinity_returns_current_budget_when_request_unavailable(self, monkeypatch):
+        from teleopit.controllers import rl_policy
+        from teleopit.controllers.rl_policy import RLPolicyController
+
+        calls = []
+
+        monkeypatch.setattr(rl_policy.os, "sched_getaffinity", lambda _pid: {0, 1})
+        monkeypatch.setattr(
+            rl_policy.os,
+            "sched_setaffinity",
+            lambda pid, cpus: calls.append((pid, set(cpus))),
+        )
+
+        effective = RLPolicyController._apply_cpu_affinity({"cpu_affinity": [4, 5, 6, 7]})
+
+        assert effective == (0, 1)
+        assert calls == []
+
     def test_cfg_get_dict(self):
         from teleopit.runtime.common import cfg_get
         assert cfg_get({"a": 1}, "a", 0) == 1

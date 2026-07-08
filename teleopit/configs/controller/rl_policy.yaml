@@ -5,3 +5,9 @@ observation_type: "velcmd_history"
 action_scale: null  # inherited from robot config; set explicitly to override
 clip_range: [-10.0, 10.0]
 default_dof_pos: null
+
+# CPU runtime controls for ONNX Runtime. Leave cpu_affinity null for no process binding.
+cpu_affinity: null
+intra_op_num_threads: null
+inter_op_num_threads: null
+intra_op_allow_spinning: null
