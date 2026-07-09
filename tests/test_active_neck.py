@@ -150,6 +150,69 @@ def test_neck_runtime_releases_on_shutdown_when_enabled() -> None:
     assert device.closed is True
 
 
+def test_neck_shutdown_defaults_to_close_only() -> None:
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.center_calls = 0
+            self.released = False
+            self.closed = False
+
+        def connect(self) -> None:
+            return None
+
+        def center(self) -> None:
+            self.center_calls += 1
+
+        def release(self) -> None:
+            self.released = True
+
+        def move_norm(self, yaw: float, pitch: float) -> None:
+            del yaw, pitch
+
+        def close(self) -> None:
+            self.closed = True
+
+    device = FakeDevice()
+    runtime = NeckRuntime(NeckConfig(enabled=True, center_on_start=False), device=device)
+
+    runtime.close()
+
+    assert device.center_calls == 0
+    assert device.released is False
+    assert device.closed is True
+
+
+def test_neck_runtime_closes_after_shutdown_center_failure() -> None:
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def connect(self) -> None:
+            return None
+
+        def center(self) -> None:
+            raise RuntimeError("neck center failed")
+
+        def release(self) -> None:
+            return None
+
+        def move_norm(self, yaw: float, pitch: float) -> None:
+            del yaw, pitch
+
+        def close(self) -> None:
+            self.closed = True
+
+    device = FakeDevice()
+    runtime = NeckRuntime(
+        NeckConfig(enabled=True, center_on_start=False, center_on_shutdown=True),
+        device=device,
+    )
+
+    runtime.close()
+
+    assert device.closed is True
+
+
 def test_body_packet_frame_ignores_incomplete_packets() -> None:
     assert body_packet_frame(None) == (None, None, -1)
     assert body_packet_frame(SimpleNamespace(frame=_frame(_quat_y(0.0)))) == (None, None, -1)
@@ -197,6 +260,129 @@ def test_openneck_device_closes_context_manager(monkeypatch) -> None:
     device.close()
 
     assert calls == ["enter", "entered-center-0.5", "entered-move-0.25--0.5", "exit"]
+
+
+def test_openneck_device_direct_close_after_context_exit_failure(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeOpenNeckController:
+        port = "/dev/fake"
+
+        def __init__(self, *, config: object, port: object, enable_torque_on_connect: bool) -> None:
+            del config, port, enable_torque_on_connect
+
+        def __enter__(self):
+            calls.append("enter")
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            del exc_type, exc, tb
+            calls.append("exit")
+            raise RuntimeError("context exit failed")
+
+        def close(self) -> None:
+            calls.append("close")
+
+    module = ModuleType("openneck")
+    module.OpenNeckController = FakeOpenNeckController  # type: ignore[attr-defined]
+    monkeypatch.setitem(__import__("sys").modules, "openneck", module)
+
+    device = OpenNeckDevice(NeckConfig(enabled=True))
+    device.connect()
+    try:
+        device.close()
+    except RuntimeError as exc:
+        assert "context exit failed" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert calls == ["enter", "exit", "close"]
+
+
+def test_openneck_device_direct_closes_context_when_entered_proxy_lacks_close(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeEnteredController:
+        port = "/dev/entered"
+
+    class FakeOpenNeckController:
+        port = "/dev/fake"
+
+        def __init__(self, *, config: object, port: object, enable_torque_on_connect: bool) -> None:
+            del config, port, enable_torque_on_connect
+            self.entered = FakeEnteredController()
+
+        def __enter__(self):
+            calls.append("enter")
+            return self.entered
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            del exc_type, exc, tb
+            calls.append("exit")
+            raise RuntimeError("context exit failed")
+
+        def close(self) -> None:
+            calls.append("context-close")
+
+    module = ModuleType("openneck")
+    module.OpenNeckController = FakeOpenNeckController  # type: ignore[attr-defined]
+    monkeypatch.setitem(__import__("sys").modules, "openneck", module)
+
+    device = OpenNeckDevice(NeckConfig(enabled=True))
+    device.connect()
+    try:
+        device.close()
+    except RuntimeError as exc:
+        assert "context exit failed" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert calls == ["enter", "exit", "context-close"]
+
+
+def test_openneck_device_attempts_all_direct_close_targets(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeEnteredController:
+        port = "/dev/entered"
+
+        def close(self) -> None:
+            calls.append("entered-close")
+            raise RuntimeError("entered close failed")
+
+    class FakeOpenNeckController:
+        port = "/dev/fake"
+
+        def __init__(self, *, config: object, port: object, enable_torque_on_connect: bool) -> None:
+            del config, port, enable_torque_on_connect
+            self.entered = FakeEnteredController()
+
+        def __enter__(self):
+            calls.append("enter")
+            return self.entered
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            del exc_type, exc, tb
+            calls.append("exit")
+            raise RuntimeError("context exit failed")
+
+        def close(self) -> None:
+            calls.append("context-close")
+
+    module = ModuleType("openneck")
+    module.OpenNeckController = FakeOpenNeckController  # type: ignore[attr-defined]
+    monkeypatch.setitem(__import__("sys").modules, "openneck", module)
+
+    device = OpenNeckDevice(NeckConfig(enabled=True))
+    device.connect()
+    try:
+        device.close()
+    except RuntimeError as exc:
+        assert "context exit failed" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert calls == ["enter", "exit", "entered-close", "context-close"]
 
 
 def test_parse_neck_config_validates_rate() -> None:

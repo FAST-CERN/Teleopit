@@ -29,7 +29,7 @@ class NeckConfig:
     invert_yaw: bool = True
     invert_pitch: bool = True
     center_on_start: bool = True
-    center_on_shutdown: bool = True
+    center_on_shutdown: bool = False
     release_on_shutdown: bool = False
     dry_run: bool = False
 
@@ -81,7 +81,7 @@ def parse_neck_config(cfg: Any) -> NeckConfig:
         invert_yaw=bool(cfg_get(neck_cfg, "invert_yaw", True)),
         invert_pitch=bool(cfg_get(neck_cfg, "invert_pitch", True)),
         center_on_start=bool(cfg_get(neck_cfg, "center_on_start", True)),
-        center_on_shutdown=bool(cfg_get(neck_cfg, "center_on_shutdown", True)),
+        center_on_shutdown=bool(cfg_get(neck_cfg, "center_on_shutdown", False)),
         release_on_shutdown=bool(cfg_get(neck_cfg, "release_on_shutdown", False)),
         dry_run=bool(cfg_get(neck_cfg, "dry_run", False)),
     )

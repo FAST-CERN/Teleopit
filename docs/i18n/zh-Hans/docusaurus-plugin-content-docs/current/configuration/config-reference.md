@@ -193,7 +193,7 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 | `neck.smoothing_alpha` | 归一化 yaw/pitch 命令的 EMA alpha | `0.35` |
 | `neck.yaw_range_deg` / `pitch_range_deg` | 映射到归一化命令幅值 `1.0` 的角度 | `90.0` / `60.0` |
 | `neck.invert_yaw` / `invert_pitch` | 按轴反转 OpenNeck 命令方向 | `true` / `true` |
-| `neck.center_on_start` / `center_on_shutdown` | worker 启动/关闭时回中云台 | `true` / `true` |
+| `neck.center_on_start` / `center_on_shutdown` | worker 启动/关闭时回中云台 | `true` / `false` |
 | `neck.release_on_shutdown` | 关闭后在支持时释放舵机扭矩 | `false` |
 | `neck.dry_run` | 只计算命令，不打开 OpenNeck 硬件 | `false` |
 

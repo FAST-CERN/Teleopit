@@ -68,15 +68,37 @@ class OpenNeckDevice:
         controller = self._controller
         self._context = None
         self._controller = None
+        close_error: BaseException | None = None
         if context is not None:
             exit_context = getattr(context, "__exit__", None)
             if callable(exit_context):
-                exit_context(None, None, None)
-                return
-        if controller is not None:
-            close = getattr(controller, "close", None)
+                try:
+                    exit_context(None, None, None)
+                    return
+                except BaseException as exc:
+                    close_error = exc
+                    logger.exception("OpenNeck context exit failed; trying direct close")
+        close_targets = [target for target in (controller, context) if target is not None]
+        seen_target_ids: set[int] = set()
+        direct_close_error: BaseException | None = None
+        for target in close_targets:
+            target_id = id(target)
+            if target_id in seen_target_ids:
+                continue
+            seen_target_ids.add(target_id)
+            close = getattr(target, "close", None)
             if callable(close):
-                close()
+                try:
+                    close()
+                except BaseException as exc:
+                    direct_close_error = exc
+                    logger.exception("OpenNeck direct close failed")
+        if close_error is not None:
+            if direct_close_error is not None:
+                raise close_error from direct_close_error
+            raise close_error
+        if direct_close_error is not None:
+            raise direct_close_error
 
 
 class DryRunNeckDevice:

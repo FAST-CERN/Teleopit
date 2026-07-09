@@ -199,6 +199,37 @@ def test_video_runtime_stops_producer_before_reraising_tick_error(monkeypatch: p
     assert stopped is True
 
 
+def test_realsense_video_start_failure_does_not_stop_unstarted_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_rs = ModuleType("pyrealsense2")
+    fake_rs.stream = SimpleNamespace(color="color")
+    fake_rs.format = SimpleNamespace(rgb8="rgb8")
+    stop_calls = 0
+
+    class FakeConfig:
+        def enable_stream(self, *_args: object) -> None:
+            pass
+
+    class FakePipeline:
+        def start(self, _config: object) -> None:
+            raise RuntimeError("no device connected")
+
+        def stop(self) -> None:
+            nonlocal stop_calls
+            stop_calls += 1
+
+    fake_rs.config = FakeConfig
+    fake_rs.pipeline = FakePipeline
+    monkeypatch.setitem(sys.modules, "pyrealsense2", fake_rs)
+
+    sink = _FrameSink()
+    config = parse_pico_video_config({"video": {"enabled": True, "source": "realsense"}})
+    runtime = PicoVideoRuntime(provider=sink, config=config, mode="sim2real")
+
+    runtime.start()
+
+    assert stop_calls == 0
+
+
 def test_mujoco_video_runtime_renders_camera_frame(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_mujoco = ModuleType("mujoco")
     fake_mujoco.mjtObj = SimpleNamespace(mjOBJ_CAMERA="camera")

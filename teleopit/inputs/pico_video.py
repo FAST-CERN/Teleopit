@@ -191,6 +191,7 @@ class _RealSenseVideoProducer(_VideoProducer):
             self._thread.join(timeout=2.0)
 
     def _run(self) -> None:
+        pipeline_started = False
         try:
             import pyrealsense2 as rs
 
@@ -206,6 +207,7 @@ class _RealSenseVideoProducer(_VideoProducer):
                 self._config.fps,
             )
             pipeline.start(config)
+            pipeline_started = True
             self._ready_event.set()
             try:
                 while not self._stop_event.is_set():
@@ -222,7 +224,11 @@ class _RealSenseVideoProducer(_VideoProducer):
                     else:
                         self._pushed_frames += 1
             finally:
-                pipeline.stop()
+                if pipeline_started:
+                    try:
+                        pipeline.stop()
+                    except RuntimeError:
+                        logger.exception("Failed to stop RealSense pipeline after video producer exit")
         except BaseException as exc:
             self._error = exc
             self._ready_event.set()

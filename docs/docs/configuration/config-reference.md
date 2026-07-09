@@ -176,7 +176,7 @@ sim2real worker and does not change the policy observation.
 | `neck.smoothing_alpha` | EMA alpha for normalized yaw/pitch commands | `0.35` |
 | `neck.yaw_range_deg` / `pitch_range_deg` | Degrees mapped to normalized command magnitude `1.0` | `90.0` / `60.0` |
 | `neck.invert_yaw` / `invert_pitch` | Invert OpenNeck command direction per axis | `true` / `true` |
-| `neck.center_on_start` / `center_on_shutdown` | Center the gimbal at worker startup/shutdown | `true` / `true` |
+| `neck.center_on_start` / `center_on_shutdown` | Center the gimbal at worker startup/shutdown | `true` / `false` |
 | `neck.release_on_shutdown` | Release servo torque after shutdown when supported | `false` |
 | `neck.dry_run` | Compute commands without opening OpenNeck hardware | `false` |
 

@@ -49,9 +49,15 @@ class NeckRuntime:
     def close(self) -> None:
         try:
             if self._cfg.center_on_shutdown:
-                self._device.center()
+                try:
+                    self._device.center()
+                except Exception:
+                    logger.exception("Failed to center OpenNeck on shutdown; closing device")
             if self._cfg.release_on_shutdown:
-                self._device.release()
+                try:
+                    self._device.release()
+                except Exception:
+                    logger.exception("Failed to release OpenNeck torque on shutdown; closing device")
         finally:
             self._device.close()
 

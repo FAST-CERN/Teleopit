@@ -125,7 +125,7 @@ neck:
   invert_yaw: true
   invert_pitch: true
   center_on_start: true
-  center_on_shutdown: true
+  center_on_shutdown: false
   release_on_shutdown: false
   dry_run: false
 
