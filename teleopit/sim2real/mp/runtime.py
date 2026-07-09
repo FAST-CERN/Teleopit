@@ -1068,7 +1068,6 @@ class _RobotControlWorker:
         self.policy_hz = float(cfg_get(cfg, "policy_hz", 50.0))
         self.dt = 1.0 / self.policy_hz
 
-        RLPolicyController._apply_cpu_affinity(require_section(cfg, "controller"))
         self.robot = UnitreeG1Robot(cfg_get(cfg, "real_robot"))
         self.remote = UnitreeRemote()
         self.policy, self.obs_builder = self._build_policy_and_obs()

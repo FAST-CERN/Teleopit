@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import logging
-import os
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -61,16 +60,7 @@ class RLPolicyController:
             cast(Callable[[], Sequence[str]], providers_fn),
             str(cfg_get(cfg, "device", "auto")),
         )
-        applied_cpus = self._apply_cpu_affinity(cfg)
-        session_options = self._create_session_options(
-            ort,
-            cfg,
-            cpu_budget=None if applied_cpus is None else len(applied_cpus),
-        )
-        self._session = cast(
-            _OrtSession,
-            session_ctor(str(policy_path), sess_options=session_options, providers=providers),
-        )
+        self._session = cast(_OrtSession, session_ctor(str(policy_path), providers=providers))
         onnx_inputs = self._session.get_inputs()
         self._input_name = onnx_inputs[0].name
         self._output_name = self._session.get_outputs()[0].name
@@ -264,155 +254,3 @@ class RLPolicyController:
             providers.append("CUDAExecutionProvider")
         providers.append("CPUExecutionProvider")
         return providers
-
-    @staticmethod
-    def _create_session_options(
-        ort: object,
-        cfg: object,
-        *,
-        cpu_budget: int | None = None,
-    ) -> object | None:
-        intra_threads = RLPolicyController._parse_optional_positive_int(
-            cfg_get(cfg, "intra_op_num_threads", None),
-            field_name="controller.intra_op_num_threads",
-        )
-        inter_threads = RLPolicyController._parse_optional_positive_int(
-            cfg_get(cfg, "inter_op_num_threads", None),
-            field_name="controller.inter_op_num_threads",
-        )
-        allow_spinning = cfg_get(cfg, "intra_op_allow_spinning", None)
-        if intra_threads is None and inter_threads is None and allow_spinning is None:
-            return None
-        if (
-            intra_threads is not None
-            and cpu_budget is not None
-            and cpu_budget > 0
-            and intra_threads > cpu_budget
-        ):
-            _logger.warning(
-                "controller.intra_op_num_threads=%s exceeds effective CPU affinity budget %s; using %s",
-                intra_threads,
-                cpu_budget,
-                cpu_budget,
-            )
-            intra_threads = cpu_budget
-
-        session_options_ctor = getattr(ort, "SessionOptions", None)
-        if not callable(session_options_ctor):
-            raise ImportError("onnxruntime missing SessionOptions API")
-        session_options = session_options_ctor()
-        if intra_threads is not None:
-            session_options.intra_op_num_threads = intra_threads
-        if inter_threads is not None:
-            session_options.inter_op_num_threads = inter_threads
-        if allow_spinning is not None:
-            if not isinstance(allow_spinning, bool):
-                raise ValueError(
-                    "controller.intra_op_allow_spinning must be true, false, or null"
-                )
-            add_entry = getattr(session_options, "add_session_config_entry", None)
-            if not callable(add_entry):
-                raise ImportError("onnxruntime SessionOptions missing add_session_config_entry API")
-            add_entry("session.intra_op.allow_spinning", "1" if allow_spinning else "0")
-        return session_options
-
-    @staticmethod
-    def _apply_cpu_affinity(cfg: object) -> tuple[int, ...] | None:
-        cpus = RLPolicyController._normalize_cpu_affinity(
-            cfg_get(cfg, "cpu_affinity", None),
-            field_name="controller.cpu_affinity",
-        )
-        if cpus is None:
-            return None
-        if not hasattr(os, "sched_getaffinity") or not hasattr(os, "sched_setaffinity"):
-            _logger.warning("controller.cpu_affinity is configured but OS CPU affinity APIs are unavailable")
-            return None
-
-        allowed = sorted(os.sched_getaffinity(0))
-        target = [cpu for cpu in cpus if cpu in allowed]
-        if len(target) != len(cpus):
-            _logger.warning(
-                "controller.cpu_affinity requested CPUs %s but current affinity mask allows %s; using %s",
-                list(cpus),
-                allowed,
-                target,
-            )
-        if not target:
-            _logger.warning(
-                "controller.cpu_affinity resolved to no available CPUs; leaving affinity unchanged "
-                "and using current CPU budget %s",
-                allowed,
-            )
-            return tuple(allowed) if allowed else None
-        if set(target) != set(allowed):
-            os.sched_setaffinity(0, set(target))
-            _logger.info("Bound CPU affinity to CPUs %s", target)
-        else:
-            _logger.debug("CPU affinity already limited to CPUs %s", target)
-        return tuple(target)
-
-    @staticmethod
-    def _normalize_cpu_affinity(raw: object, *, field_name: str) -> tuple[int, ...] | None:
-        if raw is None or raw is False:
-            return None
-        if isinstance(raw, str) and raw.strip().lower() in ("", "null", "none"):
-            return None
-
-        values: list[object]
-        if isinstance(raw, str):
-            values = []
-            for token in raw.split(","):
-                token = token.strip()
-                if not token:
-                    continue
-                if "-" in token:
-                    parts = token.split("-")
-                    if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-                        raise ValueError(f"{field_name} contains invalid CPU range {token!r}")
-                    try:
-                        start = int(parts[0])
-                        end = int(parts[1])
-                    except ValueError as exc:
-                        raise ValueError(f"{field_name} contains invalid CPU range {token!r}") from exc
-                    if end < start:
-                        raise ValueError(f"{field_name} CPU range must be ascending, got {token!r}")
-                    values.extend(range(start, end + 1))
-                else:
-                    try:
-                        values.append(int(token))
-                    except ValueError as exc:
-                        raise ValueError(f"{field_name} contains invalid CPU id {token!r}") from exc
-        elif isinstance(raw, int) and not isinstance(raw, bool):
-            values = [raw]
-        elif isinstance(raw, Sequence) and not isinstance(raw, (bytes, bytearray)):
-            values = list(raw)
-        else:
-            raise ValueError(f"{field_name} must be null, an int, a list of ints, or a comma-separated string")
-
-        cpus: list[int] = []
-        seen: set[int] = set()
-        for value in values:
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise ValueError(f"{field_name} entries must be non-negative integers, got {value!r}")
-            cpu = int(value)
-            if cpu < 0 or cpu != value:
-                raise ValueError(f"{field_name} entries must be non-negative integers, got {value!r}")
-            if cpu not in seen:
-                seen.add(cpu)
-                cpus.append(cpu)
-        if not cpus:
-            return None
-        return tuple(cpus)
-
-    @staticmethod
-    def _parse_optional_positive_int(raw: object, *, field_name: str) -> int | None:
-        if raw is None:
-            return None
-        if isinstance(raw, str) and raw.strip().lower() in ("", "null", "none"):
-            return None
-        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-            raise ValueError(f"{field_name} must be a positive integer or null, got {raw!r}")
-        parsed = int(raw)
-        if parsed <= 0 or parsed != raw:
-            raise ValueError(f"{field_name} must be a positive integer or null, got {raw!r}")
-        return parsed

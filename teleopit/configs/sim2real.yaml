@@ -22,13 +22,6 @@ console:
   show_timing: false
   timing_log_interval_s: 10.0
 
-# Sim2real production defaults: bind the control process to CPUs 4-7 and keep
-# ONNX Runtime inside that CPU budget.
-controller:
-  cpu_affinity: [4, 5, 6, 7]
-  intra_op_num_threads: 4
-  inter_op_num_threads: 1
-
 recording:
   enabled: false
   format: hdf5
