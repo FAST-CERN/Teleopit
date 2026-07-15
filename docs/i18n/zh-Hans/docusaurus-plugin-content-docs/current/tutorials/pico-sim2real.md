@@ -117,8 +117,9 @@ episode 会保存为 `data/recordings/sim2real_hdf5/data/` 下的 `.h5` 文件�
 `episodes.jsonl` 保存每个 episode 的文件映射与可编辑任务 prompt。HDF5 以
 30 Hz 保存 `frame_index`、`timestamp`、`observation.state(68)`、标量
 `observation.mode` 和作为 motion-tracker reference 的 36D `action`。启用灵巧手
-控制时还会保存 `action.hand(12)`。启用 OpenNeck 控制时，会把最新的归一化
-yaw/pitch 命令保存为 `action.neck(2)`。未启用的设备不会添加对应的 action 字段。
+控制时还会保存 `action.hand(12)`。启用 OpenNeck 控制时，会把最新经过机械限位裁剪的
+`[yaw_deg, pitch_deg]` 目标以度为单位保存为 `action.neck(2)`。未启用的设备不会添加
+对应的 action 字段。
 
 ## 操作流程
 

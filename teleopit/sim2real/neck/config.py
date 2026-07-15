@@ -8,6 +8,12 @@ from typing import Any
 from teleopit.runtime.common import cfg_get
 
 VALID_NECK_ACTIVE_MODES = frozenset(("standing", "mocap", "arms", "pause"))
+REMOVED_NECK_CONFIG_KEYS = (
+    "yaw_range_deg",
+    "pitch_range_deg",
+    "invert_yaw",
+    "invert_pitch",
+)
 
 
 @dataclass(frozen=True)
@@ -20,10 +26,6 @@ class NeckConfig:
     frame_timeout_s: float = 0.2
     active_modes: tuple[str, ...] = ("standing", "mocap", "arms", "pause")
     dead_zone_deg: float = 0.5
-    yaw_range_deg: float = 90.0
-    pitch_range_deg: float = 60.0
-    invert_yaw: bool = True
-    invert_pitch: bool = True
     center_on_start: bool = True
     center_on_shutdown: bool = False
     release_on_shutdown: bool = False
@@ -32,6 +34,13 @@ class NeckConfig:
 
 def parse_neck_config(cfg: Any) -> NeckConfig:
     neck_cfg = cfg_get(cfg, "neck", {}) or {}
+    removed = [key for key in REMOVED_NECK_CONFIG_KEYS if cfg_get(neck_cfg, key, None) is not None]
+    if removed:
+        raise ValueError(
+            "Removed normalized OpenNeck config key(s): "
+            f"{', '.join(removed)}. Teleopit now sends head angles in degrees; "
+            "configure motor direction and mechanical limits in the OpenNeck calibration file."
+        )
     active_modes = _parse_active_modes(cfg_get(neck_cfg, "active_modes", ["standing", "mocap", "arms", "pause"]))
     rate_hz = float(cfg_get(neck_cfg, "rate_hz", 60.0))
     if rate_hz <= 0:
@@ -42,12 +51,6 @@ def parse_neck_config(cfg: Any) -> NeckConfig:
     dead_zone_deg = float(cfg_get(neck_cfg, "dead_zone_deg", 0.5))
     if dead_zone_deg < 0:
         raise ValueError("neck.dead_zone_deg must be >= 0")
-    yaw_range_deg = float(cfg_get(neck_cfg, "yaw_range_deg", 90.0))
-    pitch_range_deg = float(cfg_get(neck_cfg, "pitch_range_deg", 60.0))
-    if yaw_range_deg <= 0:
-        raise ValueError("neck.yaw_range_deg must be > 0")
-    if pitch_range_deg <= 0:
-        raise ValueError("neck.pitch_range_deg must be > 0")
     config_path = cfg_get(neck_cfg, "config_path", None)
     if config_path in ("", "null"):
         config_path = None
@@ -65,10 +68,6 @@ def parse_neck_config(cfg: Any) -> NeckConfig:
         frame_timeout_s=frame_timeout_s,
         active_modes=active_modes,
         dead_zone_deg=dead_zone_deg,
-        yaw_range_deg=yaw_range_deg,
-        pitch_range_deg=pitch_range_deg,
-        invert_yaw=bool(cfg_get(neck_cfg, "invert_yaw", True)),
-        invert_pitch=bool(cfg_get(neck_cfg, "invert_pitch", True)),
         center_on_start=bool(cfg_get(neck_cfg, "center_on_start", True)),
         center_on_shutdown=bool(cfg_get(neck_cfg, "center_on_shutdown", False)),
         release_on_shutdown=bool(cfg_get(neck_cfg, "release_on_shutdown", False)),

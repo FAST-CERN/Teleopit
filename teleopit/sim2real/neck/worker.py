@@ -39,8 +39,15 @@ class NeckRuntime:
         command = self._mapper.map_frame(frame)
         if command is None:
             return None
-        self._device.move_norm(command.yaw, command.pitch)
-        return command
+        applied_yaw_deg, applied_pitch_deg = self._device.move_deg(
+            command.yaw_deg,
+            command.pitch_deg,
+        )
+        return NeckCommand(
+            yaw_deg=applied_yaw_deg,
+            pitch_deg=applied_pitch_deg,
+            roll_deg=command.roll_deg,
+        )
 
     def close(self) -> None:
         try:
@@ -51,7 +58,7 @@ class NeckRuntime:
                     logger.exception("Failed to center OpenNeck on shutdown; closing device")
             if self._cfg.release_on_shutdown:
                 try:
-                    self._device.release()
+                    self._device.release_torque()
                 except Exception:
                     logger.exception("Failed to release OpenNeck torque on shutdown; closing device")
         finally:

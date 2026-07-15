@@ -87,8 +87,8 @@ class NeckCommandPacket:
     timestamp_s: float
     driver: str
     active: bool
-    yaw: float
-    pitch: float
+    yaw_deg: float
+    pitch_deg: float
     seq: int
 
 

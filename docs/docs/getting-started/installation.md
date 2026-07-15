@@ -73,14 +73,17 @@ bash scripts/setup/download_somehand_assets.sh
 
 These packages are only required when `hands.enabled=true`.
 
-Optional OpenNeck active-vision control for Pico sim2real uses the remote
-OpenNeck package:
+Optional OpenNeck active-vision control for Pico sim2real uses the latest
+OpenNeck angle-control package:
 
 ```bash
 pip install -e '.[openneck]'
 ```
 
 This extra includes the Pico stack and is only required when `neck.enabled=true`.
+OpenNeck 0.2.0 calibration files use `*_center_step`, `*_min_step`,
+`*_max_step`, and `*_step_sign`; the previous normalized configuration format
+is unsupported. Run `openneck calibrate` to create a current calibration file.
 
 ### Sim2Real Recording
 

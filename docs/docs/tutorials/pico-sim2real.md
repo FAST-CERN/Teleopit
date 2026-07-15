@@ -123,8 +123,9 @@ under `data/recordings/sim2real_hdf5/data/`, with compressed MP4 files under
 episode. HDF5 stores `frame_index`, `timestamp`, `observation.state(68)`, scalar
 `observation.mode`, and the 36D motion-tracker reference `action` at 30 Hz.
 When hand control is enabled, it also stores `action.hand(12)`. When OpenNeck
-control is enabled, it stores the latest normalized yaw/pitch command as
-`action.neck(2)`. Disabled devices do not add their action fields.
+control is enabled, it stores the latest mechanically clamped
+`[yaw_deg, pitch_deg]` target in degrees as `action.neck(2)`. Disabled devices
+do not add their action fields.
 
 ## Operator Flow
 

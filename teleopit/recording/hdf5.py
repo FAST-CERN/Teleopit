@@ -37,7 +37,7 @@ HAND_ACTION_DIM = 12
 NECK_ACTION_DIM = 2
 DEFAULT_IMAGE_SHAPE = (480, 640, 3)
 HDF5_RECORDING_FORMAT = "teleopit_hdf5"
-HDF5_RECORDING_VERSION = 2
+HDF5_RECORDING_VERSION = 3
 DEFAULT_ROBOT_TYPE = "unitree_g1_29dof"
 NO_HAND_TYPE = "none"
 SUPPORTED_HAND_TYPES = (NO_HAND_TYPE, "linkerhand_l6", "linkerhand_o6")
@@ -194,9 +194,8 @@ def hdf5_schema(schema: RecordingSchema) -> dict[str, object]:
         features[schema.neck_action_key] = {
             "dtype": "float32",
             "shape": [schema.neck_action_dim],
-            "names": ["yaw", "pitch"],
-            "units": "normalized",
-            "range": [-1.0, 1.0],
+            "names": ["yaw_deg", "pitch_deg"],
+            "units": "degrees",
         }
     features[schema.image_key] = {
         "dtype": "video",
@@ -258,8 +257,8 @@ def normalize_hand_action(left_pose: object, right_pose: object) -> np.ndarray:
     return action
 
 
-def normalize_neck_action(yaw: object, pitch: object) -> np.ndarray:
-    action = np.asarray([yaw, pitch], dtype=np.float32).reshape(-1)
+def build_neck_action(yaw_deg: object, pitch_deg: object) -> np.ndarray:
+    action = np.asarray([yaw_deg, pitch_deg], dtype=np.float32).reshape(-1)
     if action.shape[0] != NECK_ACTION_DIM:
         raise ValueError(f"recording action.neck must be {NECK_ACTION_DIM}D, got {action.shape[0]}")
     return action

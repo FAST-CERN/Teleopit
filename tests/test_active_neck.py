@@ -8,7 +8,7 @@ import numpy as np
 from teleopit.inputs.pico4_provider import BODY_JOINT_NAMES, Pico4InputProvider
 from teleopit.sim2real.neck.config import NeckConfig, parse_neck_config
 from teleopit.sim2real.neck.mapper import HeadPoseMapper
-from teleopit.sim2real.neck.openneck import OpenNeckDevice
+from teleopit.sim2real.neck.openneck import DryRunNeckDevice, OpenNeckDevice
 from teleopit.sim2real.neck.worker import NeckRuntime, body_packet_frame
 
 
@@ -30,56 +30,59 @@ def _frame(head: np.ndarray, spine: np.ndarray | None = None):
     return frame
 
 
-def test_head_pose_mapper_maps_fixed_neutral_yaw_pitch_without_startup_calibration() -> None:
-    cfg = NeckConfig(
-        enabled=True,
-        invert_yaw=False,
-        invert_pitch=False,
-        dead_zone_deg=0.0,
-    )
-    mapper = HeadPoseMapper(cfg)
+class FakeDevice:
+    def __init__(self) -> None:
+        self.moves: list[tuple[float, float]] = []
+        self.center_calls = 0
+        self.released = False
+        self.closed = False
+
+    def connect(self) -> None:
+        return None
+
+    def center(self) -> None:
+        self.center_calls += 1
+
+    def release_torque(self) -> None:
+        self.released = True
+
+    def move_deg(self, yaw_deg: float, pitch_deg: float) -> tuple[float, float]:
+        self.moves.append((yaw_deg, pitch_deg))
+        return max(-20.0, min(20.0, yaw_deg)), max(-10.0, min(10.0, pitch_deg))
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_head_pose_mapper_maps_fixed_pico_convention_to_openneck_degrees() -> None:
+    mapper = HeadPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
 
     command = mapper.map_frame(_frame(_quat_y(30.0), _quat_y(0.0)))
     assert command is not None
-    assert command.yaw_deg == pytest_approx(30.0)
-    assert command.yaw == pytest_approx(30.0 / 90.0)
+    assert command.yaw_deg == pytest_approx(-30.0)
 
     command = mapper.map_frame(_frame(_quat_y(0.0), _quat_y(0.0)))
     assert command is not None
     assert command.yaw_deg == pytest_approx(0.0)
-    assert command.yaw == pytest_approx(0.0)
 
     command = mapper.map_frame(_frame(_quat_x(15.0), _quat_x(0.0)))
     assert command is not None
-    assert command.pitch_deg == pytest_approx(15.0)
-    assert command.pitch == pytest_approx(15.0 / 60.0)
+    assert command.pitch_deg == pytest_approx(-15.0)
 
 
 def test_head_pose_mapper_uses_body_relative_orientation() -> None:
-    cfg = NeckConfig(
-        enabled=True,
-        invert_yaw=False,
-        dead_zone_deg=0.0,
-    )
-    mapper = HeadPoseMapper(cfg)
+    mapper = HeadPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
 
     command = mapper.map_frame(_frame(_quat_y(40.0), _quat_y(10.0)))
 
     assert command is not None
-    assert command.yaw_deg == pytest_approx(30.0)
+    assert command.yaw_deg == pytest_approx(-30.0)
 
 
 def test_head_pose_mapper_handles_converted_pico_neutral_and_yaw() -> None:
     body_poses = np.zeros((len(BODY_JOINT_NAMES), 7), dtype=np.float64)
     body_poses[:, 6] = 1.0
-    mapper = HeadPoseMapper(
-        NeckConfig(
-            enabled=True,
-            invert_yaw=False,
-            invert_pitch=False,
-            dead_zone_deg=0.0,
-        )
-    )
+    mapper = HeadPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
 
     neutral = mapper.map_frame(Pico4InputProvider._convert_body_joints_to_frame(body_poses))
     assert neutral is not None
@@ -91,7 +94,7 @@ def test_head_pose_mapper_handles_converted_pico_neutral_and_yaw() -> None:
     body_poses[head_idx, 6] = math.cos(math.radians(30.0) / 2.0)
     command = mapper.map_frame(Pico4InputProvider._convert_body_joints_to_frame(body_poses))
     assert command is not None
-    assert command.yaw_deg == pytest_approx(30.0)
+    assert command.yaw_deg == pytest_approx(-30.0)
     assert command.pitch_deg == pytest_approx(0.0)
 
 
@@ -101,32 +104,10 @@ def test_head_pose_mapper_requires_spine3_joint() -> None:
     assert mapper.map_frame(_frame(_quat_y(30.0))) is None
 
 
-def test_neck_runtime_sends_relative_command_on_first_active_frame() -> None:
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.moves: list[tuple[float, float]] = []
-            self.center_calls = 0
-            self.closed = False
-
-        def connect(self) -> None:
-            return None
-
-        def center(self) -> None:
-            self.center_calls += 1
-
-        def release(self) -> None:
-            return None
-
-        def move_norm(self, yaw: float, pitch: float) -> None:
-            self.moves.append((yaw, pitch))
-
-        def close(self) -> None:
-            self.closed = True
-
+def test_neck_runtime_sends_degrees_and_returns_applied_target() -> None:
     device = FakeDevice()
     cfg = NeckConfig(
         enabled=True,
-        invert_yaw=False,
         dead_zone_deg=0.0,
         center_on_start=True,
         center_on_shutdown=True,
@@ -134,7 +115,6 @@ def test_neck_runtime_sends_relative_command_on_first_active_frame() -> None:
     runtime = NeckRuntime(cfg, device=device)
 
     runtime.start()
-    assert device.center_calls == 1
     command = runtime.tick(
         frame=_frame(_quat_y(30.0), _quat_y(0.0)),
         frame_timestamp_s=1.0,
@@ -150,39 +130,19 @@ def test_neck_runtime_sends_relative_command_on_first_active_frame() -> None:
     runtime.close()
 
     assert command is not None
-    assert command.yaw == pytest_approx(30.0 / 90.0)
-    assert command.pitch == pytest_approx(0.0)
+    assert command.yaw_deg == pytest_approx(-20.0)
+    assert command.pitch_deg == pytest_approx(0.0)
     assert neutral_command is not None
-    assert neutral_command.yaw == pytest_approx(0.0)
-    assert device.moves == [(30.0 / 90.0, 0.0), (0.0, 0.0)]
+    assert neutral_command.yaw_deg == pytest_approx(0.0)
+    np.testing.assert_allclose(device.moves, [(-30.0, 0.0), (0.0, 0.0)], atol=1e-6)
     assert device.center_calls == 2
     assert device.closed is True
 
 
-def test_neck_runtime_releases_on_shutdown_when_enabled() -> None:
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.released = False
-            self.closed = False
-
-        def connect(self) -> None:
-            return None
-
-        def center(self) -> None:
-            return None
-
-        def release(self) -> None:
-            self.released = True
-
-        def move_norm(self, yaw: float, pitch: float) -> None:
-            del yaw, pitch
-
-        def close(self) -> None:
-            self.closed = True
-
+def test_neck_runtime_releases_torque_on_shutdown_when_enabled() -> None:
     device = FakeDevice()
     runtime = NeckRuntime(
-        NeckConfig(enabled=True, center_on_start=False, center_on_shutdown=False, release_on_shutdown=True),
+        NeckConfig(enabled=True, center_on_start=False, release_on_shutdown=True),
         device=device,
     )
 
@@ -193,27 +153,6 @@ def test_neck_runtime_releases_on_shutdown_when_enabled() -> None:
 
 
 def test_neck_shutdown_defaults_to_close_only() -> None:
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.center_calls = 0
-            self.released = False
-            self.closed = False
-
-        def connect(self) -> None:
-            return None
-
-        def center(self) -> None:
-            self.center_calls += 1
-
-        def release(self) -> None:
-            self.released = True
-
-        def move_norm(self, yaw: float, pitch: float) -> None:
-            del yaw, pitch
-
-        def close(self) -> None:
-            self.closed = True
-
     device = FakeDevice()
     runtime = NeckRuntime(NeckConfig(enabled=True, center_on_start=False), device=device)
 
@@ -225,26 +164,11 @@ def test_neck_shutdown_defaults_to_close_only() -> None:
 
 
 def test_neck_runtime_closes_after_shutdown_center_failure() -> None:
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.closed = False
-
-        def connect(self) -> None:
-            return None
-
+    class CenterFailingDevice(FakeDevice):
         def center(self) -> None:
             raise RuntimeError("neck center failed")
 
-        def release(self) -> None:
-            return None
-
-        def move_norm(self, yaw: float, pitch: float) -> None:
-            del yaw, pitch
-
-        def close(self) -> None:
-            self.closed = True
-
-    device = FakeDevice()
+    device = CenterFailingDevice()
     runtime = NeckRuntime(
         NeckConfig(enabled=True, center_on_start=False, center_on_shutdown=True),
         device=device,
@@ -261,32 +185,27 @@ def test_body_packet_frame_ignores_incomplete_packets() -> None:
     assert body_packet_frame(SimpleNamespace(frame=_frame(_quat_y(0.0)), timestamp_s="bad", seq=1)) == (None, None, -1)
 
 
-def test_openneck_device_closes_context_manager(monkeypatch) -> None:
+def test_openneck_device_uses_angle_api_and_returns_applied_target(monkeypatch) -> None:
     calls: list[str] = []
-
-    class FakeEnteredController:
-        port = "/dev/entered"
-
-        def center(self, *, wait_s: float) -> None:
-            calls.append(f"entered-center-{wait_s}")
-
-        def move_norm(self, yaw: float, pitch: float) -> None:
-            calls.append(f"entered-move-{yaw}-{pitch}")
 
     class FakeOpenNeckController:
         port = "/dev/fake"
 
-        def __init__(self, *, config: object, port: object, enable_torque_on_connect: bool) -> None:
-            del config, port, enable_torque_on_connect
-            self.entered = FakeEnteredController()
+        def __init__(self, *, config: object, port: object) -> None:
+            calls.append(f"init-{config}-{port}")
 
-        def __enter__(self):
-            calls.append("enter")
-            return self.entered
+        def connect(self) -> None:
+            calls.append("connect")
 
-        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-            del exc_type, exc, tb
-            calls.append("exit")
+        def center(self) -> None:
+            calls.append("center")
+
+        def move_deg(self, yaw_deg: float, pitch_deg: float) -> SimpleNamespace:
+            calls.append(f"move-{yaw_deg}-{pitch_deg}")
+            return SimpleNamespace(yaw_deg=-20.0, pitch_deg=10.0)
+
+        def release_torque(self) -> None:
+            calls.append("release-torque")
 
         def close(self) -> None:
             calls.append("close")
@@ -295,136 +214,70 @@ def test_openneck_device_closes_context_manager(monkeypatch) -> None:
     module.OpenNeckController = FakeOpenNeckController  # type: ignore[attr-defined]
     monkeypatch.setitem(__import__("sys").modules, "openneck", module)
 
-    device = OpenNeckDevice(NeckConfig(enabled=True))
+    device = OpenNeckDevice(
+        NeckConfig(enabled=True, config_path="neck.json", port="/dev/ttyACM0")
+    )
     device.connect()
     device.center()
-    device.move_norm(0.25, -0.5)
+    applied = device.move_deg(-25.0, 15.0)
+    device.release_torque()
     device.close()
 
-    assert calls == ["enter", "entered-center-0.5", "entered-move-0.25--0.5", "exit"]
+    assert applied == (-20.0, 10.0)
+    assert calls == [
+        "init-neck.json-/dev/ttyACM0",
+        "connect",
+        "center",
+        "move--25.0-15.0",
+        "release-torque",
+        "close",
+    ]
 
 
-def test_openneck_device_direct_close_after_context_exit_failure(monkeypatch) -> None:
+def test_dry_run_neck_device_reuses_openneck_calibration_clamp(monkeypatch) -> None:
     calls: list[str] = []
 
     class FakeOpenNeckController:
-        port = "/dev/fake"
+        def __init__(self, *, config: object, port: object) -> None:
+            calls.append(f"init-{config}-{port}")
 
-        def __init__(self, *, config: object, port: object, enable_torque_on_connect: bool) -> None:
-            del config, port, enable_torque_on_connect
+        def move_deg(self, yaw_deg: float, pitch_deg: float) -> None:
+            del yaw_deg, pitch_deg
+            raise AssertionError("dry-run must not send a hardware command")
 
-        def __enter__(self):
-            calls.append("enter")
-            return self
+        def _angle_to_step(self, axis: str, angle_deg: float) -> int:
+            calls.append(f"angle-to-step-{axis}-{angle_deg}")
+            low, high = (-20.0, 20.0) if axis == "yaw" else (-10.0, 10.0)
+            return round(max(low, min(high, angle_deg)))
 
-        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-            del exc_type, exc, tb
-            calls.append("exit")
-            raise RuntimeError("context exit failed")
-
-        def close(self) -> None:
-            calls.append("close")
+        def _step_to_angle(self, axis: str, step: int) -> float:
+            calls.append(f"step-to-angle-{axis}-{step}")
+            return float(step)
 
     module = ModuleType("openneck")
     module.OpenNeckController = FakeOpenNeckController  # type: ignore[attr-defined]
     monkeypatch.setitem(__import__("sys").modules, "openneck", module)
 
-    device = OpenNeckDevice(NeckConfig(enabled=True))
+    device = DryRunNeckDevice(
+        NeckConfig(
+            enabled=True,
+            config_path="neck.json",
+            port="/dev/ttyACM0",
+            dry_run=True,
+        )
+    )
     device.connect()
-    try:
-        device.close()
-    except RuntimeError as exc:
-        assert "context exit failed" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
+    applied = device.move_deg(25.0, -15.0)
+    device.close()
 
-    assert calls == ["enter", "exit", "close"]
-
-
-def test_openneck_device_direct_closes_context_when_entered_proxy_lacks_close(monkeypatch) -> None:
-    calls: list[str] = []
-
-    class FakeEnteredController:
-        port = "/dev/entered"
-
-    class FakeOpenNeckController:
-        port = "/dev/fake"
-
-        def __init__(self, *, config: object, port: object, enable_torque_on_connect: bool) -> None:
-            del config, port, enable_torque_on_connect
-            self.entered = FakeEnteredController()
-
-        def __enter__(self):
-            calls.append("enter")
-            return self.entered
-
-        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-            del exc_type, exc, tb
-            calls.append("exit")
-            raise RuntimeError("context exit failed")
-
-        def close(self) -> None:
-            calls.append("context-close")
-
-    module = ModuleType("openneck")
-    module.OpenNeckController = FakeOpenNeckController  # type: ignore[attr-defined]
-    monkeypatch.setitem(__import__("sys").modules, "openneck", module)
-
-    device = OpenNeckDevice(NeckConfig(enabled=True))
-    device.connect()
-    try:
-        device.close()
-    except RuntimeError as exc:
-        assert "context exit failed" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
-
-    assert calls == ["enter", "exit", "context-close"]
-
-
-def test_openneck_device_attempts_all_direct_close_targets(monkeypatch) -> None:
-    calls: list[str] = []
-
-    class FakeEnteredController:
-        port = "/dev/entered"
-
-        def close(self) -> None:
-            calls.append("entered-close")
-            raise RuntimeError("entered close failed")
-
-    class FakeOpenNeckController:
-        port = "/dev/fake"
-
-        def __init__(self, *, config: object, port: object, enable_torque_on_connect: bool) -> None:
-            del config, port, enable_torque_on_connect
-            self.entered = FakeEnteredController()
-
-        def __enter__(self):
-            calls.append("enter")
-            return self.entered
-
-        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-            del exc_type, exc, tb
-            calls.append("exit")
-            raise RuntimeError("context exit failed")
-
-        def close(self) -> None:
-            calls.append("context-close")
-
-    module = ModuleType("openneck")
-    module.OpenNeckController = FakeOpenNeckController  # type: ignore[attr-defined]
-    monkeypatch.setitem(__import__("sys").modules, "openneck", module)
-
-    device = OpenNeckDevice(NeckConfig(enabled=True))
-    device.connect()
-    try:
-        device.close()
-    except RuntimeError as exc:
-        assert "context exit failed" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
-
-    assert calls == ["enter", "exit", "entered-close", "context-close"]
+    assert applied == (20.0, -10.0)
+    assert calls == [
+        "init-neck.json-/dev/ttyACM0",
+        "angle-to-step-yaw-25.0",
+        "angle-to-step-pitch--15.0",
+        "step-to-angle-yaw-20",
+        "step-to-angle-pitch--10",
+    ]
 
 
 def test_parse_neck_config_validates_rate() -> None:
@@ -448,6 +301,16 @@ def test_parse_neck_config_rejects_unknown_active_mode() -> None:
     except ValueError as exc:
         assert "neck.active_modes" in str(exc)
         assert "idle" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_parse_neck_config_rejects_removed_normalized_fields() -> None:
+    try:
+        parse_neck_config({"neck": {"enabled": True, "yaw_range_deg": 90.0}})
+    except ValueError as exc:
+        assert "Removed normalized OpenNeck config" in str(exc)
+        assert "angles in degrees" in str(exc)
     else:
         raise AssertionError("expected ValueError")
 

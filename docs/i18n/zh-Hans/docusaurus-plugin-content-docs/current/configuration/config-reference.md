@@ -180,19 +180,26 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 管线。OpenNeck 作为非关键 sim2real worker 运行，不会改变策略观测。头部运动使用固定的
 PICO 中立姿态且不进行颈部侧 EMA，按照 `Head` 相对于 `Spine3` 的绝对朝向进行映射；
 启动时不会把操作者的第一帧姿态采集为新的零位，因此开始追踪时操作者不需要保持头部朝正前方。
+Teleopit 将受支持的 PICO 约定转换为 OpenNeck 的物理约定——正 yaw 向左转，正 pitch
+向上看——并通过 OpenNeck 0.2.0 的 `move_deg()` 发送以度为单位的相对角度。OpenNeck
+负责直驱角度到舵机步数的转换，并将每个目标裁剪到标定文件中的机械步数限位。
+
+OpenNeck 0.2.0 标定文件使用 `yaw_center_step`、`yaw_min_step`、
+`yaw_max_step` 和 `yaw_step_sign` 等角度控制字段（pitch 使用对应字段）。不支持以前的
+OpenNeck 归一化配置；运行 `openneck calibrate` 创建当前格式的文件。Teleopit 已移除的
+`neck.yaw_range_deg`、`neck.pitch_range_deg` 和 `neck.invert_*` 键会被拒绝，
+而不是被忽略。
 
 | 字段 | 说明 | 默认值 |
 |---|---|---|
 | `neck.enabled` | 启用可选 OpenNeck worker | `false` |
 | `neck.driver` | 头颈设备驱动插件；当前为 `openneck` | `openneck` |
-| `neck.config_path` | 可选 OpenNeck 校准配置路径 | `null` |
+| `neck.config_path` | 可选 OpenNeck 0.2.0 角度标定配置路径 | `null` |
 | `neck.port` | 可选串口覆盖，例如 `/dev/ttyACM0` | `null` |
 | `neck.rate_hz` | 最大头颈命令频率（Hz） | `60.0` |
 | `neck.frame_timeout_s` | Pico body frame 过期阈值 | `0.2` |
 | `neck.active_modes` | 允许头颈运动的 sim2real 模式 | `[standing, mocap, arms, pause]` |
 | `neck.dead_zone_deg` | yaw/pitch 死区（度） | `0.5` |
-| `neck.yaw_range_deg` / `pitch_range_deg` | 映射到归一化命令幅值 `1.0` 的角度 | `90.0` / `60.0` |
-| `neck.invert_yaw` / `invert_pitch` | 按轴反转 OpenNeck 命令方向 | `true` / `true` |
 | `neck.center_on_start` / `center_on_shutdown` | worker 启动/关闭时回中云台 | `true` / `false` |
 | `neck.release_on_shutdown` | 关闭后在支持时释放舵机扭矩 | `false` |
 | `neck.dry_run` | 只计算命令，不打开 OpenNeck 硬件 | `false` |
@@ -273,5 +280,6 @@ HDF5 文件仅包含上述逐帧数组，不保存录制元数据根属性。RGB
 消费的高层参考，不是 tracker policy 的原始输出，也不是最终下发给 G1 的关节目标。
 `action.hand` 是手部 worker 最新的 LinkerHand 命令：
 `left_pose(6) + right_pose(6)`，使用 SDK 的 0-255 pose 数值。
-`action.neck` 是颈部 worker 最近一次成功发送给 OpenNeck 的命令：归一化的
-`[yaw, pitch]`，两个值的范围均为 `[-1, 1]`。
+`action.neck` 是 OpenNeck 成功执行命令后返回的最新机械限位裁剪目标：以度为单位的
+`[yaw_deg, pitch_deg]`。正 yaw 向左转，正 pitch 向上看。可达范围来自 OpenNeck
+标定文件，因此录制 schema 中没有固定范围。

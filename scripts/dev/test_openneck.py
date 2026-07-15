@@ -21,7 +21,7 @@ from teleopit.sim2real.neck.worker import NeckRuntime  # noqa: E402
 
 DEFAULT_RATE_HZ = 60.0
 DEFAULT_FRAME_TIMEOUT_S = 0.3
-DEFAULT_STEP_MAGNITUDE = 0.25
+DEFAULT_TEST_ANGLE_DEG = 5.0
 DEFAULT_HOLD_S = 0.8
 DEFAULT_PICO_TIMEOUT_S = 60.0
 
@@ -43,21 +43,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rate-hz", type=float, default=DEFAULT_RATE_HZ)
     parser.add_argument("--frame-timeout-s", type=float, default=DEFAULT_FRAME_TIMEOUT_S)
     parser.add_argument(
-        "--magnitude",
+        "--angle-deg",
         type=float,
-        default=DEFAULT_STEP_MAGNITUDE,
-        help="Normalized direct-test command magnitude in [0, 1]. Keep this conservative.",
+        default=DEFAULT_TEST_ANGLE_DEG,
+        help="Direct-test angle magnitude in degrees. Keep this conservative.",
     )
     parser.add_argument("--hold-s", type=float, default=DEFAULT_HOLD_S, help="Seconds to hold each direct-test command")
     parser.add_argument("--duration-s", type=float, default=0.0, help="Pico mode duration; 0 means until Ctrl-C")
     parser.add_argument("--no-center-on-start", action="store_true")
     parser.add_argument("--no-center-on-shutdown", action="store_true")
     parser.add_argument("--release-on-shutdown", action="store_true")
-    parser.add_argument("--invert-yaw", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--invert-pitch", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dead-zone-deg", type=float, default=0.5)
-    parser.add_argument("--yaw-range-deg", type=float, default=90.0)
-    parser.add_argument("--pitch-range-deg", type=float, default=60.0)
     parser.add_argument("--bridge-host", default="0.0.0.0")
     parser.add_argument("--bridge-port", type=int, default=63901)
     parser.add_argument("--bridge-discovery", action=argparse.BooleanOptionalAction, default=True)
@@ -71,8 +67,8 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("--hold-s must be > 0")
     if args.duration_s < 0:
         raise SystemExit("--duration-s must be >= 0")
-    if not 0.0 <= args.magnitude <= 1.0:
-        raise SystemExit("--magnitude must be in [0, 1]")
+    if args.angle_deg <= 0.0:
+        raise SystemExit("--angle-deg must be > 0")
     return args
 
 
@@ -86,10 +82,6 @@ def make_neck_config(args: argparse.Namespace) -> NeckConfig:
         frame_timeout_s=args.frame_timeout_s,
         active_modes=("mocap",),
         dead_zone_deg=args.dead_zone_deg,
-        yaw_range_deg=args.yaw_range_deg,
-        pitch_range_deg=args.pitch_range_deg,
-        invert_yaw=bool(args.invert_yaw),
-        invert_pitch=bool(args.invert_pitch),
         center_on_start=not bool(args.no_center_on_start),
         center_on_shutdown=not bool(args.no_center_on_shutdown),
         release_on_shutdown=bool(args.release_on_shutdown),
@@ -114,31 +106,31 @@ def make_pico_provider(args: argparse.Namespace) -> Pico4InputProvider:
 def run_direct(args: argparse.Namespace) -> None:
     cfg = make_neck_config(args)
     device = build_neck_device(cfg)
-    magnitude = float(args.magnitude)
+    angle_deg = float(args.angle_deg)
     pattern = [
         ("center", 0.0, 0.0),
-        ("yaw right", magnitude, 0.0),
+        ("yaw left", angle_deg, 0.0),
         ("center", 0.0, 0.0),
-        ("yaw left", -magnitude, 0.0),
+        ("yaw right", -angle_deg, 0.0),
         ("center", 0.0, 0.0),
-        ("pitch up", 0.0, magnitude),
+        ("pitch up", 0.0, angle_deg),
         ("center", 0.0, 0.0),
-        ("pitch down", 0.0, -magnitude),
+        ("pitch down", 0.0, -angle_deg),
         ("center", 0.0, 0.0),
     ]
 
     print(
         f"Testing OpenNeck direct pattern | port={args.port} dry_run={args.dry_run} "
-        f"magnitude={magnitude:.2f}",
+        f"angle={angle_deg:.2f}deg",
         flush=True,
     )
     try:
         device.connect()
         if cfg.center_on_start:
             device.center()
-        for label, yaw, pitch in pattern:
-            print(f"{label}: yaw={yaw:.3f} pitch={pitch:.3f}", flush=True)
-            device.move_norm(yaw, pitch)
+        for label, yaw_deg, pitch_deg in pattern:
+            print(f"{label}: yaw={yaw_deg:.2f}deg pitch={pitch_deg:.2f}deg", flush=True)
+            device.move_deg(yaw_deg, pitch_deg)
             time.sleep(float(args.hold_s))
     except KeyboardInterrupt:
         print("Interrupted; shutting down OpenNeck", flush=True)
@@ -147,7 +139,7 @@ def run_direct(args: argparse.Namespace) -> None:
             if cfg.center_on_shutdown:
                 device.center()
             if cfg.release_on_shutdown:
-                device.release()
+                device.release_torque()
         finally:
             device.close()
 

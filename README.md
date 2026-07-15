@@ -107,8 +107,8 @@ to its HDF5/video files and stores its editable task prompt. HDF5 contains only
 frame-aligned arrays: `observation.state(68)`, scalar `observation.mode`, and
 `action(36)` as the aligned reference qpos consumed by the motion tracker.
 `action.hand(12)` is present exactly when LinkerHand control is enabled, and
-`action.neck(2)` contains the latest normalized OpenNeck yaw/pitch command exactly
-when OpenNeck control is enabled.
+`action.neck(2)` contains the latest mechanically clamped OpenNeck
+`[yaw_deg, pitch_deg]` target when OpenNeck control is enabled.
 Recording is non-critical: an incompatible output schema stops only the
 recording worker while G1 control continues. Episodes interrupted before their
 manifest entry is committed are discarded on the next recording startup.
@@ -130,7 +130,15 @@ python scripts/run/run_sim2real.py --config-name pico4_sim2real \
 existing Teleopit Pico receiver and does not start another `PicoBridge` or
 camera pipeline. It maps the absolute `Head` orientation relative to `Spine3`
 with a fixed neutral pose and no neck-side EMA, so tracking startup does not
-require the operator to face straight ahead.
+require the operator to face straight ahead. Teleopit sends physical yaw/pitch
+angles through the OpenNeck 0.2.0 `move_deg()` API; OpenNeck converts those
+angles for its direct-drive servos and clips them to the calibrated mechanical
+step limits. Positive yaw turns left and positive pitch looks up.
+
+OpenNeck 0.2.0 uses an angle-based calibration file and rejects the previous
+normalized configuration fields. Re-run `openneck calibrate` before enabling
+the neck worker, and set `neck.config_path` when the calibration file is not in
+the runtime working directory.
 
 ## Documentation
 

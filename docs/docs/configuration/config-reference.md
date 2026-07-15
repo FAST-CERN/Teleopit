@@ -164,20 +164,29 @@ sim2real worker and does not change the policy observation. Head motion is
 mapped as the absolute `Head` orientation relative to `Spine3`, using the fixed
 PICO neutral orientation and no neck-side EMA; startup does not capture the
 operator's first pose as a new zero pose, so the operator does not need to face
-straight when tracking starts.
+straight when tracking starts. Teleopit converts the supported PICO convention
+to OpenNeck's physical convention—positive yaw turns left and positive pitch
+looks up—and sends the relative angles in degrees through OpenNeck 0.2.0
+`move_deg()`. OpenNeck performs the direct-drive degree-to-step conversion and
+clips each target to the mechanical step limits in its calibration file.
+
+OpenNeck 0.2.0 calibration files use angle-control fields such as
+`yaw_center_step`, `yaw_min_step`, `yaw_max_step`, and `yaw_step_sign` (and the
+corresponding pitch fields). The previous normalized OpenNeck configuration is
+unsupported; run `openneck calibrate` to create a current file. Teleopit's
+removed `neck.yaw_range_deg`, `neck.pitch_range_deg`, and `neck.invert_*` keys
+are rejected rather than ignored.
 
 | Field | Description | Default |
 |-------|-------------|---------|
 | `neck.enabled` | Enable optional OpenNeck worker | `false` |
 | `neck.driver` | Neck driver plugin; currently `openneck` | `openneck` |
-| `neck.config_path` | Optional OpenNeck calibration config path | `null` |
+| `neck.config_path` | Optional OpenNeck 0.2.0 angle-calibration config path | `null` |
 | `neck.port` | Optional serial port override, for example `/dev/ttyACM0` | `null` |
 | `neck.rate_hz` | Maximum neck command rate in Hz | `60.0` |
 | `neck.frame_timeout_s` | Pico body-frame staleness threshold | `0.2` |
 | `neck.active_modes` | Sim2real modes that allow neck motion | `[standing, mocap, arms, pause]` |
 | `neck.dead_zone_deg` | Yaw/pitch dead zone in degrees | `0.5` |
-| `neck.yaw_range_deg` / `pitch_range_deg` | Degrees mapped to normalized command magnitude `1.0` | `90.0` / `60.0` |
-| `neck.invert_yaw` / `invert_pitch` | Invert OpenNeck command direction per axis | `true` / `true` |
 | `neck.center_on_start` / `center_on_shutdown` | Center the gimbal at worker startup/shutdown | `true` / `false` |
 | `neck.release_on_shutdown` | Release servo torque after shutdown when supported | `false` |
 | `neck.dry_run` | Compute commands without opening OpenNeck hardware | `false` |
@@ -267,8 +276,10 @@ high-level reference consumed by the motion tracker, not the tracker policy's
 raw output or the final joint targets sent to G1.
 `action.hand` is the latest LinkerHand command from the hand worker:
 `left_pose(6) + right_pose(6)`, using the SDK's 0-255 pose values.
-`action.neck` is the latest command successfully sent to OpenNeck by the neck
-worker: normalized `[yaw, pitch]`, each in `[-1, 1]`.
+`action.neck` is the latest mechanically clamped target returned by OpenNeck
+after a successful command: `[yaw_deg, pitch_deg]` in degrees. Positive yaw
+turns left and positive pitch looks up. The reachable range comes from the
+OpenNeck calibration file and is therefore not fixed in the recording schema.
 
 ## Critical: `default_dof_pos`
 

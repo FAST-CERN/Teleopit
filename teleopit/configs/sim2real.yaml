@@ -116,10 +116,6 @@ neck:
   frame_timeout_s: 0.2
   active_modes: [standing, mocap, arms, pause]
   dead_zone_deg: 0.5
-  yaw_range_deg: 90.0
-  pitch_range_deg: 60.0
-  invert_yaw: true
-  invert_pitch: true
   center_on_start: true
   center_on_shutdown: false
   release_on_shutdown: false

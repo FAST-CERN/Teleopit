@@ -8,14 +8,31 @@ from teleopit.sim2real.neck.config import NeckConfig
 logger = logging.getLogger(__name__)
 
 
+def _load_openneck_controller() -> type:
+    try:
+        from openneck import OpenNeckController
+    except ModuleNotFoundError as exc:
+        raise ImportError(
+            "OpenNeck 0.2.0 is required for neck.driver=openneck. "
+            "Install with: pip install -e '.[openneck]'"
+        ) from exc
+    if not callable(getattr(OpenNeckController, "move_deg", None)):
+        raise ImportError(
+            "OpenNeck 0.2.0 angle API is required; reinstall with: "
+            "pip install --force-reinstall --no-deps "
+            "'openneck @ git+https://github.com/BotRunner64/OpenNeck.git'"
+        )
+    return OpenNeckController
+
+
 class NeckDevice(Protocol):
     def connect(self) -> None: ...
 
     def center(self) -> None: ...
 
-    def release(self) -> None: ...
+    def release_torque(self) -> None: ...
 
-    def move_norm(self, yaw: float, pitch: float) -> None: ...
+    def move_deg(self, yaw_deg: float, pitch_deg: float) -> tuple[float, float]: ...
 
     def close(self) -> None: ...
 
@@ -23,98 +40,79 @@ class NeckDevice(Protocol):
 class OpenNeckDevice:
     def __init__(self, config: NeckConfig) -> None:
         self._cfg = config
-        self._context = None
         self._controller = None
 
     def connect(self) -> None:
-        try:
-            from openneck import OpenNeckController
-        except ModuleNotFoundError as exc:
-            raise ImportError(
-                "openneck is required for neck.driver=openneck. "
-                "Install with: pip install -e '.[openneck]'"
-            ) from exc
+        OpenNeckController = _load_openneck_controller()
         controller = OpenNeckController(
             config=self._cfg.config_path,
             port=self._cfg.port,
-            enable_torque_on_connect=True,
         )
-        entered = controller.__enter__()
-        self._context = controller
-        self._controller = controller if entered is None else entered
+        controller.connect()
+        self._controller = controller
         logger.info("OpenNeck connected on port %s", getattr(self._controller, "port", self._cfg.port))
 
     def center(self) -> None:
         if self._controller is not None:
-            self._controller.center(wait_s=0.5)
+            self._controller.center()
 
-    def move_norm(self, yaw: float, pitch: float) -> None:
-        if self._controller is not None:
-            self._controller.move_norm(float(yaw), float(pitch))
-
-    def release(self) -> None:
+    def move_deg(self, yaw_deg: float, pitch_deg: float) -> tuple[float, float]:
         if self._controller is None:
-            return
-        release = getattr(self._controller, "release", None)
-        if callable(release):
-            release()
-            return
-        disable_torque = getattr(self._controller, "disable_torque", None)
-        if callable(disable_torque):
-            disable_torque()
+            raise RuntimeError("OpenNeck is not connected")
+        applied = self._controller.move_deg(float(yaw_deg), float(pitch_deg))
+        return float(applied.yaw_deg), float(applied.pitch_deg)
+
+    def release_torque(self) -> None:
+        if self._controller is not None:
+            self._controller.release_torque()
 
     def close(self) -> None:
-        context = self._context
         controller = self._controller
-        self._context = None
         self._controller = None
-        close_error: BaseException | None = None
-        if context is not None:
-            exit_context = getattr(context, "__exit__", None)
-            if callable(exit_context):
-                try:
-                    exit_context(None, None, None)
-                    return
-                except BaseException as exc:
-                    close_error = exc
-                    logger.exception("OpenNeck context exit failed; trying direct close")
-        close_targets = [target for target in (controller, context) if target is not None]
-        seen_target_ids: set[int] = set()
-        direct_close_error: BaseException | None = None
-        for target in close_targets:
-            target_id = id(target)
-            if target_id in seen_target_ids:
-                continue
-            seen_target_ids.add(target_id)
-            close = getattr(target, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except BaseException as exc:
-                    direct_close_error = exc
-                    logger.exception("OpenNeck direct close failed")
-        if close_error is not None:
-            if direct_close_error is not None:
-                raise close_error from direct_close_error
-            raise close_error
-        if direct_close_error is not None:
-            raise direct_close_error
+        if controller is not None:
+            controller.close()
 
 
 class DryRunNeckDevice:
+    def __init__(self, config: NeckConfig) -> None:
+        self._cfg = config
+        self._controller = None
+
     def connect(self) -> None:
+        OpenNeckController = _load_openneck_controller()
+        self._controller = OpenNeckController(
+            config=self._cfg.config_path,
+            port=self._cfg.port,
+        )
         logger.info("OpenNeck dry-run device active")
 
     def center(self) -> None:
         logger.info("OpenNeck dry-run center")
 
-    def move_norm(self, yaw: float, pitch: float) -> None:
-        logger.debug("OpenNeck dry-run command yaw=%.3f pitch=%.3f", yaw, pitch)
+    def move_deg(self, yaw_deg: float, pitch_deg: float) -> tuple[float, float]:
+        controller = self._controller
+        if controller is None:
+            raise RuntimeError("OpenNeck dry-run device is not connected")
+        # Reuse OpenNeck's calibration conversion without writing to
+        # its servo driver, so dry-run reports the same clamped target.
+        yaw_step = controller._angle_to_step("yaw", float(yaw_deg))
+        pitch_step = controller._angle_to_step("pitch", float(pitch_deg))
+        applied_yaw_deg = float(controller._step_to_angle("yaw", yaw_step))
+        applied_pitch_deg = float(controller._step_to_angle("pitch", pitch_step))
+        logger.debug(
+            "OpenNeck dry-run command yaw=%.3fdeg pitch=%.3fdeg applied_yaw=%.3fdeg applied_pitch=%.3fdeg",
+            yaw_deg,
+            pitch_deg,
+            applied_yaw_deg,
+            applied_pitch_deg,
+        )
+        return applied_yaw_deg, applied_pitch_deg
 
-    def release(self) -> None:
+    def release_torque(self) -> None:
         logger.info("OpenNeck dry-run release")
 
     def close(self) -> None:
+        self._controller = None
         logger.info("OpenNeck dry-run closed")
 
 
@@ -122,5 +120,5 @@ def build_neck_device(config: NeckConfig) -> NeckDevice:
     if config.driver != "openneck":
         raise ValueError("Unsupported neck.driver={!r}; supported drivers: openneck".format(config.driver))
     if config.dry_run:
-        return DryRunNeckDevice()
+        return DryRunNeckDevice(config)
     return OpenNeckDevice(config)

@@ -501,9 +501,9 @@ def test_hdf5_recording_schema() -> None:
     assert features[ACTION_KEY]["groups"]["reference_joint_pos"] == [7, 36]
     assert features[HAND_ACTION_KEY]["groups"]["left_hand_target"] == [0, 6]
     assert features[HAND_ACTION_KEY]["groups"]["right_hand_target"] == [6, 12]
-    assert features[NECK_ACTION_KEY]["names"] == ["yaw", "pitch"]
-    assert features[NECK_ACTION_KEY]["units"] == "normalized"
-    assert features[NECK_ACTION_KEY]["range"] == [-1.0, 1.0]
+    assert features[NECK_ACTION_KEY]["names"] == ["yaw_deg", "pitch_deg"]
+    assert features[NECK_ACTION_KEY]["units"] == "degrees"
+    assert "range" not in features[NECK_ACTION_KEY]
     assert len(features[STATE_KEY]["names"]) == 68
     assert len(features[ACTION_KEY]["names"]) == 36
     assert len(features[HAND_ACTION_KEY]["names"]) == 12
@@ -560,7 +560,7 @@ def test_hdf5_recorder_mp4_sidecar_writes_sync_metadata(tmp_path: Path) -> None:
             mode=build_mode_observation("mocap"),
             action=np.arange(36, dtype=np.float32),
             hand_action=np.arange(12, dtype=np.float32),
-            neck_action=np.array([0.25, -0.5], dtype=np.float32),
+            neck_action=np.array([12.5, -8.0], dtype=np.float32),
         )
     recorder.save_episode()
     recorder.finalize()
@@ -600,7 +600,7 @@ def test_hdf5_recorder_mp4_sidecar_writes_sync_metadata(tmp_path: Path) -> None:
         assert h5[NECK_ACTION_KEY].shape == (2, 2)
         np.testing.assert_allclose(
             h5[NECK_ACTION_KEY][...],
-            np.array([[0.25, -0.5], [0.25, -0.5]], dtype=np.float32),
+            np.array([[12.5, -8.0], [12.5, -8.0]], dtype=np.float32),
         )
 
 
@@ -1433,8 +1433,8 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             timestamp_s=2.06,
             driver="openneck",
             active=True,
-            yaw=0.25,
-            pitch=-0.5,
+            yaw_deg=12.5,
+            pitch_deg=-8.0,
             seq=1,
         )
         desc = writer.write(np.full((2, 2, 3), 5, dtype=np.uint8), timestamp_s=2.1)
@@ -1447,7 +1447,7 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
         assert int(frames[0]["mode"]) == int(build_mode_observation("standing"))
         np.testing.assert_allclose(frames[0]["action"], np.arange(36, dtype=np.float32))
         np.testing.assert_allclose(frames[0]["hand_action"], np.arange(12, dtype=np.float32))
-        np.testing.assert_allclose(frames[0]["neck_action"], np.array([0.25, -0.5], dtype=np.float32))
+        np.testing.assert_allclose(frames[0]["neck_action"], np.array([12.5, -8.0], dtype=np.float32))
 
         worker._latest_record = RecordStepPacket(
             timestamp_s=3.0,

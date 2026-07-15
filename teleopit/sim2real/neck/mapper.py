@@ -17,15 +17,13 @@ _PICO_BODY_REFERENCE_JOINT = "Spine3"
 
 @dataclass(frozen=True)
 class NeckCommand:
-    yaw: float
-    pitch: float
     yaw_deg: float
     pitch_deg: float
     roll_deg: float
 
 
 class HeadPoseMapper:
-    """Map Teleopit Pico body frames to normalized active-neck yaw/pitch commands."""
+    """Map Teleopit Pico body frames to OpenNeck yaw/pitch angles."""
 
     def __init__(self, config: NeckConfig) -> None:
         self._cfg = config
@@ -41,20 +39,16 @@ class HeadPoseMapper:
         # PICO convention, so their relative identity is the fixed zero pose.
         q_cmd = _qmul(_qconj(q_body), q_head)
         yaw_deg, pitch_deg, roll_deg = _openneck_yaw_pitch_roll_deg(q_cmd)
-        if self._cfg.invert_yaw:
-            yaw_deg = -yaw_deg
-        if self._cfg.invert_pitch:
-            pitch_deg = -pitch_deg
+        # Convert the supported PICO convention to OpenNeck's physical command
+        # convention: positive yaw turns left and positive pitch looks up.
+        yaw_deg = -yaw_deg
+        pitch_deg = -pitch_deg
         if abs(yaw_deg) < self._cfg.dead_zone_deg:
             yaw_deg = 0.0
         if abs(pitch_deg) < self._cfg.dead_zone_deg:
             pitch_deg = 0.0
 
-        yaw = yaw_deg / self._cfg.yaw_range_deg
-        pitch = pitch_deg / self._cfg.pitch_range_deg
         return NeckCommand(
-            yaw=float(np.clip(yaw, -1.0, 1.0)),
-            pitch=float(np.clip(pitch, -1.0, 1.0)),
             yaw_deg=float(yaw_deg),
             pitch_deg=float(pitch_deg),
             roll_deg=float(roll_deg),

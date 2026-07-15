@@ -52,7 +52,7 @@ from teleopit.recording.hdf5 import (
     build_recording_schema,
     normalize_action_reference_qpos,
     normalize_hand_action,
-    normalize_neck_action,
+    build_neck_action,
 )
 from teleopit.sim.reference_motion import OfflineReferenceMotion
 from teleopit.sim.reference_timeline import ReferenceTimeline, ReferenceWindow, ReferenceWindowBuilder
@@ -1892,8 +1892,8 @@ class _RecordingWorker:
             timestamp_s=0.0,
             driver=str(cfg_get(cfg_get(cfg, "neck", {}) or {}, "driver", "openneck")).strip().lower(),
             active=False,
-            yaw=0.0,
-            pitch=0.0,
+            yaw_deg=0.0,
+            pitch_deg=0.0,
             seq=0,
         )
         self._latest_video_seq = -1
@@ -2047,9 +2047,9 @@ class _RecordingWorker:
             else None
         )
         neck_action = (
-            normalize_neck_action(
-                self._latest_neck_command.yaw,
-                self._latest_neck_command.pitch,
+            build_neck_action(
+                self._latest_neck_command.yaw_deg,
+                self._latest_neck_command.pitch_deg,
             )
             if self._schema.has_neck_action
             else None
@@ -2103,7 +2103,13 @@ def _run_neck_worker(
         sleep_s = 1.0 / max(float(neck_cfg.rate_hz), 1.0)
         last_status_s = 0.0
 
-        def _publish_neck_command(*, timestamp_s: float, active: bool, yaw: float, pitch: float) -> None:
+        def _publish_neck_command(
+            *,
+            timestamp_s: float,
+            active: bool,
+            yaw_deg: float,
+            pitch_deg: float,
+        ) -> None:
             nonlocal command_seq
             if neck_command_pub is None:
                 return
@@ -2114,8 +2120,8 @@ def _run_neck_worker(
                     timestamp_s=float(timestamp_s),
                     driver=neck_cfg.driver,
                     active=bool(active),
-                    yaw=float(yaw),
-                    pitch=float(pitch),
+                    yaw_deg=float(yaw_deg),
+                    pitch_deg=float(pitch_deg),
                     seq=command_seq,
                 ),
             )
@@ -2123,7 +2129,12 @@ def _run_neck_worker(
         try:
             runtime.start()
             if neck_cfg.center_on_start:
-                _publish_neck_command(timestamp_s=time.monotonic(), active=False, yaw=0.0, pitch=0.0)
+                _publish_neck_command(
+                    timestamp_s=time.monotonic(),
+                    active=False,
+                    yaw_deg=0.0,
+                    pitch_deg=0.0,
+                )
             while not stop_event.is_set():
                 runtime_command = command_sub.recv_latest()
                 if isinstance(runtime_command, CommandPacket) and runtime_command.command == "shutdown":
@@ -2152,8 +2163,8 @@ def _run_neck_worker(
                         _publish_neck_command(
                             timestamp_s=now_s,
                             active=active,
-                            yaw=neck_command.yaw,
-                            pitch=neck_command.pitch,
+                            yaw_deg=neck_command.yaw_deg,
+                            pitch_deg=neck_command.pitch_deg,
                         )
                 except Exception:
                     logger.exception("OpenNeck worker tick failed; neck control continues")
