@@ -83,6 +83,16 @@ class HandCommandPacket:
 
 
 @dataclass(frozen=True)
+class NeckCommandPacket:
+    timestamp_s: float
+    driver: str
+    active: bool
+    yaw: float
+    pitch: float
+    seq: int
+
+
+@dataclass(frozen=True)
 class HealthPacket:
     worker: str
     timestamp_s: float

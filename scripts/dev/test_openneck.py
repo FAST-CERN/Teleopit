@@ -181,12 +181,13 @@ def run_pico(args: argparse.Namespace) -> None:
             if provider.has_frame():
                 frame, timestamp_s, seq = provider.get_frame_packet()
                 if int(seq) != last_seq:
-                    moved = runtime.tick(
+                    command = runtime.tick(
                         frame=frame,
                         frame_timestamp_s=timestamp_s,
                         active=True,
                         now_s=now_s,
                     )
+                    moved = command is not None
                     if moved:
                         command_count += 1
                     last_seq = int(seq)

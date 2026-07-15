@@ -221,9 +221,12 @@ recording.output_dir/
         └── episode_000000.mp4
 ```
 
-`schema.json` contains the FPS, `robot_type`, `hand_type`, and feature
-definitions. `robot_type` comes from `robot.type`; `hand_type` is `none` when
-hands are disabled, otherwise it is the configured `hands.driver`.
+`schema.json` contains the FPS, `robot_type`, `hand_type`, `neck_type`, and
+feature definitions. `robot_type` comes from `robot.type`; `hand_type` is `none`
+when hands are disabled, otherwise it is the configured `hands.driver`.
+`neck_type` is `none` when active-neck control is disabled, otherwise it is the
+configured `neck.driver`. These enabled flags directly control whether their
+action fields are recorded; there are no separate recording switches.
 `episodes.jsonl` contains one object per saved episode with `episode_index`,
 `frames`, editable `task`, HDF5 path, and video paths. Task prompts can therefore
 be relabeled without rewriting HDF5 or MP4 data. Starting another recording run
@@ -247,6 +250,7 @@ observation.state              float32[N, 68]
 observation.mode               int8[N]
 action                         float32[N, 36]
 action.hand                    float32[N, 12]  # only when hands are enabled
+action.neck                    float32[N, 2]   # only when OpenNeck is enabled
 ```
 
 HDF5 files contain only these frame arrays and have no recording metadata root
@@ -262,6 +266,8 @@ high-level reference consumed by the motion tracker, not the tracker policy's
 raw output or the final joint targets sent to G1.
 `action.hand` is the latest LinkerHand command from the hand worker:
 `left_pose(6) + right_pose(6)`, using the SDK's 0-255 pose values.
+`action.neck` is the latest command successfully sent to OpenNeck by the neck
+worker: normalized `[yaw, pitch]`, each in `[-1, 1]`.
 
 ## Critical: `default_dof_pos`
 

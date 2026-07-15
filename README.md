@@ -101,12 +101,14 @@ python scripts/run/run_sim2real.py --config-name sim2real_record \
 Recording uses the terminal controls `R` start, `S` save, `D` discard, and `Q`
 shutdown. `STANDING`, `MOCAP`, `ARMS`, and paused mocap can be recorded. Saved
 episodes are written under `data/recordings/sim2real_hdf5/data/`, with compressed
-MP4 files under `videos/d435i_rgb/`. `schema.json` records the FPS, robot and
-hand types, feature shapes, names, and groups. `episodes.jsonl` maps each episode
+MP4 files under `videos/d435i_rgb/`. `schema.json` records the FPS, robot, hand,
+and neck types, plus feature shapes, names, and groups. `episodes.jsonl` maps each episode
 to its HDF5/video files and stores its editable task prompt. HDF5 contains only
 frame-aligned arrays: `observation.state(68)`, scalar `observation.mode`, and
 `action(36)` as the aligned reference qpos consumed by the motion tracker.
-`action.hand(12)` is present when LinkerHand control is enabled.
+`action.hand(12)` is present exactly when LinkerHand control is enabled, and
+`action.neck(2)` contains the latest normalized OpenNeck yaw/pitch command exactly
+when OpenNeck control is enabled.
 Recording is non-critical: an incompatible output schema stops only the
 recording worker while G1 control continues. Episodes interrupted before their
 manifest entry is committed are discarded on the next recording startup.

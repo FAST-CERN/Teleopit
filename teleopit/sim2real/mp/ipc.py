@@ -13,6 +13,7 @@ import zmq
 BODY_TOPIC = "body"
 HAND_TOPIC = "hand"
 HAND_COMMAND_TOPIC = "hand_command"
+NECK_COMMAND_TOPIC = "neck_command"
 CONTROLLER_TOPIC = "controller"
 CONTROL_EVENTS_TOPIC = "control_events"
 REFERENCE_TOPIC = "reference"
@@ -28,6 +29,7 @@ class Sim2RealIpcEndpoints:
     body_pub: str
     hand_pub: str
     hand_command_pub: str
+    neck_command_pub: str
     controller_pub: str
     control_events_pub: str
     reference_pub: str
@@ -46,6 +48,7 @@ def default_endpoints(*, host: str = "127.0.0.1", base_port: int = 39700) -> Sim
         body_pub=f"{prefix}{base_port}",
         hand_pub=f"{prefix}{base_port + 1}",
         hand_command_pub=f"{prefix}{base_port + 2}",
+        neck_command_pub=f"{prefix}{base_port + 12}",
         controller_pub=f"{prefix}{base_port + 3}",
         control_events_pub=f"{prefix}{base_port + 4}",
         reference_pub=f"{prefix}{base_port + 5}",

@@ -236,9 +236,11 @@ recording.output_dir/
         └── episode_000000.mp4
 ```
 
-`schema.json` 保存 FPS、`robot_type`、`hand_type` 和 feature 定义。
+`schema.json` 保存 FPS、`robot_type`、`hand_type`、`neck_type` 和 feature 定义。
 `robot_type` 来自 `robot.type`；未启用灵巧手时 `hand_type` 为 `none`，否则为
-配置的 `hands.driver`。`episodes.jsonl` 每行对应一个已保存的 episode，包含
+配置的 `hands.driver`。未启用主动视觉颈部控制时 `neck_type` 为 `none`，否则为
+配置的 `neck.driver`。这些 enabled 标志直接决定是否录制对应的 action 字段；没有
+单独的录制开关。`episodes.jsonl` 每行对应一个已保存的 episode，包含
 `episode_index`、`frames`、可编辑的 `task`、HDF5 路径和视频路径。因此修改任务
 prompt 不需要重写 HDF5 或 MP4。使用相同 schema 再次启动录制时，会从下一个
 episode index 继续追加，并且可以使用不同的 `recording.task`。
@@ -258,6 +260,7 @@ observation.state              float32[N, 68]
 observation.mode               int8[N]
 action                         float32[N, 36]
 action.hand                    float32[N, 12]  # 仅启用灵巧手时存在
+action.neck                    float32[N, 2]   # 仅启用 OpenNeck 时存在
 ```
 
 HDF5 文件仅包含上述逐帧数组，不保存录制元数据根属性。RGB 帧保存在 MP4 中，
@@ -271,3 +274,5 @@ HDF5 文件仅包含上述逐帧数组，不保存录制元数据根属性。RGB
 消费的高层参考，不是 tracker policy 的原始输出，也不是最终下发给 G1 的关节目标。
 `action.hand` 是手部 worker 最新的 LinkerHand 命令：
 `left_pose(6) + right_pose(6)`，使用 SDK 的 0-255 pose 数值。
+`action.neck` 是颈部 worker 最近一次成功发送给 OpenNeck 的命令：归一化的
+`[yaw, pitch]`，两个值的范围均为 `[-1, 1]`。

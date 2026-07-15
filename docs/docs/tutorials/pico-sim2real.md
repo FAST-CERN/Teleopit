@@ -118,11 +118,13 @@ shutdown. `STANDING`, `MOCAP`, `ARMS`, and paused mocap can be recorded;
 saved episodes cannot be discarded afterward. Episodes are saved as `.h5` files
 under `data/recordings/sim2real_hdf5/data/`, with compressed MP4 files under
 `data/recordings/sim2real_hdf5/videos/d435i_rgb/`. The dataset-level
-`schema.json` records robot/hand types and feature definitions, while
+`schema.json` records robot/hand/neck types and feature definitions, while
 `episodes.jsonl` stores file mappings and the editable task prompt for every
 episode. HDF5 stores `frame_index`, `timestamp`, `observation.state(68)`, scalar
 `observation.mode`, and the 36D motion-tracker reference `action` at 30 Hz.
-When hand control is enabled, it also stores `action.hand(12)`.
+When hand control is enabled, it also stores `action.hand(12)`. When OpenNeck
+control is enabled, it stores the latest normalized yaw/pitch command as
+`action.neck(2)`. Disabled devices do not add their action fields.
 
 ## Operator Flow
 

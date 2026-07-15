@@ -6,7 +6,7 @@ from typing import Any
 
 from teleopit.inputs.realtime_packet import HumanFrame
 from teleopit.sim2real.neck.config import NeckConfig, parse_neck_config
-from teleopit.sim2real.neck.mapper import HeadPoseMapper
+from teleopit.sim2real.neck.mapper import HeadPoseMapper, NeckCommand
 from teleopit.sim2real.neck.openneck import NeckDevice, build_neck_device
 
 logger = logging.getLogger(__name__)
@@ -31,20 +31,20 @@ class NeckRuntime:
         frame_timestamp_s: float | None,
         active: bool,
         now_s: float | None = None,
-    ) -> bool:
+    ) -> NeckCommand | None:
         now = time.monotonic() if now_s is None else float(now_s)
         if active and not self._active:
             self._mapper.reset()
         self._active = bool(active)
         if not self._active or frame is None or frame_timestamp_s is None:
-            return False
+            return None
         if now - float(frame_timestamp_s) > self._cfg.frame_timeout_s:
-            return False
+            return None
         command = self._mapper.map_frame(frame)
         if command is None:
-            return False
+            return None
         self._device.move_norm(command.yaw, command.pitch)
-        return True
+        return command
 
     def close(self) -> None:
         try:
@@ -73,9 +73,9 @@ class DisabledNeckRuntime:
         frame_timestamp_s: float | None,
         active: bool,
         now_s: float | None = None,
-    ) -> bool:
+    ) -> None:
         del frame, frame_timestamp_s, active, now_s
-        return False
+        return None
 
     def close(self) -> None:
         return None

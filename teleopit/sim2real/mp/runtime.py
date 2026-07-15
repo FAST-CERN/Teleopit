@@ -45,12 +45,14 @@ from teleopit.runtime.terminal_keyboard import TerminalKeyboardReader
 from teleopit.recording.hdf5 import (
     DEFAULT_ROBOT_TYPE,
     NO_HAND_TYPE,
+    NO_NECK_TYPE,
     build_mode_observation,
     build_mp4_video_config,
     build_observation_state,
     build_recording_schema,
-    normalize_hand_action,
     normalize_action_reference_qpos,
+    normalize_hand_action,
+    normalize_neck_action,
 )
 from teleopit.sim.reference_motion import OfflineReferenceMotion
 from teleopit.sim.reference_timeline import ReferenceTimeline, ReferenceWindow, ReferenceWindowBuilder
@@ -76,6 +78,7 @@ from teleopit.sim2real.mp.ipc import (
     HAND_TOPIC,
     HEALTH_TOPIC,
     MODE_TOPIC,
+    NECK_COMMAND_TOPIC,
     RECORD_TOPIC,
     REFERENCE_TOPIC,
     VIDEO_TOPIC,
@@ -91,6 +94,7 @@ from teleopit.sim2real.mp.messages import (
     HandCommandPacket,
     HealthPacket,
     ModeStatePacket,
+    NeckCommandPacket,
     ReferencePacket,
     RecordStepPacket,
     SnapshotPacket,
@@ -286,7 +290,7 @@ def _recording_camera_cfg(cfg: Any) -> Any:
     return cfg_get(_recording_cfg(cfg), "camera", {}) or {}
 
 
-def _recording_robot_and_hand_types(cfg: Any) -> tuple[str, str]:
+def _recording_hardware_types(cfg: Any) -> tuple[str, str, str]:
     robot_cfg = cfg_get(cfg, "robot", {}) or {}
     robot_type = str(cfg_get(robot_cfg, "type", DEFAULT_ROBOT_TYPE)).strip().lower()
     hands_cfg = cfg_get(cfg, "hands", {}) or {}
@@ -295,7 +299,13 @@ def _recording_robot_and_hand_types(cfg: Any) -> tuple[str, str]:
         if bool(cfg_get(hands_cfg, "enabled", False))
         else NO_HAND_TYPE
     )
-    return robot_type, hand_type
+    neck_cfg = cfg_get(cfg, "neck", {}) or {}
+    neck_type = (
+        str(cfg_get(neck_cfg, "driver", "openneck")).strip().lower()
+        if bool(cfg_get(neck_cfg, "enabled", False))
+        else NO_NECK_TYPE
+    )
+    return robot_type, hand_type, neck_type
 
 
 def _configured_open_hand_pose(cfg: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -353,12 +363,13 @@ def _validate_new_runtime_config(cfg: Any) -> None:
             raise ValueError("recording.camera.source must be realsense")
         if int(cfg_get(rec_cfg, "fps", 30)) != int(cfg_get(camera_cfg, "fps", 30)):
             raise ValueError("recording.fps must match recording.camera.fps")
-        robot_type, hand_type = _recording_robot_and_hand_types(cfg)
+        robot_type, hand_type, neck_type = _recording_hardware_types(cfg)
         build_recording_schema(
             camera_cfg,
             fps=int(cfg_get(rec_cfg, "fps", 30)),
             robot_type=robot_type,
             hand_type=hand_type,
+            neck_type=neck_type,
         )
         input_video = parse_pico_video_config(cfg_get(cfg, "input", {}) or {})
         if not input_video.enabled:
@@ -1863,6 +1874,7 @@ class _RecordingWorker:
         self._record_sub = LatestSubscriber(endpoints.record_pub, RECORD_TOPIC)
         self._video_sub = LatestSubscriber(endpoints.video_pub, VIDEO_TOPIC)
         self._hand_command_sub = LatestSubscriber(endpoints.hand_command_pub, HAND_COMMAND_TOPIC)
+        self._neck_command_sub = LatestSubscriber(endpoints.neck_command_pub, NECK_COMMAND_TOPIC)
         self._command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
         self._frame_reader = frame_reader or SharedFrameRingReader()
         self._latest_record: RecordStepPacket | None = None
@@ -1876,6 +1888,14 @@ class _RecordingWorker:
             right_pose=right_open.astype(np.float32, copy=True),
             seq=0,
         )
+        self._latest_neck_command = NeckCommandPacket(
+            timestamp_s=0.0,
+            driver=str(cfg_get(cfg_get(cfg, "neck", {}) or {}, "driver", "openneck")).strip().lower(),
+            active=False,
+            yaw=0.0,
+            pitch=0.0,
+            seq=0,
+        )
         self._latest_video_seq = -1
         self._active = False
         self._episode_started_s = 0.0
@@ -1883,12 +1903,13 @@ class _RecordingWorker:
 
         from teleopit.recording.hdf5 import TeleopitHDF5Recorder
 
-        robot_type, hand_type = _recording_robot_and_hand_types(cfg)
+        robot_type, hand_type, neck_type = _recording_hardware_types(cfg)
         self._schema = build_recording_schema(
             self.camera_cfg,
             fps=self.fps,
             robot_type=robot_type,
             hand_type=hand_type,
+            neck_type=neck_type,
         )
         self._video_config = build_mp4_video_config(cfg_get(self.rec_cfg, "video", {}) or {})
         factory = recorder_factory or TeleopitHDF5Recorder.create
@@ -1917,6 +1938,10 @@ class _RecordingWorker:
                 if isinstance(hand_command, HandCommandPacket):
                     self._latest_hand_command = hand_command
 
+                neck_command = self._neck_command_sub.recv_latest()
+                if isinstance(neck_command, NeckCommandPacket):
+                    self._latest_neck_command = neck_command
+
                 video = self._video_sub.recv_latest()
                 if isinstance(video, SharedFrameDescriptor):
                     self._handle_video(video)
@@ -1934,6 +1959,7 @@ class _RecordingWorker:
                 self._record_sub.close()
                 self._video_sub.close()
                 self._hand_command_sub.close()
+                self._neck_command_sub.close()
                 self._command_sub.close()
                 self._frame_reader.close()
 
@@ -2020,13 +2046,24 @@ class _RecordingWorker:
             if self._schema.has_hand_action
             else None
         )
-        self._recorder.add_frame(
-            image=np.asarray(image, dtype=np.uint8),
-            state=np.asarray(record.observation_state, dtype=np.float32),
-            mode=record.observation_mode,
-            action=np.asarray(record.action_reference_qpos, dtype=np.float32),
-            hand_action=hand_action,
+        neck_action = (
+            normalize_neck_action(
+                self._latest_neck_command.yaw,
+                self._latest_neck_command.pitch,
+            )
+            if self._schema.has_neck_action
+            else None
         )
+        frame_kwargs = {
+            "image": np.asarray(image, dtype=np.uint8),
+            "state": np.asarray(record.observation_state, dtype=np.float32),
+            "mode": record.observation_mode,
+            "action": np.asarray(record.action_reference_qpos, dtype=np.float32),
+            "hand_action": hand_action,
+        }
+        if neck_action is not None:
+            frame_kwargs["neck_action"] = neck_action
+        self._recorder.add_frame(**frame_kwargs)
         self._episode_frames += 1
 
 def _run_recording_worker(
@@ -2052,18 +2089,44 @@ def _run_neck_worker(
         body_sub = LatestSubscriber(endpoints.body_pub, BODY_TOPIC)
         mode_sub = LatestSubscriber(endpoints.mode_pub, MODE_TOPIC)
         command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
+        neck_command_pub = (
+            ZmqPublisher(endpoints.neck_command_pub)
+            if _recording_enabled(cfg)
+            else None
+        )
         latest_frame: Any | None = None
         latest_frame_timestamp_s: float | None = None
         latest_body_seq = -1
         latest_mode: ModeStatePacket | None = None
         command_count = 0
+        command_seq = 0
         sleep_s = 1.0 / max(float(neck_cfg.rate_hz), 1.0)
         last_status_s = 0.0
+
+        def _publish_neck_command(*, timestamp_s: float, active: bool, yaw: float, pitch: float) -> None:
+            nonlocal command_seq
+            if neck_command_pub is None:
+                return
+            command_seq += 1
+            neck_command_pub.publish(
+                NECK_COMMAND_TOPIC,
+                NeckCommandPacket(
+                    timestamp_s=float(timestamp_s),
+                    driver=neck_cfg.driver,
+                    active=bool(active),
+                    yaw=float(yaw),
+                    pitch=float(pitch),
+                    seq=command_seq,
+                ),
+            )
+
         try:
             runtime.start()
+            if neck_cfg.center_on_start:
+                _publish_neck_command(timestamp_s=time.monotonic(), active=False, yaw=0.0, pitch=0.0)
             while not stop_event.is_set():
-                command = command_sub.recv_latest()
-                if isinstance(command, CommandPacket) and command.command == "shutdown":
+                runtime_command = command_sub.recv_latest()
+                if isinstance(runtime_command, CommandPacket) and runtime_command.command == "shutdown":
                     stop_event.set()
                     break
                 body_packet = body_sub.recv_latest()
@@ -2076,15 +2139,22 @@ def _run_neck_worker(
                 if isinstance(mode_packet, ModeStatePacket):
                     latest_mode = mode_packet
                 now_s = time.monotonic()
+                active = mode_packet_active(latest_mode, neck_cfg)
                 try:
-                    moved = runtime.tick(
+                    neck_command = runtime.tick(
                         frame=latest_frame,
                         frame_timestamp_s=latest_frame_timestamp_s,
-                        active=mode_packet_active(latest_mode, neck_cfg),
+                        active=active,
                         now_s=now_s,
                     )
-                    if moved:
+                    if neck_command is not None:
                         command_count += 1
+                        _publish_neck_command(
+                            timestamp_s=now_s,
+                            active=active,
+                            yaw=neck_command.yaw,
+                            pitch=neck_command.pitch,
+                        )
                 except Exception:
                     logger.exception("OpenNeck worker tick failed; neck control continues")
                 if now_s - last_status_s >= 5.0:
@@ -2092,7 +2162,7 @@ def _run_neck_worker(
                         "OpenNeck worker status | body_seq=%s commands=%s active=%s",
                         latest_body_seq,
                         command_count,
-                        mode_packet_active(latest_mode, neck_cfg),
+                        active,
                     )
                     last_status_s = now_s
                 time.sleep(sleep_s)
@@ -2103,6 +2173,8 @@ def _run_neck_worker(
                 body_sub.close()
                 mode_sub.close()
                 command_sub.close()
+                if neck_command_pub is not None:
+                    neck_command_pub.close()
 
     _worker_loop("neck_worker", cfg, _main)
 

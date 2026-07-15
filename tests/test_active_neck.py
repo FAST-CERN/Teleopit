@@ -108,10 +108,13 @@ def test_neck_runtime_sends_command_after_calibration() -> None:
 
     runtime.start()
     assert device.center_calls == 1
-    assert not runtime.tick(frame=_frame(_quat_y(0.0)), frame_timestamp_s=1.0, active=True, now_s=1.01)
-    assert runtime.tick(frame=_frame(_quat_y(30.0)), frame_timestamp_s=1.02, active=True, now_s=1.03)
+    assert runtime.tick(frame=_frame(_quat_y(0.0)), frame_timestamp_s=1.0, active=True, now_s=1.01) is None
+    command = runtime.tick(frame=_frame(_quat_y(30.0)), frame_timestamp_s=1.02, active=True, now_s=1.03)
     runtime.close()
 
+    assert command is not None
+    assert command.yaw == pytest_approx(30.0 / 90.0)
+    assert command.pitch == pytest_approx(0.0)
     assert device.moves == [(30.0 / 90.0, 0.0)]
     assert device.center_calls == 2
     assert device.closed is True

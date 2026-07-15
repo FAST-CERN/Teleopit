@@ -28,17 +28,21 @@ STATE_KEY = "observation.state"
 MODE_KEY = "observation.mode"
 ACTION_KEY = "action"
 HAND_ACTION_KEY = "action.hand"
+NECK_ACTION_KEY = "action.neck"
 FRAME_INDEX_KEY = "frame_index"
 TIMESTAMP_KEY = "timestamp"
 STATE_DIM = 68
 ACTION_DIM = FULL_QPOS_DIM
 HAND_ACTION_DIM = 12
+NECK_ACTION_DIM = 2
 DEFAULT_IMAGE_SHAPE = (480, 640, 3)
 HDF5_RECORDING_FORMAT = "teleopit_hdf5"
-HDF5_RECORDING_VERSION = 1
+HDF5_RECORDING_VERSION = 2
 DEFAULT_ROBOT_TYPE = "unitree_g1_29dof"
 NO_HAND_TYPE = "none"
 SUPPORTED_HAND_TYPES = (NO_HAND_TYPE, "linkerhand_l6", "linkerhand_o6")
+NO_NECK_TYPE = "none"
+SUPPORTED_NECK_TYPES = (NO_NECK_TYPE, "openneck")
 MODE_CODES = {
     "standing": 0,
     "mocap": 1,
@@ -56,6 +60,7 @@ class RecordingSchema:
     hand_type: str
     image_key: str
     image_shape: tuple[int, int, int]
+    neck_type: str = NO_NECK_TYPE
     state_key: str = STATE_KEY
     state_dim: int = STATE_DIM
     mode_key: str = MODE_KEY
@@ -63,10 +68,16 @@ class RecordingSchema:
     action_dim: int = ACTION_DIM
     hand_action_key: str = HAND_ACTION_KEY
     hand_action_dim: int = HAND_ACTION_DIM
+    neck_action_key: str = NECK_ACTION_KEY
+    neck_action_dim: int = NECK_ACTION_DIM
 
     @property
     def has_hand_action(self) -> bool:
         return self.hand_type != NO_HAND_TYPE
+
+    @property
+    def has_neck_action(self) -> bool:
+        return self.neck_type != NO_NECK_TYPE
 
 
 @dataclass(frozen=True)
@@ -82,6 +93,7 @@ def build_recording_schema(
     fps: int = 30,
     robot_type: str = DEFAULT_ROBOT_TYPE,
     hand_type: str = NO_HAND_TYPE,
+    neck_type: str = NO_NECK_TYPE,
 ) -> RecordingSchema:
     key = str(cfg_get(camera_cfg, "key", IMAGE_KEY)).strip()
     width = int(cfg_get(camera_cfg, "width", DEFAULT_IMAGE_SHAPE[1]))
@@ -89,6 +101,7 @@ def build_recording_schema(
     parsed_fps = int(fps)
     parsed_robot_type = str(robot_type).strip().lower()
     parsed_hand_type = str(hand_type).strip().lower()
+    parsed_neck_type = str(neck_type).strip().lower()
     if not key:
         raise ValueError("recording.camera.key must not be empty")
     if width <= 0 or height <= 0:
@@ -103,10 +116,15 @@ def build_recording_schema(
         raise ValueError(
             f"Unsupported recording hand_type={parsed_hand_type!r}; expected one of {SUPPORTED_HAND_TYPES}"
         )
+    if parsed_neck_type not in SUPPORTED_NECK_TYPES:
+        raise ValueError(
+            f"Unsupported recording neck_type={parsed_neck_type!r}; expected one of {SUPPORTED_NECK_TYPES}"
+        )
     return RecordingSchema(
         fps=parsed_fps,
         robot_type=parsed_robot_type,
         hand_type=parsed_hand_type,
+        neck_type=parsed_neck_type,
         image_key=key,
         image_shape=(height, width, 3),
     )
@@ -172,6 +190,14 @@ def hdf5_schema(schema: RecordingSchema) -> dict[str, object]:
                 "right_hand_target": [6, 12],
             },
         }
+    if schema.has_neck_action:
+        features[schema.neck_action_key] = {
+            "dtype": "float32",
+            "shape": [schema.neck_action_dim],
+            "names": ["yaw", "pitch"],
+            "units": "normalized",
+            "range": [-1.0, 1.0],
+        }
     features[schema.image_key] = {
         "dtype": "video",
         "shape": list(schema.image_shape),
@@ -183,6 +209,7 @@ def hdf5_schema(schema: RecordingSchema) -> dict[str, object]:
         "fps": schema.fps,
         "robot_type": schema.robot_type,
         "hand_type": schema.hand_type,
+        "neck_type": schema.neck_type,
         "features": features,
     }
 
@@ -228,6 +255,13 @@ def normalize_hand_action(left_pose: object, right_pose: object) -> np.ndarray:
     action = np.concatenate([left, right], dtype=np.float32)
     if action.shape[0] != HAND_ACTION_DIM:
         raise ValueError(f"recording action.hand must be {HAND_ACTION_DIM}D, got {action.shape[0]}")
+    return action
+
+
+def normalize_neck_action(yaw: object, pitch: object) -> np.ndarray:
+    action = np.asarray([yaw, pitch], dtype=np.float32).reshape(-1)
+    if action.shape[0] != NECK_ACTION_DIM:
+        raise ValueError(f"recording action.neck must be {NECK_ACTION_DIM}D, got {action.shape[0]}")
     return action
 
 
@@ -332,6 +366,7 @@ class TeleopitHDF5Recorder:
         mode: object,
         action: np.ndarray,
         hand_action: np.ndarray | None = None,
+        neck_action: np.ndarray | None = None,
     ) -> None:
         if not self._active or self._h5 is None:
             raise RuntimeError("Cannot add a recording frame without an active episode")
@@ -352,6 +387,17 @@ class TeleopitHDF5Recorder:
             )
         elif hand_action is not None:
             raise ValueError(f"{self._schema.hand_action_key} must be omitted for hand_type={NO_HAND_TYPE}")
+        neck_action_arr: np.ndarray | None = None
+        if self._schema.has_neck_action:
+            if neck_action is None:
+                raise ValueError(f"{self._schema.neck_action_key} is required for neck_type={self._schema.neck_type}")
+            neck_action_arr = self._validate_vector(
+                neck_action,
+                self._schema.neck_action_key,
+                self._schema.neck_action_dim,
+            )
+        elif neck_action is not None:
+            raise ValueError(f"{self._schema.neck_action_key} must be omitted for neck_type={NO_NECK_TYPE}")
 
         row = self._frames_in_episode
         for dataset in self._datasets.values():
@@ -366,6 +412,8 @@ class TeleopitHDF5Recorder:
         self._datasets[self._schema.action_key][row] = action_arr
         if hand_action_arr is not None:
             self._datasets[self._schema.hand_action_key][row] = hand_action_arr
+        if neck_action_arr is not None:
+            self._datasets[self._schema.neck_action_key][row] = neck_action_arr
         self._frames_in_episode += 1
 
     def save_episode(self) -> None:
@@ -622,6 +670,12 @@ class TeleopitHDF5Recorder:
                 h5,
                 self._schema.hand_action_key,
                 self._schema.hand_action_dim,
+            )
+        if self._schema.has_neck_action:
+            datasets[self._schema.neck_action_key] = self._create_vector_dataset(
+                h5,
+                self._schema.neck_action_key,
+                self._schema.neck_action_dim,
             )
         return datasets
 
