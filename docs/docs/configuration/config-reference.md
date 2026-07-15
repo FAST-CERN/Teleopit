@@ -23,6 +23,7 @@ Complete reference for all configurable fields.
 
 | Field | Description | Default |
 |-------|-------------|---------|
+| `robot.type` | Stable robot type written into recording schemas | `unitree_g1_29dof` |
 | `robot.num_actions` | Joint action dimension | `29` |
 | `robot.xml_path` | MuJoCo XML path | - |
 | `d435i_rgb` | Fixed RGB camera in the G1 MJCF; use `viewers=[sim2sim,camera]` to display it | - |
@@ -196,7 +197,7 @@ same frames produced by `pico_input`.
 |-------|-------------|---------|
 | `recording.enabled` | Enable manual HDF5 recording | `false` |
 | `recording.output_dir` | Dataset root directory | `data/recordings/sim2real_hdf5` |
-| `recording.task` | Task string stored with frames | `demo` |
+| `recording.task` | Episode task prompt written to `episodes.jsonl` | `demo` |
 | `recording.fps` | Recording/video clock rate | `30` |
 | `recording.min_episode_seconds` | Discard saved episodes shorter than this duration | `1.0` |
 | `recording.record_modes` | Modes that allow recording start and frame writes | `[standing, mocap, arms, pause]` |
@@ -207,32 +208,58 @@ same frames produced by `pico_input`.
 
 Camera failure behavior is controlled by `input.video.fail_on_error`.
 
-Each saved episode has one `.h5` file under `recording.output_dir/episodes/`
-and one compressed MP4 sidecar under
-`recording.output_dir/videos/<camera_key>/`. The HDF5 episode stores
-`frame_index` and `timestamp` arrays, plus `video_path`, `video_fps`, and
-`video_frames` root attributes for synchronization. Raw RGB image datasets are
-not written.
+The recorder creates an editable source dataset:
+
+```text
+recording.output_dir/
+├── schema.json
+├── episodes.jsonl
+├── data/
+│   └── episode_000000.h5
+└── videos/
+    └── d435i_rgb/
+        └── episode_000000.mp4
+```
+
+`schema.json` contains the FPS, `robot_type`, `hand_type`, and feature
+definitions. `robot_type` comes from `robot.type`; `hand_type` is `none` when
+hands are disabled, otherwise it is the configured `hands.driver`.
+`episodes.jsonl` contains one object per saved episode with `episode_index`,
+`frames`, editable `task`, HDF5 path, and video paths. Task prompts can therefore
+be relabeled without rewriting HDF5 or MP4 data. Starting another recording run
+with the same schema resumes at the next episode index and may use a different
+`recording.task`.
+
+The format is intentionally not compatible with the earlier attribute-based
+HDF5 layout. Use an empty `recording.output_dir`; when an existing schema does
+not match, the recording worker rejects the dataset and exits without writing
+episodes. Recording is non-critical, so the main sim2real control runtime
+continues and reports the worker failure. An episode interrupted before its
+`episodes.jsonl` entry is committed is discarded on the next recording-worker
+startup and does not consume an episode index.
 
 HDF5 datasets:
 
 ```text
 frame_index                    int64[N]
 timestamp                      float64[N]
-observation.state              float32[68]
-observation.mode               float32[1]
-action                         float32[36]
-action.hand                    float32[12]
+observation.state              float32[N, 68]
+observation.mode               int8[N]
+action                         float32[N, 36]
+action.hand                    float32[N, 12]  # only when hands are enabled
 ```
 
-The root attributes include the Teleopit HDF5 recording format, schema version,
-task, fps, frame count, and video sync metadata.
+HDF5 files contain only these frame arrays and have no recording metadata root
+attributes. RGB frames remain in MP4 and are associated through
+`episodes.jsonl`; raw RGB HDF5 datasets are not written.
 
 `observation.state` is ordered as `joint_pos(29)`, `joint_vel(29)`,
 `base_quat_wxyz(4)`, `base_ang_vel(3)`, and `projected_gravity(3)`.
 `observation.mode` is a numeric categorical: `standing=0`, `mocap=1`,
 `arms=2`, and `pause=3`. `action` is the current reference qpos:
-`root_pos(3) + root_quat_wxyz(4) + joint_pos(29)`.
+`root_pos(3) + root_quat_wxyz(4) + reference_joint_pos(29)`. It is the
+high-level reference consumed by the motion tracker, not the tracker policy's
+raw output or the final joint targets sent to G1.
 `action.hand` is the latest LinkerHand command from the hand worker:
 `left_pose(6) + right_pose(6)`, using the SDK's 0-255 pose values.
 

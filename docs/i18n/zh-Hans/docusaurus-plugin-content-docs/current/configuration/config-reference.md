@@ -25,6 +25,7 @@ sidebar_position: 2
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
+| `type` | str | 写入录制 schema 的稳定机器人类型，G1 为 `unitree_g1_29dof` |
 | `num_actions` | int | 策略输出的动作维度（即受控关节数） |
 | `xml_path` | str | MuJoCo MJCF 模型文件路径 |
 | `d435i_rgb` | camera | G1 MJCF 中的固定 RGB 相机；配合 `viewers=[sim2sim,camera]` 显示画面 |
@@ -211,7 +212,7 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 |---|---|---|
 | `recording.enabled` | 启用手动 HDF5 录制 | `false` |
 | `recording.output_dir` | 数据集根目录 | `data/recordings/sim2real_hdf5` |
-| `recording.task` | 写入 frame 的任务字符串 | `demo` |
+| `recording.task` | 写入 `episodes.jsonl` 的 episode 任务 prompt | `demo` |
 | `recording.fps` | 录制/视频主时钟频率 | `30` |
 | `recording.min_episode_seconds` | 保存时短于该时长的 episode 会被丢弃 | `1.0` |
 | `recording.record_modes` | 允许开始录制和写帧的模式 | `[standing, mocap, arms, pause]` |
@@ -222,30 +223,51 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 
 相机失败时的行为由 `input.video.fail_on_error` 控制。
 
-每个保存的 episode 会在 `recording.output_dir/episodes/` 下写入一个 `.h5`
-文件，并在 `recording.output_dir/videos/<camera_key>/` 下写入一个压缩 MP4
-sidecar。HDF5 episode 保存 `frame_index` 和 `timestamp` 数组，并在根属性中
-记录 `video_path`、`video_fps` 和 `video_frames` 用于同步。录制不会写入原始
-RGB 图像 dataset。
+录制器会创建一份便于编辑的源数据集：
+
+```text
+recording.output_dir/
+├── schema.json
+├── episodes.jsonl
+├── data/
+│   └── episode_000000.h5
+└── videos/
+    └── d435i_rgb/
+        └── episode_000000.mp4
+```
+
+`schema.json` 保存 FPS、`robot_type`、`hand_type` 和 feature 定义。
+`robot_type` 来自 `robot.type`；未启用灵巧手时 `hand_type` 为 `none`，否则为
+配置的 `hands.driver`。`episodes.jsonl` 每行对应一个已保存的 episode，包含
+`episode_index`、`frames`、可编辑的 `task`、HDF5 路径和视频路径。因此修改任务
+prompt 不需要重写 HDF5 或 MP4。使用相同 schema 再次启动录制时，会从下一个
+episode index 继续追加，并且可以使用不同的 `recording.task`。
+
+该格式有意不兼容之前依赖 HDF5 根属性的布局。请使用空的
+`recording.output_dir`；如果已有 schema 不匹配，录制 worker 会拒绝该数据集并
+退出，不写入 episode。录制属于非关键进程，因此 sim2real 主控制运行时会继续
+运行并报告 worker 故障。在 `episodes.jsonl` 条目提交前中断的 episode 会在下次
+录制 worker 启动时被丢弃，并且不会占用 episode index。
 
 HDF5 datasets：
 
 ```text
 frame_index                    int64[N]
 timestamp                      float64[N]
-observation.state              float32[68]
-observation.mode               float32[1]
-action                         float32[36]
-action.hand                    float32[12]
+observation.state              float32[N, 68]
+observation.mode               int8[N]
+action                         float32[N, 36]
+action.hand                    float32[N, 12]  # 仅启用灵巧手时存在
 ```
 
-根属性包含 Teleopit HDF5 recording format、schema version、task、fps、
-frame count 和视频同步元数据。
+HDF5 文件仅包含上述逐帧数组，不保存录制元数据根属性。RGB 帧保存在 MP4 中，
+并通过 `episodes.jsonl` 与 episode 关联；不会写入原始 RGB HDF5 dataset。
 
 `observation.state` 的顺序是 `joint_pos(29)`、`joint_vel(29)`、
 `base_quat_wxyz(4)`、`base_ang_vel(3)` 和 `projected_gravity(3)`。
 `observation.mode` 是数值类别：`standing=0`、`mocap=1`、
 `arms=2`、`pause=3`。`action` 是当前 reference qpos：
-`root_pos(3) + root_quat_wxyz(4) + joint_pos(29)`。
+`root_pos(3) + root_quat_wxyz(4) + reference_joint_pos(29)`。它是 motion tracker
+消费的高层参考，不是 tracker policy 的原始输出，也不是最终下发给 G1 的关节目标。
 `action.hand` 是手部 worker 最新的 LinkerHand 命令：
 `left_pose(6) + right_pose(6)`，使用 SDK 的 0-255 pose 数值。

@@ -43,9 +43,12 @@ from teleopit.runtime.mocap_session import MocapSessionManager, MocapSessionStat
 from teleopit.runtime.reference_config import parse_reference_config
 from teleopit.runtime.terminal_keyboard import TerminalKeyboardReader
 from teleopit.recording.hdf5 import (
+    DEFAULT_ROBOT_TYPE,
+    NO_HAND_TYPE,
     build_mode_observation,
     build_mp4_video_config,
     build_observation_state,
+    build_recording_schema,
     normalize_hand_action,
     normalize_action_reference_qpos,
 )
@@ -283,6 +286,18 @@ def _recording_camera_cfg(cfg: Any) -> Any:
     return cfg_get(_recording_cfg(cfg), "camera", {}) or {}
 
 
+def _recording_robot_and_hand_types(cfg: Any) -> tuple[str, str]:
+    robot_cfg = cfg_get(cfg, "robot", {}) or {}
+    robot_type = str(cfg_get(robot_cfg, "type", DEFAULT_ROBOT_TYPE)).strip().lower()
+    hands_cfg = cfg_get(cfg, "hands", {}) or {}
+    hand_type = (
+        str(cfg_get(hands_cfg, "driver", "linkerhand_l6")).strip().lower()
+        if bool(cfg_get(hands_cfg, "enabled", False))
+        else NO_HAND_TYPE
+    )
+    return robot_type, hand_type
+
+
 def _configured_open_hand_pose(cfg: Any) -> tuple[np.ndarray, np.ndarray]:
     hands_cfg = cfg_get(cfg, "hands", {}) or {}
     driver = str(cfg_get(hands_cfg, "driver", "linkerhand_l6")).strip().lower()
@@ -338,6 +353,13 @@ def _validate_new_runtime_config(cfg: Any) -> None:
             raise ValueError("recording.camera.source must be realsense")
         if int(cfg_get(rec_cfg, "fps", 30)) != int(cfg_get(camera_cfg, "fps", 30)):
             raise ValueError("recording.fps must match recording.camera.fps")
+        robot_type, hand_type = _recording_robot_and_hand_types(cfg)
+        build_recording_schema(
+            camera_cfg,
+            fps=int(cfg_get(rec_cfg, "fps", 30)),
+            robot_type=robot_type,
+            hand_type=hand_type,
+        )
         input_video = parse_pico_video_config(cfg_get(cfg, "input", {}) or {})
         if not input_video.enabled:
             raise ValueError("recording.enabled=true requires input.video.enabled=true")
@@ -1720,7 +1742,7 @@ class _RobotControlWorker:
                     mocap_active=active,
                     recordable=recordable,
                     observation_state=build_observation_state(robot_state).astype(np.float32, copy=True),
-                    observation_mode=build_mode_observation(record_mode).astype(np.float32, copy=True),
+                    observation_mode=int(build_mode_observation(record_mode)),
                     action_reference_qpos=normalize_action_reference_qpos(reference_qpos).astype(np.float32, copy=True),
                     seq=self._mode_seq,
                 ),
@@ -1742,7 +1764,7 @@ class _RobotControlWorker:
                     mocap_active=False,
                     recordable=False,
                     observation_state=build_observation_state(robot_state).astype(np.float32, copy=True),
-                    observation_mode=np.array([-1.0], dtype=np.float32),
+                    observation_mode=-1,
                     action_reference_qpos=normalize_action_reference_qpos(reference_qpos).astype(np.float32, copy=True),
                     seq=self._mode_seq,
                 ),
@@ -1859,18 +1881,20 @@ class _RecordingWorker:
         self._episode_started_s = 0.0
         self._episode_frames = 0
 
-        from teleopit.recording.hdf5 import (
-            TeleopitHDF5Recorder,
-            build_recording_schema,
-        )
+        from teleopit.recording.hdf5 import TeleopitHDF5Recorder
 
-        self._schema = build_recording_schema(self.camera_cfg)
+        robot_type, hand_type = _recording_robot_and_hand_types(cfg)
+        self._schema = build_recording_schema(
+            self.camera_cfg,
+            fps=self.fps,
+            robot_type=robot_type,
+            hand_type=hand_type,
+        )
         self._video_config = build_mp4_video_config(cfg_get(self.rec_cfg, "video", {}) or {})
         factory = recorder_factory or TeleopitHDF5Recorder.create
         self._recorder = factory(
             output_dir=cfg_get(self.rec_cfg, "output_dir", "data/recordings/sim2real_hdf5"),
             task=self.task,
-            fps=self.fps,
             schema=self._schema,
             video_config=self._video_config,
         )
@@ -1988,16 +2012,20 @@ class _RecordingWorker:
             self._discard_episode("mode not recordable")
             return
         image = self._frame_reader.read(descriptor, copy=True)
+        hand_action = (
+            normalize_hand_action(
+                self._latest_hand_command.left_pose,
+                self._latest_hand_command.right_pose,
+            )
+            if self._schema.has_hand_action
+            else None
+        )
         self._recorder.add_frame(
             image=np.asarray(image, dtype=np.uint8),
             state=np.asarray(record.observation_state, dtype=np.float32),
-            mode=np.asarray(record.observation_mode, dtype=np.float32),
+            mode=record.observation_mode,
             action=np.asarray(record.action_reference_qpos, dtype=np.float32),
-            hand_action=normalize_hand_action(
-                self._latest_hand_command.left_pose,
-                self._latest_hand_command.right_pose,
-            ),
-            task=self.task,
+            hand_action=hand_action,
         )
         self._episode_frames += 1
 

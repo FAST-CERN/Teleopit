@@ -111,11 +111,13 @@ python scripts/run/run_sim2real.py \
 
 终端控制为：`R` 开始 episode，`S` 保存，`D` 丢弃，`Q` 关闭。可以录制
 `STANDING`、`MOCAP`、`ARMS` 和暂停状态的 mocap；已经保存的 episode 不支持再丢弃。
-episode 会保存为 `data/recordings/sim2real_hdf5/episodes/` 下的 `.h5` 文件，
-压缩 MP4 sidecar 视频保存在 `data/recordings/sim2real_hdf5/videos/` 下。
-HDF5 episode 以 30 Hz 保存 `frame_index` 和 `timestamp` 同步数组，以及
-`observation.state(68)`、`observation.mode(1)`、`action(36)` 和
-`action.hand(12)`。
+episode 会保存为 `data/recordings/sim2real_hdf5/data/` 下的 `.h5` 文件，
+压缩 MP4 视频保存在 `data/recordings/sim2real_hdf5/videos/d435i_rgb/` 下。
+数据集级 `schema.json` 保存机器人/灵巧手类型和 feature 定义，
+`episodes.jsonl` 保存每个 episode 的文件映射与可编辑任务 prompt。HDF5 以
+30 Hz 保存 `frame_index`、`timestamp`、`observation.state(68)`、标量
+`observation.mode` 和作为 motion-tracker reference 的 36D `action`。启用灵巧手
+控制时还会保存 `action.hand(12)`。
 
 ## 操作流程
 

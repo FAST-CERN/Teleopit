@@ -66,7 +66,7 @@ class RecordStepPacket:
     mocap_active: bool
     recordable: bool
     observation_state: Float64Array
-    observation_mode: Float64Array
+    observation_mode: int
     action_reference_qpos: Float64Array
     seq: int
 
