@@ -177,7 +177,9 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 
 `neck.enabled=true` 要求 `input.provider=pico4` 和 `openneck` extra。neck worker
 复用 Teleopit 已有的 Pico body frame 数据流，不会启动第二个 `PicoBridge` 或 RealSense
-管线。OpenNeck 作为非关键 sim2real worker 运行，不会改变策略观测。
+管线。OpenNeck 作为非关键 sim2real worker 运行，不会改变策略观测。头部运动使用固定的
+PICO 中立姿态且不进行颈部侧 EMA，按照 `Head` 相对于 `Spine3` 的绝对朝向进行映射；
+启动时不会把操作者的第一帧姿态采集为新的零位，因此开始追踪时操作者不需要保持头部朝正前方。
 
 | 字段 | 说明 | 默认值 |
 |---|---|---|
@@ -188,10 +190,7 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 | `neck.rate_hz` | 最大头颈命令频率（Hz） | `60.0` |
 | `neck.frame_timeout_s` | Pico body frame 过期阈值 | `0.2` |
 | `neck.active_modes` | 允许头颈运动的 sim2real 模式 | `[standing, mocap, arms, pause]` |
-| `neck.head_joint` / `body_reference_joint` | 用于相对头部映射的 Pico body 关节 | `Head` / `Spine3` |
-| `neck.use_body_reference` | 相对于 body reference 关节映射头部运动 | `true` |
 | `neck.dead_zone_deg` | yaw/pitch 死区（度） | `0.5` |
-| `neck.smoothing_alpha` | 归一化 yaw/pitch 命令的 EMA alpha | `0.35` |
 | `neck.yaw_range_deg` / `pitch_range_deg` | 映射到归一化命令幅值 `1.0` 的角度 | `90.0` / `60.0` |
 | `neck.invert_yaw` / `invert_pitch` | 按轴反转 OpenNeck 命令方向 | `true` / `true` |
 | `neck.center_on_start` / `center_on_shutdown` | worker 启动/关闭时回中云台 | `true` / `false` |

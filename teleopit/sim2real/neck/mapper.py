@@ -11,6 +11,8 @@ from teleopit.sim2real.neck.config import NeckConfig
 
 
 FloatArray = NDArray[np.float64]
+_PICO_HEAD_JOINT = "Head"
+_PICO_BODY_REFERENCE_JOINT = "Spine3"
 
 
 @dataclass(frozen=True)
@@ -27,33 +29,17 @@ class HeadPoseMapper:
 
     def __init__(self, config: NeckConfig) -> None:
         self._cfg = config
-        self._offset = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
-        self._calibrated = False
-        self._smooth_yaw = 0.0
-        self._smooth_pitch = 0.0
-
-    @property
-    def calibrated(self) -> bool:
-        return self._calibrated
-
-    def reset(self) -> None:
-        self._offset = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
-        self._calibrated = False
-        self._smooth_yaw = 0.0
-        self._smooth_pitch = 0.0
 
     def map_frame(self, frame: HumanFrame) -> NeckCommand | None:
-        q_head = _joint_quat(frame, self._cfg.head_joint)
+        q_head = _joint_quat(frame, _PICO_HEAD_JOINT)
         if q_head is None:
             return None
-        q_body = _joint_quat(frame, self._cfg.body_reference_joint) if self._cfg.use_body_reference else None
-        relative = self._relative(q_head, q_body)
-        if not self._calibrated:
-            self._offset = relative
-            self._calibrated = True
+        q_body = _joint_quat(frame, _PICO_BODY_REFERENCE_JOINT)
+        if q_body is None:
             return None
-
-        q_cmd = _qmul(relative, _qconj(self._offset))
+        # Head and Spine3 share the same neutral orientation in the supported
+        # PICO convention, so their relative identity is the fixed zero pose.
+        q_cmd = _qmul(_qconj(q_body), q_head)
         yaw_deg, pitch_deg, roll_deg = _openneck_yaw_pitch_roll_deg(q_cmd)
         if self._cfg.invert_yaw:
             yaw_deg = -yaw_deg
@@ -66,21 +52,13 @@ class HeadPoseMapper:
 
         yaw = yaw_deg / self._cfg.yaw_range_deg
         pitch = pitch_deg / self._cfg.pitch_range_deg
-        alpha = self._cfg.smoothing_alpha
-        self._smooth_yaw += alpha * (yaw - self._smooth_yaw)
-        self._smooth_pitch += alpha * (pitch - self._smooth_pitch)
         return NeckCommand(
-            yaw=float(np.clip(self._smooth_yaw, -1.0, 1.0)),
-            pitch=float(np.clip(self._smooth_pitch, -1.0, 1.0)),
+            yaw=float(np.clip(yaw, -1.0, 1.0)),
+            pitch=float(np.clip(pitch, -1.0, 1.0)),
             yaw_deg=float(yaw_deg),
             pitch_deg=float(pitch_deg),
             roll_deg=float(roll_deg),
         )
-
-    def _relative(self, q_head: FloatArray, q_body: FloatArray | None) -> FloatArray:
-        if q_body is not None:
-            return _qmul(_qconj(q_body), q_head)
-        return q_head
 
 
 def _joint_quat(frame: HumanFrame, joint_name: str) -> FloatArray | None:

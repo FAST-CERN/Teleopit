@@ -19,11 +19,7 @@ class NeckConfig:
     rate_hz: float = 60.0
     frame_timeout_s: float = 0.2
     active_modes: tuple[str, ...] = ("standing", "mocap", "arms", "pause")
-    head_joint: str = "Head"
-    body_reference_joint: str = "Spine3"
-    use_body_reference: bool = True
     dead_zone_deg: float = 0.5
-    smoothing_alpha: float = 0.35
     yaw_range_deg: float = 90.0
     pitch_range_deg: float = 60.0
     invert_yaw: bool = True
@@ -43,9 +39,6 @@ def parse_neck_config(cfg: Any) -> NeckConfig:
     frame_timeout_s = float(cfg_get(neck_cfg, "frame_timeout_s", 0.2))
     if frame_timeout_s <= 0:
         raise ValueError("neck.frame_timeout_s must be > 0")
-    smoothing_alpha = float(cfg_get(neck_cfg, "smoothing_alpha", 0.35))
-    if not 0.0 < smoothing_alpha <= 1.0:
-        raise ValueError("neck.smoothing_alpha must be in (0, 1]")
     dead_zone_deg = float(cfg_get(neck_cfg, "dead_zone_deg", 0.5))
     if dead_zone_deg < 0:
         raise ValueError("neck.dead_zone_deg must be >= 0")
@@ -71,11 +64,7 @@ def parse_neck_config(cfg: Any) -> NeckConfig:
         rate_hz=rate_hz,
         frame_timeout_s=frame_timeout_s,
         active_modes=active_modes,
-        head_joint=str(cfg_get(neck_cfg, "head_joint", "Head")),
-        body_reference_joint=str(cfg_get(neck_cfg, "body_reference_joint", "Spine3")),
-        use_body_reference=bool(cfg_get(neck_cfg, "use_body_reference", True)),
         dead_zone_deg=dead_zone_deg,
-        smoothing_alpha=smoothing_alpha,
         yaw_range_deg=yaw_range_deg,
         pitch_range_deg=pitch_range_deg,
         invert_yaw=bool(cfg_get(neck_cfg, "invert_yaw", True)),

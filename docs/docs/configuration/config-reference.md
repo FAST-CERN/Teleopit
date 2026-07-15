@@ -160,7 +160,11 @@ through `somehand.api` only.
 `neck.enabled=true` requires `input.provider=pico4` and the `openneck` extra. The
 neck worker reuses Teleopit's existing Pico body-frame stream and does not start
 a second `PicoBridge` or RealSense pipeline. OpenNeck runs as a non-critical
-sim2real worker and does not change the policy observation.
+sim2real worker and does not change the policy observation. Head motion is
+mapped as the absolute `Head` orientation relative to `Spine3`, using the fixed
+PICO neutral orientation and no neck-side EMA; startup does not capture the
+operator's first pose as a new zero pose, so the operator does not need to face
+straight when tracking starts.
 
 | Field | Description | Default |
 |-------|-------------|---------|
@@ -171,10 +175,7 @@ sim2real worker and does not change the policy observation.
 | `neck.rate_hz` | Maximum neck command rate in Hz | `60.0` |
 | `neck.frame_timeout_s` | Pico body-frame staleness threshold | `0.2` |
 | `neck.active_modes` | Sim2real modes that allow neck motion | `[standing, mocap, arms, pause]` |
-| `neck.head_joint` / `body_reference_joint` | Pico body joints used for relative head mapping | `Head` / `Spine3` |
-| `neck.use_body_reference` | Map head motion relative to the body reference joint | `true` |
 | `neck.dead_zone_deg` | Yaw/pitch dead zone in degrees | `0.5` |
-| `neck.smoothing_alpha` | EMA alpha for normalized yaw/pitch commands | `0.35` |
 | `neck.yaw_range_deg` / `pitch_range_deg` | Degrees mapped to normalized command magnitude `1.0` | `90.0` / `60.0` |
 | `neck.invert_yaw` / `invert_pitch` | Invert OpenNeck command direction per axis | `true` / `true` |
 | `neck.center_on_start` / `center_on_shutdown` | Center the gimbal at worker startup/shutdown | `true` / `false` |

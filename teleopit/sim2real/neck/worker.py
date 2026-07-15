@@ -17,7 +17,6 @@ class NeckRuntime:
         self._cfg = config
         self._device = device or build_neck_device(config)
         self._mapper = HeadPoseMapper(config)
-        self._active = False
 
     def start(self) -> None:
         self._device.connect()
@@ -33,10 +32,7 @@ class NeckRuntime:
         now_s: float | None = None,
     ) -> NeckCommand | None:
         now = time.monotonic() if now_s is None else float(now_s)
-        if active and not self._active:
-            self._mapper.reset()
-        self._active = bool(active)
-        if not self._active or frame is None or frame_timestamp_s is None:
+        if not active or frame is None or frame_timestamp_s is None:
             return None
         if now - float(frame_timestamp_s) > self._cfg.frame_timeout_s:
             return None

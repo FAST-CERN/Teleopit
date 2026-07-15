@@ -128,7 +128,9 @@ python scripts/run/run_sim2real.py --config-name pico4_sim2real \
 
 `neck.enabled=true` requires `input.provider=pico4`. The neck worker reuses the
 existing Teleopit Pico receiver and does not start another `PicoBridge` or
-camera pipeline.
+camera pipeline. It maps the absolute `Head` orientation relative to `Spine3`
+with a fixed neutral pose and no neck-side EMA, so tracking startup does not
+require the operator to face straight ahead.
 
 ## Documentation
 

@@ -5,6 +5,7 @@ from types import ModuleType, SimpleNamespace
 
 import numpy as np
 
+from teleopit.inputs.pico4_provider import BODY_JOINT_NAMES, Pico4InputProvider
 from teleopit.sim2real.neck.config import NeckConfig, parse_neck_config
 from teleopit.sim2real.neck.mapper import HeadPoseMapper
 from teleopit.sim2real.neck.openneck import OpenNeckDevice
@@ -29,27 +30,26 @@ def _frame(head: np.ndarray, spine: np.ndarray | None = None):
     return frame
 
 
-def test_head_pose_mapper_calibrates_then_maps_yaw_pitch() -> None:
+def test_head_pose_mapper_maps_fixed_neutral_yaw_pitch_without_startup_calibration() -> None:
     cfg = NeckConfig(
         enabled=True,
-        smoothing_alpha=1.0,
         invert_yaw=False,
         invert_pitch=False,
-        use_body_reference=False,
         dead_zone_deg=0.0,
     )
     mapper = HeadPoseMapper(cfg)
 
-    assert mapper.map_frame(_frame(_quat_y(0.0))) is None
-    command = mapper.map_frame(_frame(_quat_y(30.0)))
-
+    command = mapper.map_frame(_frame(_quat_y(30.0), _quat_y(0.0)))
     assert command is not None
     assert command.yaw_deg == pytest_approx(30.0)
     assert command.yaw == pytest_approx(30.0 / 90.0)
 
-    mapper.reset()
-    assert mapper.map_frame(_frame(_quat_x(0.0))) is None
-    command = mapper.map_frame(_frame(_quat_x(15.0)))
+    command = mapper.map_frame(_frame(_quat_y(0.0), _quat_y(0.0)))
+    assert command is not None
+    assert command.yaw_deg == pytest_approx(0.0)
+    assert command.yaw == pytest_approx(0.0)
+
+    command = mapper.map_frame(_frame(_quat_x(15.0), _quat_x(0.0)))
     assert command is not None
     assert command.pitch_deg == pytest_approx(15.0)
     assert command.pitch == pytest_approx(15.0 / 60.0)
@@ -58,21 +58,50 @@ def test_head_pose_mapper_calibrates_then_maps_yaw_pitch() -> None:
 def test_head_pose_mapper_uses_body_relative_orientation() -> None:
     cfg = NeckConfig(
         enabled=True,
-        smoothing_alpha=1.0,
         invert_yaw=False,
-        use_body_reference=True,
         dead_zone_deg=0.0,
     )
     mapper = HeadPoseMapper(cfg)
 
-    assert mapper.map_frame(_frame(_quat_y(10.0), _quat_y(10.0))) is None
     command = mapper.map_frame(_frame(_quat_y(40.0), _quat_y(10.0)))
 
     assert command is not None
     assert command.yaw_deg == pytest_approx(30.0)
 
 
-def test_neck_runtime_sends_command_after_calibration() -> None:
+def test_head_pose_mapper_handles_converted_pico_neutral_and_yaw() -> None:
+    body_poses = np.zeros((len(BODY_JOINT_NAMES), 7), dtype=np.float64)
+    body_poses[:, 6] = 1.0
+    mapper = HeadPoseMapper(
+        NeckConfig(
+            enabled=True,
+            invert_yaw=False,
+            invert_pitch=False,
+            dead_zone_deg=0.0,
+        )
+    )
+
+    neutral = mapper.map_frame(Pico4InputProvider._convert_body_joints_to_frame(body_poses))
+    assert neutral is not None
+    assert neutral.yaw_deg == pytest_approx(0.0)
+    assert neutral.pitch_deg == pytest_approx(0.0)
+
+    head_idx = BODY_JOINT_NAMES.index("Head")
+    body_poses[head_idx, 4] = math.sin(math.radians(30.0) / 2.0)
+    body_poses[head_idx, 6] = math.cos(math.radians(30.0) / 2.0)
+    command = mapper.map_frame(Pico4InputProvider._convert_body_joints_to_frame(body_poses))
+    assert command is not None
+    assert command.yaw_deg == pytest_approx(30.0)
+    assert command.pitch_deg == pytest_approx(0.0)
+
+
+def test_head_pose_mapper_requires_spine3_joint() -> None:
+    mapper = HeadPoseMapper(NeckConfig(enabled=True))
+
+    assert mapper.map_frame(_frame(_quat_y(30.0))) is None
+
+
+def test_neck_runtime_sends_relative_command_on_first_active_frame() -> None:
     class FakeDevice:
         def __init__(self) -> None:
             self.moves: list[tuple[float, float]] = []
@@ -97,9 +126,7 @@ def test_neck_runtime_sends_command_after_calibration() -> None:
     device = FakeDevice()
     cfg = NeckConfig(
         enabled=True,
-        smoothing_alpha=1.0,
         invert_yaw=False,
-        use_body_reference=False,
         dead_zone_deg=0.0,
         center_on_start=True,
         center_on_shutdown=True,
@@ -108,14 +135,26 @@ def test_neck_runtime_sends_command_after_calibration() -> None:
 
     runtime.start()
     assert device.center_calls == 1
-    assert runtime.tick(frame=_frame(_quat_y(0.0)), frame_timestamp_s=1.0, active=True, now_s=1.01) is None
-    command = runtime.tick(frame=_frame(_quat_y(30.0)), frame_timestamp_s=1.02, active=True, now_s=1.03)
+    command = runtime.tick(
+        frame=_frame(_quat_y(30.0), _quat_y(0.0)),
+        frame_timestamp_s=1.0,
+        active=True,
+        now_s=1.01,
+    )
+    neutral_command = runtime.tick(
+        frame=_frame(_quat_y(0.0), _quat_y(0.0)),
+        frame_timestamp_s=1.02,
+        active=True,
+        now_s=1.03,
+    )
     runtime.close()
 
     assert command is not None
     assert command.yaw == pytest_approx(30.0 / 90.0)
     assert command.pitch == pytest_approx(0.0)
-    assert device.moves == [(30.0 / 90.0, 0.0)]
+    assert neutral_command is not None
+    assert neutral_command.yaw == pytest_approx(0.0)
+    assert device.moves == [(30.0 / 90.0, 0.0), (0.0, 0.0)]
     assert device.center_calls == 2
     assert device.closed is True
 

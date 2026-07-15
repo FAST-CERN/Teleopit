@@ -53,15 +53,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-center-on-start", action="store_true")
     parser.add_argument("--no-center-on-shutdown", action="store_true")
     parser.add_argument("--release-on-shutdown", action="store_true")
-    parser.add_argument("--use-body-reference", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--invert-yaw", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--invert-pitch", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dead-zone-deg", type=float, default=0.5)
-    parser.add_argument("--smoothing-alpha", type=float, default=0.35)
     parser.add_argument("--yaw-range-deg", type=float, default=90.0)
     parser.add_argument("--pitch-range-deg", type=float, default=60.0)
-    parser.add_argument("--head-joint", default="Head")
-    parser.add_argument("--body-reference-joint", default="Spine3")
     parser.add_argument("--bridge-host", default="0.0.0.0")
     parser.add_argument("--bridge-port", type=int, default=63901)
     parser.add_argument("--bridge-discovery", action=argparse.BooleanOptionalAction, default=True)
@@ -89,11 +85,7 @@ def make_neck_config(args: argparse.Namespace) -> NeckConfig:
         rate_hz=args.rate_hz,
         frame_timeout_s=args.frame_timeout_s,
         active_modes=("mocap",),
-        head_joint=args.head_joint,
-        body_reference_joint=args.body_reference_joint,
-        use_body_reference=bool(args.use_body_reference),
         dead_zone_deg=args.dead_zone_deg,
-        smoothing_alpha=args.smoothing_alpha,
         yaw_range_deg=args.yaw_range_deg,
         pitch_range_deg=args.pitch_range_deg,
         invert_yaw=bool(args.invert_yaw),
@@ -171,7 +163,7 @@ def run_pico(args: argparse.Namespace) -> None:
 
     print(
         "Testing OpenNeck active vision from live Pico body tracking. "
-        "Hold your head neutral for the first valid body frame; press Ctrl-C to stop.",
+        "OpenNeck follows the current head pose relative to the torso; press Ctrl-C to stop.",
         flush=True,
     )
     try:

@@ -115,11 +115,7 @@ neck:
   rate_hz: 60.0
   frame_timeout_s: 0.2
   active_modes: [standing, mocap, arms, pause]
-  head_joint: Head
-  body_reference_joint: Spine3
-  use_body_reference: true
   dead_zone_deg: 0.5
-  smoothing_alpha: 0.35
   yaw_range_deg: 90.0
   pitch_range_deg: 60.0
   invert_yaw: true

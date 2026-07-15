@@ -164,6 +164,7 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - In `vr_hand_pose` mode, missing/inactive hand pose holds the last commanded pose for that side instead of opening the hand
 - Optional OpenNeck active-vision gimbal control uses `neck.enabled=true` and `neck.driver=openneck`; it requires `input.provider=pico4`, reuses the existing Pico body frame stream, and must not start a second `PicoBridge`
 - OpenNeck is integrated as a non-critical sim2real `neck_worker`; failures should not stop the G1 control loop, and no OpenNeck state is added to the 167D policy observation
+- OpenNeck maps the absolute Pico `Head` orientation relative to `Spine3` with a fixed identity neutral pose and no neck-side EMA; it must not capture the first live frame as a runtime zero pose, so tracking can start while the operator's head is turned
 
 ### SimulationLoop Runtime Behavior
 - `realtime=true` enforces wall-clock pacing even without a viewer
