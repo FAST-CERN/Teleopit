@@ -133,8 +133,10 @@ camera pipeline. The neck path reads the independent HMD
 source frame. It never uses the full-body tracker's `Body.Head` skeleton joint,
 whose model constraints can under-report extreme head pitch. The mapper uses a
 fixed neutral pose and no neck-side EMA, so tracking startup does not require
-the operator to face straight ahead. Teleopit sends physical yaw/pitch angles
-through the OpenNeck 0.2.0 `move_deg()` API; OpenNeck converts those angles for
+the operator to face straight ahead. After the dead zone, Teleopit multiplies
+the relative pitch by `neck.pitch_gain` (default `1.4`) to compensate for the
+robot camera geometry; yaw remains one-to-one. It then sends physical angles
+through the OpenNeck 0.2.0 `move_deg()` API. OpenNeck converts those angles for
 its direct-drive servos and clips them to the calibrated mechanical step
 limits. Positive yaw turns left and positive pitch looks up.
 

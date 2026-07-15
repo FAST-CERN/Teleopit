@@ -51,6 +51,8 @@ class HmdPoseMapper:
             yaw_deg = 0.0
         if abs(pitch_deg) < self._cfg.dead_zone_deg:
             pitch_deg = 0.0
+        else:
+            pitch_deg *= self._cfg.pitch_gain
 
         return NeckCommand(
             yaw_deg=float(yaw_deg),

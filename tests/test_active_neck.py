@@ -47,8 +47,10 @@ class FakeDevice:
         self.closed = True
 
 
-def test_hmd_pose_mapper_maps_fixed_pico_convention_to_openneck_degrees() -> None:
-    mapper = HmdPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
+def test_hmd_pose_mapper_applies_pitch_gain_to_openneck_degrees() -> None:
+    mapper = HmdPoseMapper(
+        NeckConfig(enabled=True, dead_zone_deg=0.0, pitch_gain=1.4)
+    )
 
     command = mapper.map_pose(
         hmd_rotation_wxyz=_quat_y(30.0),
@@ -69,7 +71,27 @@ def test_hmd_pose_mapper_maps_fixed_pico_convention_to_openneck_degrees() -> Non
         spine3_rotation_wxyz=_quat_x(0.0),
     )
     assert command is not None
-    assert command.pitch_deg == pytest_approx(-15.0)
+    assert command.pitch_deg == pytest_approx(-21.0)
+
+
+def test_hmd_pose_mapper_applies_dead_zone_before_pitch_gain() -> None:
+    mapper = HmdPoseMapper(
+        NeckConfig(enabled=True, dead_zone_deg=0.5, pitch_gain=2.0)
+    )
+
+    inside_dead_zone = mapper.map_pose(
+        hmd_rotation_wxyz=_quat_x(0.4),
+        spine3_rotation_wxyz=_quat_x(0.0),
+    )
+    outside_dead_zone = mapper.map_pose(
+        hmd_rotation_wxyz=_quat_x(10.0),
+        spine3_rotation_wxyz=_quat_x(0.0),
+    )
+
+    assert inside_dead_zone is not None
+    assert inside_dead_zone.pitch_deg == pytest_approx(0.0)
+    assert outside_dead_zone is not None
+    assert outside_dead_zone.pitch_deg == pytest_approx(-20.0)
 
 
 def test_hmd_pose_mapper_uses_body_relative_orientation() -> None:
@@ -322,6 +344,22 @@ def test_parse_neck_config_accepts_scalar_active_mode() -> None:
     cfg = parse_neck_config({"neck": {"enabled": True, "active_modes": "mocap"}})
 
     assert cfg.active_modes == ("mocap",)
+
+
+def test_parse_neck_config_accepts_pitch_gain() -> None:
+    cfg = parse_neck_config({"neck": {"enabled": True, "pitch_gain": 1.6}})
+
+    assert cfg.pitch_gain == pytest_approx(1.6)
+
+
+def test_parse_neck_config_rejects_invalid_pitch_gain() -> None:
+    for value in (0.0, -1.0, float("nan"), float("inf")):
+        try:
+            parse_neck_config({"neck": {"enabled": True, "pitch_gain": value}})
+        except ValueError as exc:
+            assert "neck.pitch_gain" in str(exc)
+        else:
+            raise AssertionError(f"expected ValueError for pitch_gain={value!r}")
 
 
 def test_parse_neck_config_rejects_unknown_active_mode() -> None:

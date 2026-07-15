@@ -169,10 +169,12 @@ body-frame filtering. The mapper uses the fixed PICO neutral orientation and
 no neck-side EMA; startup does not capture the operator's first pose as a new
 zero pose, so the operator does not need to face straight when tracking starts.
 Teleopit converts the supported PICO convention to OpenNeck's physical
-convention—positive yaw turns left and positive pitch looks up—and sends the
-relative angles in degrees through OpenNeck 0.2.0 `move_deg()`. OpenNeck
-performs the direct-drive degree-to-step conversion and clips each target to
-the mechanical step limits in its calibration file.
+convention—positive yaw turns left and positive pitch looks up. After applying
+`neck.dead_zone_deg` to the raw relative angles, it multiplies pitch by
+`neck.pitch_gain` (default `1.4`) while leaving yaw one-to-one. The resulting
+physical angles are sent through OpenNeck 0.2.0 `move_deg()`. OpenNeck performs
+the direct-drive degree-to-step conversion and clips each target to the
+mechanical step limits in its calibration file.
 
 OpenNeck 0.2.0 calibration files use angle-control fields such as
 `yaw_center_step`, `yaw_min_step`, `yaw_max_step`, and `yaw_step_sign` (and the
@@ -191,6 +193,7 @@ are rejected rather than ignored.
 | `neck.frame_timeout_s` | Pico HMD/Spine3 pose staleness threshold | `0.2` |
 | `neck.active_modes` | Sim2real modes that allow neck motion | `[standing, mocap, arms, pause]` |
 | `neck.dead_zone_deg` | Yaw/pitch dead zone in degrees | `0.5` |
+| `neck.pitch_gain` | Gain applied to relative HMD pitch after the dead zone | `1.4` |
 | `neck.center_on_start` / `center_on_shutdown` | Center the gimbal at worker startup/shutdown | `true` / `false` |
 | `neck.release_on_shutdown` | Release servo torque after shutdown when supported | `false` |
 | `neck.dry_run` | Compute commands without opening OpenNeck hardware | `false` |

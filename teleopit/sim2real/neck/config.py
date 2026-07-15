@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ class NeckConfig:
     frame_timeout_s: float = 0.2
     active_modes: tuple[str, ...] = ("standing", "mocap", "arms", "pause")
     dead_zone_deg: float = 0.5
+    pitch_gain: float = 1.4
     center_on_start: bool = True
     center_on_shutdown: bool = False
     release_on_shutdown: bool = False
@@ -51,6 +53,9 @@ def parse_neck_config(cfg: Any) -> NeckConfig:
     dead_zone_deg = float(cfg_get(neck_cfg, "dead_zone_deg", 0.5))
     if dead_zone_deg < 0:
         raise ValueError("neck.dead_zone_deg must be >= 0")
+    pitch_gain = float(cfg_get(neck_cfg, "pitch_gain", 1.4))
+    if not math.isfinite(pitch_gain) or pitch_gain <= 0:
+        raise ValueError("neck.pitch_gain must be finite and > 0")
     config_path = cfg_get(neck_cfg, "config_path", None)
     if config_path in ("", "null"):
         config_path = None
@@ -68,6 +73,7 @@ def parse_neck_config(cfg: Any) -> NeckConfig:
         frame_timeout_s=frame_timeout_s,
         active_modes=active_modes,
         dead_zone_deg=dead_zone_deg,
+        pitch_gain=pitch_gain,
         center_on_start=bool(cfg_get(neck_cfg, "center_on_start", True)),
         center_on_shutdown=bool(cfg_get(neck_cfg, "center_on_shutdown", False)),
         release_on_shutdown=bool(cfg_get(neck_cfg, "release_on_shutdown", False)),

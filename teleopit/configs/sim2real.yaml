@@ -116,6 +116,7 @@ neck:
   frame_timeout_s: 0.2
   active_modes: [standing, mocap, arms, pause]
   dead_zone_deg: 0.5
+  pitch_gain: 1.4
   center_on_start: true
   center_on_shutdown: false
   release_on_shutdown: false

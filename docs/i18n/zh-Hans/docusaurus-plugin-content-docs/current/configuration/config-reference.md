@@ -183,8 +183,10 @@ OpenNeck 作为非关键 sim2real worker 运行，不会改变策略观测。头
 头显姿态更新不受 body 重复帧过滤影响。mapper 使用固定的 PICO 中立姿态且不进行颈部侧
 EMA；启动时不会把操作者的第一帧姿态采集为新的零位，因此开始追踪时操作者不需要保持头部
 朝正前方。Teleopit 将受支持的 PICO 约定转换为 OpenNeck 的物理约定——正 yaw 向左转，
-正 pitch 向上看——并通过 OpenNeck 0.2.0 的 `move_deg()` 发送以度为单位的相对角度。
-OpenNeck 负责直驱角度到舵机步数的转换，并将每个目标裁剪到标定文件中的机械步数限位。
+正 pitch 向上看。对原始相对角度应用 `neck.dead_zone_deg` 后，Teleopit 将 pitch 乘以
+`neck.pitch_gain`（默认 `1.4`），而 yaw 仍保持一比一。随后通过 OpenNeck 0.2.0 的
+`move_deg()` 发送得到的物理角度。OpenNeck 负责直驱角度到舵机步数的转换，并将每个目标
+裁剪到标定文件中的机械步数限位。
 
 OpenNeck 0.2.0 标定文件使用 `yaw_center_step`、`yaw_min_step`、
 `yaw_max_step` 和 `yaw_step_sign` 等角度控制字段（pitch 使用对应字段）。不支持以前的
@@ -202,6 +204,7 @@ OpenNeck 归一化配置；运行 `openneck calibrate` 创建当前格式的文�
 | `neck.frame_timeout_s` | Pico 头显/Spine3 姿态过期阈值 | `0.2` |
 | `neck.active_modes` | 允许头颈运动的 sim2real 模式 | `[standing, mocap, arms, pause]` |
 | `neck.dead_zone_deg` | yaw/pitch 死区（度） | `0.5` |
+| `neck.pitch_gain` | 死区后应用于头显相对 pitch 的增益 | `1.4` |
 | `neck.center_on_start` / `center_on_shutdown` | worker 启动/关闭时回中云台 | `true` / `false` |
 | `neck.release_on_shutdown` | 关闭后在支持时释放舵机扭矩 | `false` |
 | `neck.dry_run` | 只计算命令，不打开 OpenNeck 硬件 | `false` |

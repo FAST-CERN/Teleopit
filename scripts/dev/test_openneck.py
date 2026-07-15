@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 from pathlib import Path
 import sys
 import time
@@ -21,6 +22,7 @@ from teleopit.sim2real.neck.worker import NeckRuntime  # noqa: E402
 
 DEFAULT_RATE_HZ = 60.0
 DEFAULT_FRAME_TIMEOUT_S = 0.3
+DEFAULT_PITCH_GAIN = 1.4
 DEFAULT_TEST_ANGLE_DEG = 5.0
 DEFAULT_HOLD_S = 0.8
 DEFAULT_PICO_TIMEOUT_S = 60.0
@@ -54,6 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-center-on-shutdown", action="store_true")
     parser.add_argument("--release-on-shutdown", action="store_true")
     parser.add_argument("--dead-zone-deg", type=float, default=0.5)
+    parser.add_argument("--pitch-gain", type=float, default=DEFAULT_PITCH_GAIN)
     parser.add_argument("--bridge-host", default="0.0.0.0")
     parser.add_argument("--bridge-port", type=int, default=63901)
     parser.add_argument("--bridge-discovery", action=argparse.BooleanOptionalAction, default=True)
@@ -69,6 +72,8 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("--duration-s must be >= 0")
     if args.angle_deg <= 0.0:
         raise SystemExit("--angle-deg must be > 0")
+    if not math.isfinite(args.pitch_gain) or args.pitch_gain <= 0.0:
+        raise SystemExit("--pitch-gain must be finite and > 0")
     return args
 
 
@@ -82,6 +87,7 @@ def make_neck_config(args: argparse.Namespace) -> NeckConfig:
         frame_timeout_s=args.frame_timeout_s,
         active_modes=("mocap",),
         dead_zone_deg=args.dead_zone_deg,
+        pitch_gain=args.pitch_gain,
         center_on_start=not bool(args.no_center_on_start),
         center_on_shutdown=not bool(args.no_center_on_shutdown),
         release_on_shutdown=bool(args.release_on_shutdown),

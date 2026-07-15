@@ -166,7 +166,8 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - OpenNeck is integrated as a non-critical sim2real `neck_worker`; failures should not stop the G1 control loop, and no OpenNeck state is added to the 167D policy observation
 - OpenNeck 0.2.0 is the supported runtime; Teleopit sends physical degrees through `move_deg()`, and the direct-drive OpenNeck package converts degrees to servo steps and clips them to its calibrated mechanical limits; the removed normalized API and config fields are unsupported
 - OpenNeck maps the independent HMD `PicoFrame.head.rotation` relative to the same-frame full-body `Body.Spine3` orientation; it must never use the full-body `Body.Head` skeleton joint for neck control, and HMD pose updates must remain independent of duplicate-body-frame filtering
-- OpenNeck uses a fixed identity neutral pose and no neck-side EMA; it must not capture the first live frame as a runtime zero pose, so tracking can start while the operator's head is turned; positive yaw turns left and positive pitch looks up
+- OpenNeck uses a fixed identity neutral pose and no neck-side EMA; it must not capture the first live frame as a runtime zero pose, so tracking can start while the operator's head is turned
+- After the raw relative-angle dead zone, `neck.pitch_gain` (default `1.4`) scales pitch before `move_deg()` while yaw remains one-to-one; OpenNeck remains responsible for final mechanical clipping; positive yaw turns left and positive pitch looks up
 
 ### SimulationLoop Runtime Behavior
 - `realtime=true` enforces wall-clock pacing even without a viewer
