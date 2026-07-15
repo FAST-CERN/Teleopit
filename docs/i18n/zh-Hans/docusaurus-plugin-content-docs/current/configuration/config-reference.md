@@ -176,13 +176,15 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 ### OpenNeck 主动视觉（Pico sim2real）
 
 `neck.enabled=true` 要求 `input.provider=pico4` 和 `openneck` extra。neck worker
-复用 Teleopit 已有的 Pico body frame 数据流，不会启动第二个 `PicoBridge` 或 RealSense
-管线。OpenNeck 作为非关键 sim2real worker 运行，不会改变策略观测。头部运动使用固定的
-PICO 中立姿态且不进行颈部侧 EMA，按照 `Head` 相对于 `Spine3` 的绝对朝向进行映射；
-启动时不会把操作者的第一帧姿态采集为新的零位，因此开始追踪时操作者不需要保持头部朝正前方。
-Teleopit 将受支持的 PICO 约定转换为 OpenNeck 的物理约定——正 yaw 向左转，正 pitch
-向上看——并通过 OpenNeck 0.2.0 的 `move_deg()` 发送以度为单位的相对角度。OpenNeck
-负责直驱角度到舵机步数的转换，并将每个目标裁剪到标定文件中的机械步数限位。
+复用 Teleopit 已有的 Pico receiver，不会启动第二个 `PicoBridge` 或 RealSense 管线。
+OpenNeck 作为非关键 sim2real worker 运行，不会改变策略观测。头部运动来自独立的头显
+`PicoFrame.head.rotation`，并相对于同一个源帧中的 `Body.Spine3` 进行映射。neck 路径
+绝不读取全身动捕的 `Body.Head` 骨架关节；人体模型约束可能使该关节低估极端低头角度。
+头显姿态更新不受 body 重复帧过滤影响。mapper 使用固定的 PICO 中立姿态且不进行颈部侧
+EMA；启动时不会把操作者的第一帧姿态采集为新的零位，因此开始追踪时操作者不需要保持头部
+朝正前方。Teleopit 将受支持的 PICO 约定转换为 OpenNeck 的物理约定——正 yaw 向左转，
+正 pitch 向上看——并通过 OpenNeck 0.2.0 的 `move_deg()` 发送以度为单位的相对角度。
+OpenNeck 负责直驱角度到舵机步数的转换，并将每个目标裁剪到标定文件中的机械步数限位。
 
 OpenNeck 0.2.0 标定文件使用 `yaw_center_step`、`yaw_min_step`、
 `yaw_max_step` 和 `yaw_step_sign` 等角度控制字段（pitch 使用对应字段）。不支持以前的
@@ -197,7 +199,7 @@ OpenNeck 归一化配置；运行 `openneck calibrate` 创建当前格式的文�
 | `neck.config_path` | 可选 OpenNeck 0.2.0 角度标定配置路径 | `null` |
 | `neck.port` | 可选串口覆盖，例如 `/dev/ttyACM0` | `null` |
 | `neck.rate_hz` | 最大头颈命令频率（Hz） | `60.0` |
-| `neck.frame_timeout_s` | Pico body frame 过期阈值 | `0.2` |
+| `neck.frame_timeout_s` | Pico 头显/Spine3 姿态过期阈值 | `0.2` |
 | `neck.active_modes` | 允许头颈运动的 sim2real 模式 | `[standing, mocap, arms, pause]` |
 | `neck.dead_zone_deg` | yaw/pitch 死区（度） | `0.5` |
 | `neck.center_on_start` / `center_on_shutdown` | worker 启动/关闭时回中云台 | `true` / `false` |

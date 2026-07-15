@@ -4,19 +4,22 @@ import logging
 import time
 from typing import Any
 
-from teleopit.inputs.realtime_packet import HumanFrame
+import numpy as np
+from numpy.typing import NDArray
+
 from teleopit.sim2real.neck.config import NeckConfig, parse_neck_config
-from teleopit.sim2real.neck.mapper import HeadPoseMapper, NeckCommand
+from teleopit.sim2real.neck.mapper import HmdPoseMapper, NeckCommand
 from teleopit.sim2real.neck.openneck import NeckDevice, build_neck_device
 
 logger = logging.getLogger(__name__)
+FloatArray = NDArray[np.float64]
 
 
 class NeckRuntime:
     def __init__(self, config: NeckConfig, device: NeckDevice | None = None) -> None:
         self._cfg = config
         self._device = device or build_neck_device(config)
-        self._mapper = HeadPoseMapper(config)
+        self._mapper = HmdPoseMapper(config)
 
     def start(self) -> None:
         self._device.connect()
@@ -26,17 +29,21 @@ class NeckRuntime:
     def tick(
         self,
         *,
-        frame: HumanFrame | None,
-        frame_timestamp_s: float | None,
+        hmd_rotation_wxyz: FloatArray | None,
+        spine3_rotation_wxyz: FloatArray | None,
+        pose_timestamp_s: float | None,
         active: bool,
         now_s: float | None = None,
     ) -> NeckCommand | None:
         now = time.monotonic() if now_s is None else float(now_s)
-        if not active or frame is None or frame_timestamp_s is None:
+        if not active or pose_timestamp_s is None:
             return None
-        if now - float(frame_timestamp_s) > self._cfg.frame_timeout_s:
+        if now - float(pose_timestamp_s) > self._cfg.frame_timeout_s:
             return None
-        command = self._mapper.map_frame(frame)
+        command = self._mapper.map_pose(
+            hmd_rotation_wxyz=hmd_rotation_wxyz,
+            spine3_rotation_wxyz=spine3_rotation_wxyz,
+        )
         if command is None:
             return None
         applied_yaw_deg, applied_pitch_deg = self._device.move_deg(
@@ -72,12 +79,13 @@ class DisabledNeckRuntime:
     def tick(
         self,
         *,
-        frame: HumanFrame | None,
-        frame_timestamp_s: float | None,
+        hmd_rotation_wxyz: FloatArray | None,
+        spine3_rotation_wxyz: FloatArray | None,
+        pose_timestamp_s: float | None,
         active: bool,
         now_s: float | None = None,
     ) -> None:
-        del frame, frame_timestamp_s, active, now_s
+        del hmd_rotation_wxyz, spine3_rotation_wxyz, pose_timestamp_s, active, now_s
         return None
 
     def close(self) -> None:
@@ -98,10 +106,33 @@ def mode_packet_active(mode_packet: object | None, config: NeckConfig) -> bool:
     return mode in config.active_modes
 
 
-def body_packet_frame(packet: object | None) -> tuple[HumanFrame | None, float | None, int]:
-    if packet is None or not all(hasattr(packet, attr) for attr in ("frame", "timestamp_s", "seq")):
-        return None, None, -1
+def head_pose_packet(
+    packet: object | None,
+) -> tuple[FloatArray | None, FloatArray | None, float | None, int]:
+    if packet is None or not all(hasattr(packet, attr) for attr in ("snapshot", "timestamp_s", "seq")):
+        return None, None, None, -1
+    snapshot = getattr(packet, "snapshot")
+    if snapshot is None or not all(
+        hasattr(snapshot, attr)
+        for attr in ("hmd_rotation_wxyz", "spine3_rotation_wxyz", "timestamp_s", "seq")
+    ):
+        return None, None, None, -1
     try:
-        return getattr(packet, "frame"), float(getattr(packet, "timestamp_s")), int(getattr(packet, "seq"))
+        timestamp_s = float(getattr(packet, "timestamp_s"))
+        seq = int(getattr(packet, "seq"))
+        if int(getattr(snapshot, "seq")) != seq:
+            return None, None, None, -1
+        hmd_rotation = _optional_quat(getattr(snapshot, "hmd_rotation_wxyz"))
+        spine3_rotation = _optional_quat(getattr(snapshot, "spine3_rotation_wxyz"))
+        return hmd_rotation, spine3_rotation, timestamp_s, seq
     except (TypeError, ValueError):
-        return None, None, -1
+        return None, None, None, -1
+
+
+def _optional_quat(value: object | None) -> FloatArray | None:
+    if value is None:
+        return None
+    try:
+        return np.asarray(value, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return None

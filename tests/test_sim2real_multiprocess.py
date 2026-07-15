@@ -54,6 +54,7 @@ from teleopit.sim2real.mp.runtime import (
     _human_frame_is_valid,
     _recording_hardware_types,
     _run_neck_worker,
+    _run_pico_io_worker,
 )
 from teleopit.sim2real.mp.shm import SharedFrameRingReader, SharedFrameRingWriter
 
@@ -344,6 +345,114 @@ def test_neck_enabled_adds_neck_worker() -> None:
     runtime._start_processes()
 
     assert started_names == ["pico_input", "reference", "robot_control", "neck_worker"]
+
+
+@pytest.mark.parametrize("failure_stage", ["setup", "snapshot", "publish", "close"])
+def test_head_pose_ipc_failure_does_not_stop_pico_input(monkeypatch, failure_stage: str) -> None:
+    endpoints = default_endpoints(base_port=39890)
+    closed_publishers: list[str] = []
+    provider_closed = False
+
+    class FakeStopEvent:
+        def __init__(self) -> None:
+            self.polls = 0
+
+        def is_set(self) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+        def set(self) -> None:
+            self.polls = 2
+
+    class FakeProvider:
+        fps = 0.0
+
+        def __init__(self, **_kwargs: object) -> None:
+            return None
+
+        def get_head_pose_snapshot(self) -> SimpleNamespace:
+            if failure_stage == "snapshot":
+                raise RuntimeError("head-pose snapshot failed")
+            return SimpleNamespace(
+                hmd_rotation_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+                spine3_rotation_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+                timestamp_s=1.0,
+                seq=1,
+            )
+
+        def has_frame(self) -> bool:
+            return False
+
+        def pop_control_events(self) -> tuple[object, ...]:
+            return ()
+
+        def get_controller_snapshot(self) -> None:
+            return None
+
+        def get_hand_snapshot(self) -> None:
+            return None
+
+        def close(self) -> None:
+            nonlocal provider_closed
+            provider_closed = True
+
+    class FakeVideoRuntime:
+        pushed_frames = 0
+
+        def __init__(self, **_kwargs: object) -> None:
+            return None
+
+        def start(self) -> None:
+            return None
+
+        def tick(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class FakeSubscriber:
+        def __init__(self, _endpoint: str, _topic: str) -> None:
+            return None
+
+        def recv_latest(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    class FakePublisher:
+        def __init__(self, endpoint: str) -> None:
+            self.endpoint = endpoint
+            if endpoint == endpoints.head_pose_pub and failure_stage == "setup":
+                raise RuntimeError("head-pose bind failed")
+
+        def publish(self, _topic: str, _payload: object) -> None:
+            if self.endpoint == endpoints.head_pose_pub and failure_stage == "publish":
+                raise RuntimeError("head-pose publish failed")
+
+        def close(self) -> None:
+            closed_publishers.append(self.endpoint)
+            if self.endpoint == endpoints.head_pose_pub and failure_stage == "close":
+                raise RuntimeError("head-pose close failed")
+
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.Pico4InputProvider", FakeProvider)
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.PicoVideoRuntime", FakeVideoRuntime)
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.LatestSubscriber", FakeSubscriber)
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.ZmqPublisher", FakePublisher)
+
+    _run_pico_io_worker(
+        {"input": {"provider": "pico4"}, "neck": {"enabled": True}},
+        endpoints,
+        FakeStopEvent(),  # type: ignore[arg-type]
+    )
+
+    assert provider_closed is True
+    assert endpoints.body_pub in closed_publishers
+    if failure_stage == "setup":
+        assert endpoints.head_pose_pub not in closed_publishers
+    else:
+        assert closed_publishers.count(endpoints.head_pose_pub) == 1
 
 
 @pytest.mark.parametrize("recording_enabled", [False, True])

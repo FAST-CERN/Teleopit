@@ -28,10 +28,16 @@ def _pico_frame(
     body_active: bool = True,
     right_primary: bool = False,
     right_secondary: bool = False,
+    head_rotation_xyzw: np.ndarray | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         seq=seq,
         receive_time_s=timestamp,
+        head=(
+            None
+            if head_rotation_xyzw is None
+            else SimpleNamespace(rotation=np.asarray(head_rotation_xyzw, dtype=np.float64))
+        ),
         body=SimpleNamespace(active=body_active, joints=body_poses),
         controllers=SimpleNamespace(
             left=SimpleNamespace(buttons={}),
@@ -70,6 +76,7 @@ def _make_provider() -> Pico4InputProvider:
     provider._ground_alignment_offset = None
     provider._controller_snapshot = None
     provider._hand_snapshot = None
+    provider._head_pose_snapshot = None
     provider._closed = False
     return provider
 
@@ -345,3 +352,93 @@ def test_pico4_provider_exposes_hand_snapshot_when_body_inactive() -> None:
     assert snapshot.right.present is True
     assert snapshot.right.active is False
     np.testing.assert_allclose(snapshot.left.joints[:, 0:3], 1.5)
+
+
+def test_pico4_provider_exposes_hmd_rotation_separately_from_skeleton_head() -> None:
+    provider = _make_provider()
+    body_poses = _body_poses(1.0)
+    angle = np.deg2rad(30.0)
+    hmd_rotation_xyzw = np.array(
+        [0.0, np.sin(angle / 2.0), 0.0, np.cos(angle / 2.0)],
+        dtype=np.float64,
+    )
+
+    assert provider._accept_pico_frame(
+        _pico_frame(
+            body_poses,
+            seq=7,
+            timestamp=3.0,
+            head_rotation_xyzw=hmd_rotation_xyzw,
+        )
+    ) is True
+
+    snapshot = provider.get_head_pose_snapshot()
+    assert snapshot is not None
+    assert snapshot.seq == 7
+    assert snapshot.timestamp_s == pytest.approx(3.0)
+    expected_body = body_poses.copy()
+    expected_body[BODY_JOINT_NAMES.index("Head"), 3:7] = hmd_rotation_xyzw
+    expected_frame = Pico4InputProvider._convert_body_joints_to_frame(expected_body)
+    np.testing.assert_allclose(
+        snapshot.hmd_rotation_wxyz,
+        expected_frame["Head"][1],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        snapshot.spine3_rotation_wxyz,
+        expected_frame["Spine3"][1],
+        atol=1e-6,
+    )
+    skeleton_frame = Pico4InputProvider._convert_body_joints_to_frame(body_poses)
+    assert not np.allclose(snapshot.hmd_rotation_wxyz, skeleton_frame["Head"][1])
+
+
+def test_pico4_provider_updates_hmd_snapshot_when_duplicate_body_is_dropped() -> None:
+    provider = _make_provider()
+    body_poses = _body_poses(1.0)
+
+    assert provider._accept_pico_frame(
+        _pico_frame(
+            body_poses,
+            seq=1,
+            timestamp=1.0,
+            head_rotation_xyzw=np.array([0.0, 0.0, 0.0, 1.0]),
+        )
+    ) is True
+    first = provider.get_head_pose_snapshot()
+    assert first is not None
+
+    angle = np.deg2rad(20.0)
+    assert provider._accept_pico_frame(
+        _pico_frame(
+            body_poses.copy(),
+            seq=2,
+            timestamp=1.01,
+            head_rotation_xyzw=np.array([np.sin(angle / 2.0), 0.0, 0.0, np.cos(angle / 2.0)]),
+        )
+    ) is False
+    second = provider.get_head_pose_snapshot()
+
+    assert second is not None
+    assert second.seq == 2
+    assert second.timestamp_s == pytest.approx(1.01)
+    assert not np.allclose(second.hmd_rotation_wxyz, first.hmd_rotation_wxyz)
+
+
+def test_pico4_provider_invalidates_spine3_when_body_tracking_is_inactive() -> None:
+    provider = _make_provider()
+
+    assert provider._accept_pico_frame(
+        _pico_frame(
+            _body_poses(1.0),
+            seq=4,
+            timestamp=2.0,
+            body_active=False,
+            head_rotation_xyzw=np.array([0.0, 0.0, 0.0, 1.0]),
+        )
+    ) is False
+
+    snapshot = provider.get_head_pose_snapshot()
+    assert snapshot is not None
+    assert snapshot.hmd_rotation_wxyz is not None
+    assert snapshot.spine3_rotation_wxyz is None

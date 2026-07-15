@@ -158,17 +158,21 @@ through `somehand.api` only.
 ### OpenNeck Active Vision (Pico sim2real)
 
 `neck.enabled=true` requires `input.provider=pico4` and the `openneck` extra. The
-neck worker reuses Teleopit's existing Pico body-frame stream and does not start
+neck worker reuses Teleopit's existing Pico receiver and does not start
 a second `PicoBridge` or RealSense pipeline. OpenNeck runs as a non-critical
-sim2real worker and does not change the policy observation. Head motion is
-mapped as the absolute `Head` orientation relative to `Spine3`, using the fixed
-PICO neutral orientation and no neck-side EMA; startup does not capture the
-operator's first pose as a new zero pose, so the operator does not need to face
-straight when tracking starts. Teleopit converts the supported PICO convention
-to OpenNeck's physical convention—positive yaw turns left and positive pitch
-looks up—and sends the relative angles in degrees through OpenNeck 0.2.0
-`move_deg()`. OpenNeck performs the direct-drive degree-to-step conversion and
-clips each target to the mechanical step limits in its calibration file.
+sim2real worker and does not change the policy observation. Head motion comes
+from the independent HMD `PicoFrame.head.rotation`, mapped relative to
+`Body.Spine3` from the same source frame. The neck path never reads the
+full-body tracker's `Body.Head` skeleton joint, whose model constraints can
+under-report extreme head pitch. HMD updates remain independent of duplicate
+body-frame filtering. The mapper uses the fixed PICO neutral orientation and
+no neck-side EMA; startup does not capture the operator's first pose as a new
+zero pose, so the operator does not need to face straight when tracking starts.
+Teleopit converts the supported PICO convention to OpenNeck's physical
+convention—positive yaw turns left and positive pitch looks up—and sends the
+relative angles in degrees through OpenNeck 0.2.0 `move_deg()`. OpenNeck
+performs the direct-drive degree-to-step conversion and clips each target to
+the mechanical step limits in its calibration file.
 
 OpenNeck 0.2.0 calibration files use angle-control fields such as
 `yaw_center_step`, `yaw_min_step`, `yaw_max_step`, and `yaw_step_sign` (and the
@@ -184,7 +188,7 @@ are rejected rather than ignored.
 | `neck.config_path` | Optional OpenNeck 0.2.0 angle-calibration config path | `null` |
 | `neck.port` | Optional serial port override, for example `/dev/ttyACM0` | `null` |
 | `neck.rate_hz` | Maximum neck command rate in Hz | `60.0` |
-| `neck.frame_timeout_s` | Pico body-frame staleness threshold | `0.2` |
+| `neck.frame_timeout_s` | Pico HMD/Spine3 pose staleness threshold | `0.2` |
 | `neck.active_modes` | Sim2real modes that allow neck motion | `[standing, mocap, arms, pause]` |
 | `neck.dead_zone_deg` | Yaw/pitch dead zone in degrees | `0.5` |
 | `neck.center_on_start` / `center_on_shutdown` | Center the gimbal at worker startup/shutdown | `true` / `false` |

@@ -68,13 +68,14 @@ from teleopit.sim2real.hands.base import HandPoseCommand
 from teleopit.sim2real.hands.linkerhand_l6 import parse_linkerhand_l6_config
 from teleopit.sim2real.hands.linkerhand_o6 import parse_linkerhand_o6_config
 from teleopit.sim2real.neck.config import parse_neck_config
-from teleopit.sim2real.neck.worker import body_packet_frame, build_neck_runtime, mode_packet_active
+from teleopit.sim2real.neck.worker import build_neck_runtime, head_pose_packet, mode_packet_active
 from teleopit.sim2real.mp.ipc import (
     BODY_TOPIC,
     COMMAND_TOPIC,
     CONTROL_EVENTS_TOPIC,
     CONTROLLER_TOPIC,
     HAND_COMMAND_TOPIC,
+    HEAD_POSE_TOPIC,
     HAND_TOPIC,
     HEALTH_TOPIC,
     MODE_TOPIC,
@@ -614,6 +615,28 @@ def _run_pico_io_worker(
         )
 
         body_pub = ZmqPublisher(endpoints.body_pub)
+        head_pose_pub: ZmqPublisher | None = None
+
+        def _disable_head_pose_publisher(message: str) -> None:
+            nonlocal head_pose_pub
+            logger.exception(message)
+            failed_publisher = head_pose_pub
+            head_pose_pub = None
+            if failed_publisher is None:
+                return
+            try:
+                failed_publisher.close()
+            except Exception:
+                logger.exception("Failed to close disabled OpenNeck head-pose publisher")
+
+        if parse_neck_config(cfg).enabled:
+            try:
+                head_pose_pub = ZmqPublisher(endpoints.head_pose_pub)
+            except Exception:
+                _disable_head_pose_publisher(
+                    "OpenNeck head-pose IPC setup failed; neck control is disabled "
+                    "while pico_input continues"
+                )
         hand_pub = ZmqPublisher(endpoints.hand_pub)
         controller_pub = ZmqPublisher(endpoints.controller_pub)
         events_pub = ZmqPublisher(endpoints.control_events_pub)
@@ -645,6 +668,7 @@ def _run_pico_io_worker(
         hz = float(cfg_get(_mp_cfg(cfg), "pico_input_hz", 120.0))
         sleep_s = 1.0 / max(hz, 1.0)
         last_body_seq = -1
+        last_head_pose_seq = -1
         last_hand_seq = -1
         last_controller_seq = -1
         last_video_seq = -1
@@ -659,6 +683,28 @@ def _run_pico_io_worker(
                     break
 
                 now = time.monotonic()
+                if head_pose_pub is not None:
+                    try:
+                        head_pose_snapshot = provider.get_head_pose_snapshot()
+                        if (
+                            head_pose_snapshot is not None
+                            and int(head_pose_snapshot.seq) != last_head_pose_seq
+                        ):
+                            head_pose_pub.publish(
+                                HEAD_POSE_TOPIC,
+                                SnapshotPacket(
+                                    snapshot=head_pose_snapshot,
+                                    timestamp_s=float(head_pose_snapshot.timestamp_s),
+                                    seq=int(head_pose_snapshot.seq),
+                                ),
+                            )
+                            last_head_pose_seq = int(head_pose_snapshot.seq)
+                    except Exception:
+                        _disable_head_pose_publisher(
+                            "OpenNeck head-pose stream failed; neck control is disabled "
+                            "while pico_input continues"
+                        )
+
                 if callable(getattr(provider, "has_frame", None)) and provider.has_frame():
                     try:
                         frame, timestamp_s, seq = provider.get_frame_packet()
@@ -715,6 +761,7 @@ def _run_pico_io_worker(
                             metrics={
                                 "body_seq": last_body_seq,
                                 "body_fps": float(provider.fps),
+                                "head_pose_seq": last_head_pose_seq,
                                 "hand_seq": last_hand_seq,
                                 "controller_seq": last_controller_seq,
                                 "video_seq": last_video_seq,
@@ -728,7 +775,19 @@ def _run_pico_io_worker(
             if frame_writer is not None:
                 frame_writer.close(unlink=True)
             command_sub.close()
-            for publisher in (body_pub, hand_pub, controller_pub, events_pub, health_pub, video_pub):
+            if head_pose_pub is not None:
+                try:
+                    head_pose_pub.close()
+                except Exception:
+                    logger.exception("Failed to close OpenNeck head-pose publisher")
+            for publisher in (
+                body_pub,
+                hand_pub,
+                controller_pub,
+                events_pub,
+                health_pub,
+                video_pub,
+            ):
                 if publisher is not None:
                     publisher.close()
             provider.close()
@@ -2086,7 +2145,7 @@ def _run_neck_worker(
     def _main() -> None:
         neck_cfg = parse_neck_config(cfg)
         runtime = build_neck_runtime(neck_cfg)
-        body_sub = LatestSubscriber(endpoints.body_pub, BODY_TOPIC)
+        head_pose_sub = LatestSubscriber(endpoints.head_pose_pub, HEAD_POSE_TOPIC)
         mode_sub = LatestSubscriber(endpoints.mode_pub, MODE_TOPIC)
         command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
         neck_command_pub = (
@@ -2094,9 +2153,10 @@ def _run_neck_worker(
             if _recording_enabled(cfg)
             else None
         )
-        latest_frame: Any | None = None
-        latest_frame_timestamp_s: float | None = None
-        latest_body_seq = -1
+        latest_hmd_rotation: Float64Array | None = None
+        latest_spine3_rotation: Float64Array | None = None
+        latest_pose_timestamp_s: float | None = None
+        latest_pose_seq = -1
         latest_mode: ModeStatePacket | None = None
         command_count = 0
         command_seq = 0
@@ -2140,12 +2200,13 @@ def _run_neck_worker(
                 if isinstance(runtime_command, CommandPacket) and runtime_command.command == "shutdown":
                     stop_event.set()
                     break
-                body_packet = body_sub.recv_latest()
-                frame, frame_timestamp_s, body_seq = body_packet_frame(body_packet)
-                if frame is not None:
-                    latest_frame = frame
-                    latest_frame_timestamp_s = frame_timestamp_s
-                    latest_body_seq = body_seq
+                pose_packet = head_pose_sub.recv_latest()
+                hmd_rotation, spine3_rotation, pose_timestamp_s, pose_seq = head_pose_packet(pose_packet)
+                if pose_seq >= 0:
+                    latest_hmd_rotation = hmd_rotation
+                    latest_spine3_rotation = spine3_rotation
+                    latest_pose_timestamp_s = pose_timestamp_s
+                    latest_pose_seq = pose_seq
                 mode_packet = mode_sub.recv_latest()
                 if isinstance(mode_packet, ModeStatePacket):
                     latest_mode = mode_packet
@@ -2153,8 +2214,9 @@ def _run_neck_worker(
                 active = mode_packet_active(latest_mode, neck_cfg)
                 try:
                     neck_command = runtime.tick(
-                        frame=latest_frame,
-                        frame_timestamp_s=latest_frame_timestamp_s,
+                        hmd_rotation_wxyz=latest_hmd_rotation,
+                        spine3_rotation_wxyz=latest_spine3_rotation,
+                        pose_timestamp_s=latest_pose_timestamp_s,
                         active=active,
                         now_s=now_s,
                     )
@@ -2170,8 +2232,8 @@ def _run_neck_worker(
                     logger.exception("OpenNeck worker tick failed; neck control continues")
                 if now_s - last_status_s >= 5.0:
                     logger.debug(
-                        "OpenNeck worker status | body_seq=%s commands=%s active=%s",
-                        latest_body_seq,
+                        "OpenNeck worker status | head_pose_seq=%s commands=%s active=%s",
+                        latest_pose_seq,
                         command_count,
                         active,
                     )
@@ -2181,7 +2243,7 @@ def _run_neck_worker(
             try:
                 runtime.close()
             finally:
-                body_sub.close()
+                head_pose_sub.close()
                 mode_sub.close()
                 command_sub.close()
                 if neck_command_pub is not None:

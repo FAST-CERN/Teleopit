@@ -116,7 +116,7 @@ manifest entry is committed are discarded on the next recording startup.
 ## OpenNeck Active Vision
 
 Pico sim2real can drive the optional OpenNeck two-axis active-vision gimbal from
-the same Pico body tracking stream used for whole-body control:
+the same Pico receiver used for whole-body control:
 
 ```bash
 pip install -e '.[openneck]'
@@ -128,12 +128,15 @@ python scripts/run/run_sim2real.py --config-name pico4_sim2real \
 
 `neck.enabled=true` requires `input.provider=pico4`. The neck worker reuses the
 existing Teleopit Pico receiver and does not start another `PicoBridge` or
-camera pipeline. It maps the absolute `Head` orientation relative to `Spine3`
-with a fixed neutral pose and no neck-side EMA, so tracking startup does not
-require the operator to face straight ahead. Teleopit sends physical yaw/pitch
-angles through the OpenNeck 0.2.0 `move_deg()` API; OpenNeck converts those
-angles for its direct-drive servos and clips them to the calibrated mechanical
-step limits. Positive yaw turns left and positive pitch looks up.
+camera pipeline. The neck path reads the independent HMD
+`PicoFrame.head.rotation` and maps it relative to `Body.Spine3` from the same
+source frame. It never uses the full-body tracker's `Body.Head` skeleton joint,
+whose model constraints can under-report extreme head pitch. The mapper uses a
+fixed neutral pose and no neck-side EMA, so tracking startup does not require
+the operator to face straight ahead. Teleopit sends physical yaw/pitch angles
+through the OpenNeck 0.2.0 `move_deg()` API; OpenNeck converts those angles for
+its direct-drive servos and clips them to the calibrated mechanical step
+limits. Positive yaw turns left and positive pitch looks up.
 
 OpenNeck 0.2.0 uses an angle-based calibration file and rejects the previous
 normalized configuration fields. Re-run `openneck calibrate` before enabling

@@ -94,6 +94,16 @@ class PicoHandSnapshot:
     seq: int
 
 
+@dataclass(frozen=True)
+class PicoHeadPoseSnapshot:
+    """Synchronized HMD and torso orientations for active-neck control."""
+
+    hmd_rotation_wxyz: NDArray[np.float64] | None
+    spine3_rotation_wxyz: NDArray[np.float64] | None
+    timestamp_s: float
+    seq: int
+
+
 _PAUSE_BUTTON_MAP: dict[str, tuple[str, str]] = {
     "A": ("right", "primaryButton"),
     "B": ("right", "secondaryButton"),
@@ -173,6 +183,32 @@ def _coordinate_transform_input(body_pose_dict: dict[str, list]) -> dict[str, li
     return body_pose_dict
 
 
+def _transform_pico_native_rotation(rotation_xyzw: Any) -> NDArray[np.float64] | None:
+    """Convert one PICO-native xyzw orientation into Teleopit wxyz coordinates."""
+    try:
+        rotation = np.asarray(rotation_xyzw, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if rotation.shape != (4,) or not np.all(np.isfinite(rotation)):
+        return None
+    quat_wxyz = np.array(
+        [rotation[3], rotation[0], rotation[1], rotation[2]],
+        dtype=np.float64,
+    )
+    norm = float(np.linalg.norm(quat_wxyz))
+    if norm <= 1e-9:
+        return None
+    transformed = quat_mul_np(
+        _INPUT_TO_TELEOPIT_QUAT,
+        quat_wxyz / norm,
+        scalar_first=True,
+    )
+    transformed_norm = float(np.linalg.norm(transformed))
+    if transformed_norm <= 1e-9 or not np.all(np.isfinite(transformed)):
+        return None
+    return np.asarray(transformed / transformed_norm, dtype=np.float64)
+
+
 class Pico4InputProvider(RealtimeInputProvider):
     """Realtime input provider backed by the ``pico_bridge`` receiver."""
 
@@ -240,6 +276,7 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._last_source_seq: int | None = None
         self._controller_snapshot: PicoControllerSnapshot | None = None
         self._hand_snapshot: PicoHandSnapshot | None = None
+        self._head_pose_snapshot: PicoHeadPoseSnapshot | None = None
         self._ground_alignment_offset: float | None = None
         self._bridge = bridge_cls(
             host=bridge_host,
@@ -336,6 +373,11 @@ class Pico4InputProvider(RealtimeInputProvider):
         with self._lock:
             return self._hand_snapshot
 
+    def get_head_pose_snapshot(self) -> PicoHeadPoseSnapshot | None:
+        """Return the latest synchronized HMD/Spine3 orientation snapshot."""
+        with self._lock:
+            return self._head_pose_snapshot
+
     def push_video_frame(self, frame: NDArray[np.uint8]) -> int:
         """Push one RGB camera frame to pico-bridge 0.2.1 video output."""
         push_video_frame = getattr(self._bridge, "push_video_frame", None)
@@ -400,6 +442,7 @@ class Pico4InputProvider(RealtimeInputProvider):
 
     def _accept_pico_frame(self, frame: Any) -> bool:
         timestamp = float(getattr(frame, "receive_time_s", time.monotonic()))
+        self._accept_head_pose_snapshot(frame, timestamp=timestamp)
         self._accept_controller_snapshot(frame, timestamp=timestamp)
         self._accept_hand_snapshot(frame, timestamp=timestamp)
         self._poll_control_events(frame, timestamp=timestamp)
@@ -466,6 +509,35 @@ class Pico4InputProvider(RealtimeInputProvider):
         )
         with self._lock:
             self._hand_snapshot = snapshot
+
+    def _accept_head_pose_snapshot(self, frame: Any, *, timestamp: float) -> None:
+        """Capture HMD and Spine3 rotations from the same pico_bridge frame."""
+        seq = int(getattr(frame, "seq", self._last_source_seq or -1))
+
+        head = getattr(frame, "head", None)
+        hmd_rotation = _transform_pico_native_rotation(
+            None if head is None else getattr(head, "rotation", None)
+        )
+
+        spine3_rotation: NDArray[np.float64] | None = None
+        body = getattr(frame, "body", None)
+        if body is not None and bool(getattr(body, "active", False)):
+            try:
+                body_joints = np.asarray(getattr(body, "joints"), dtype=np.float64)
+            except (AttributeError, TypeError, ValueError):
+                body_joints = np.empty((0, 0), dtype=np.float64)
+            if body_joints.shape == (len(BODY_JOINT_NAMES), 7):
+                spine3 = body_joints[BODY_JOINT_NAMES.index("Spine3")]
+                spine3_rotation = _transform_pico_native_rotation(spine3[[3, 4, 5, 6]])
+
+        snapshot = PicoHeadPoseSnapshot(
+            hmd_rotation_wxyz=hmd_rotation,
+            spine3_rotation_wxyz=spine3_rotation,
+            timestamp_s=float(timestamp),
+            seq=seq,
+        )
+        with self._lock:
+            self._head_pose_snapshot = snapshot
 
     def _poll_control_events(self, frame: Any, *, timestamp: float) -> bool:
         emitted = False

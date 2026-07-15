@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
         default="direct",
         help=(
             "direct sends a conservative fixed motion pattern to OpenNeck; "
-            "pico drives OpenNeck from live Pico head/body tracking through Teleopit's active-neck mapper."
+            "pico drives OpenNeck from live Pico HMD rotation relative to Spine3."
         ),
     )
     parser.add_argument("--port", default=None, help="Optional OpenNeck serial port, for example /dev/ttyACM0")
@@ -154,34 +154,41 @@ def run_pico(args: argparse.Namespace) -> None:
     command_count = 0
 
     print(
-        "Testing OpenNeck active vision from live Pico body tracking. "
-        "OpenNeck follows the current head pose relative to the torso; press Ctrl-C to stop.",
+        "Testing OpenNeck active vision from the live Pico HMD rotation relative to Spine3; "
+        "press Ctrl-C to stop.",
         flush=True,
     )
     try:
         runtime.start()
         while deadline is None or time.monotonic() < deadline:
             now_s = time.monotonic()
-            if provider.has_frame():
-                frame, timestamp_s, seq = provider.get_frame_packet()
-                if int(seq) != last_seq:
-                    command = runtime.tick(
-                        frame=frame,
-                        frame_timestamp_s=timestamp_s,
-                        active=True,
-                        now_s=now_s,
-                    )
-                    moved = command is not None
-                    if moved:
-                        command_count += 1
-                    last_seq = int(seq)
-                    age_ms = max((now_s - float(timestamp_s)) * 1000.0, 0.0)
-                    print(
-                        f"pico seq={seq} age={age_ms:.1f}ms moved={moved} commands={command_count}",
-                        flush=True,
-                    )
-            else:
-                runtime.tick(frame=None, frame_timestamp_s=None, active=True, now_s=now_s)
+            snapshot = provider.get_head_pose_snapshot()
+            if snapshot is not None and int(snapshot.seq) != last_seq:
+                command = runtime.tick(
+                    hmd_rotation_wxyz=snapshot.hmd_rotation_wxyz,
+                    spine3_rotation_wxyz=snapshot.spine3_rotation_wxyz,
+                    pose_timestamp_s=snapshot.timestamp_s,
+                    active=True,
+                    now_s=now_s,
+                )
+                moved = command is not None
+                if moved:
+                    command_count += 1
+                last_seq = int(snapshot.seq)
+                age_ms = max((now_s - float(snapshot.timestamp_s)) * 1000.0, 0.0)
+                print(
+                    f"pico seq={snapshot.seq} age={age_ms:.1f}ms "
+                    f"moved={moved} commands={command_count}",
+                    flush=True,
+                )
+            elif snapshot is None:
+                runtime.tick(
+                    hmd_rotation_wxyz=None,
+                    spine3_rotation_wxyz=None,
+                    pose_timestamp_s=None,
+                    active=True,
+                    now_s=now_s,
+                )
             time.sleep(sleep_s)
     except KeyboardInterrupt:
         print("Interrupted; shutting down OpenNeck", flush=True)

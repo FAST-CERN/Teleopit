@@ -11,6 +11,7 @@ import zmq
 
 
 BODY_TOPIC = "body"
+HEAD_POSE_TOPIC = "head_pose"
 HAND_TOPIC = "hand"
 HAND_COMMAND_TOPIC = "hand_command"
 NECK_COMMAND_TOPIC = "neck_command"
@@ -27,6 +28,7 @@ COMMAND_TOPIC = "command"
 @dataclass(frozen=True)
 class Sim2RealIpcEndpoints:
     body_pub: str
+    head_pose_pub: str
     hand_pub: str
     hand_command_pub: str
     neck_command_pub: str
@@ -46,6 +48,7 @@ def default_endpoints(*, host: str = "127.0.0.1", base_port: int = 39700) -> Sim
     prefix = f"tcp://{host}:"
     return Sim2RealIpcEndpoints(
         body_pub=f"{prefix}{base_port}",
+        head_pose_pub=f"{prefix}{base_port + 13}",
         hand_pub=f"{prefix}{base_port + 1}",
         hand_command_pub=f"{prefix}{base_port + 2}",
         neck_command_pub=f"{prefix}{base_port + 12}",

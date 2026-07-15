@@ -162,10 +162,11 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - `vr_hand_pose` defaults to a low-latency somehand path: `hands.somehand.rate_hz=60`, `max_iterations=12`, `temporal_filter_alpha=1.0`, and `output_alpha=1.0`; this prioritizes response speed over smoothing
 - LinkerHand control is active in all sim2real modes when `hands.enabled=true`; shutdown and hand-runtime failure must send the configured open pose
 - In `vr_hand_pose` mode, missing/inactive hand pose holds the last commanded pose for that side instead of opening the hand
-- Optional OpenNeck active-vision gimbal control uses `neck.enabled=true` and `neck.driver=openneck`; it requires `input.provider=pico4`, reuses the existing Pico body frame stream, and must not start a second `PicoBridge`
+- Optional OpenNeck active-vision gimbal control uses `neck.enabled=true` and `neck.driver=openneck`; it requires `input.provider=pico4`, reuses the existing Pico receiver, and must not start a second `PicoBridge`
 - OpenNeck is integrated as a non-critical sim2real `neck_worker`; failures should not stop the G1 control loop, and no OpenNeck state is added to the 167D policy observation
 - OpenNeck 0.2.0 is the supported runtime; Teleopit sends physical degrees through `move_deg()`, and the direct-drive OpenNeck package converts degrees to servo steps and clips them to its calibrated mechanical limits; the removed normalized API and config fields are unsupported
-- OpenNeck maps the absolute Pico `Head` orientation relative to `Spine3` with a fixed identity neutral pose and no neck-side EMA; it must not capture the first live frame as a runtime zero pose, so tracking can start while the operator's head is turned; positive yaw turns left and positive pitch looks up
+- OpenNeck maps the independent HMD `PicoFrame.head.rotation` relative to the same-frame full-body `Body.Spine3` orientation; it must never use the full-body `Body.Head` skeleton joint for neck control, and HMD pose updates must remain independent of duplicate-body-frame filtering
+- OpenNeck uses a fixed identity neutral pose and no neck-side EMA; it must not capture the first live frame as a runtime zero pose, so tracking can start while the operator's head is turned; positive yaw turns left and positive pitch looks up
 
 ### SimulationLoop Runtime Behavior
 - `realtime=true` enforces wall-clock pacing even without a viewer

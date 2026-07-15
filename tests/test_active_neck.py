@@ -5,11 +5,12 @@ from types import ModuleType, SimpleNamespace
 
 import numpy as np
 
-from teleopit.inputs.pico4_provider import BODY_JOINT_NAMES, Pico4InputProvider
+from teleopit.inputs.pico4_provider import PicoHeadPoseSnapshot
 from teleopit.sim2real.neck.config import NeckConfig, parse_neck_config
-from teleopit.sim2real.neck.mapper import HeadPoseMapper
+from teleopit.sim2real.neck.mapper import HmdPoseMapper
 from teleopit.sim2real.neck.openneck import DryRunNeckDevice, OpenNeckDevice
-from teleopit.sim2real.neck.worker import NeckRuntime, body_packet_frame
+from teleopit.sim2real.neck.worker import NeckRuntime, head_pose_packet
+from teleopit.sim2real.mp.messages import SnapshotPacket
 
 
 def _quat_y(deg: float) -> np.ndarray:
@@ -20,14 +21,6 @@ def _quat_y(deg: float) -> np.ndarray:
 def _quat_x(deg: float) -> np.ndarray:
     rad = math.radians(deg)
     return np.array([math.cos(rad / 2.0), math.sin(rad / 2.0), 0.0, 0.0], dtype=np.float64)
-
-
-def _frame(head: np.ndarray, spine: np.ndarray | None = None):
-    pos = np.zeros(3, dtype=np.float64)
-    frame = {"Head": (pos, head)}
-    if spine is not None:
-        frame["Spine3"] = (pos, spine)
-    return frame
 
 
 class FakeDevice:
@@ -54,54 +47,54 @@ class FakeDevice:
         self.closed = True
 
 
-def test_head_pose_mapper_maps_fixed_pico_convention_to_openneck_degrees() -> None:
-    mapper = HeadPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
+def test_hmd_pose_mapper_maps_fixed_pico_convention_to_openneck_degrees() -> None:
+    mapper = HmdPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
 
-    command = mapper.map_frame(_frame(_quat_y(30.0), _quat_y(0.0)))
+    command = mapper.map_pose(
+        hmd_rotation_wxyz=_quat_y(30.0),
+        spine3_rotation_wxyz=_quat_y(0.0),
+    )
     assert command is not None
     assert command.yaw_deg == pytest_approx(-30.0)
 
-    command = mapper.map_frame(_frame(_quat_y(0.0), _quat_y(0.0)))
+    command = mapper.map_pose(
+        hmd_rotation_wxyz=_quat_y(0.0),
+        spine3_rotation_wxyz=_quat_y(0.0),
+    )
     assert command is not None
     assert command.yaw_deg == pytest_approx(0.0)
 
-    command = mapper.map_frame(_frame(_quat_x(15.0), _quat_x(0.0)))
+    command = mapper.map_pose(
+        hmd_rotation_wxyz=_quat_x(15.0),
+        spine3_rotation_wxyz=_quat_x(0.0),
+    )
     assert command is not None
     assert command.pitch_deg == pytest_approx(-15.0)
 
 
-def test_head_pose_mapper_uses_body_relative_orientation() -> None:
-    mapper = HeadPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
+def test_hmd_pose_mapper_uses_body_relative_orientation() -> None:
+    mapper = HmdPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
 
-    command = mapper.map_frame(_frame(_quat_y(40.0), _quat_y(10.0)))
+    command = mapper.map_pose(
+        hmd_rotation_wxyz=_quat_y(40.0),
+        spine3_rotation_wxyz=_quat_y(10.0),
+    )
 
     assert command is not None
     assert command.yaw_deg == pytest_approx(-30.0)
 
 
-def test_head_pose_mapper_handles_converted_pico_neutral_and_yaw() -> None:
-    body_poses = np.zeros((len(BODY_JOINT_NAMES), 7), dtype=np.float64)
-    body_poses[:, 6] = 1.0
-    mapper = HeadPoseMapper(NeckConfig(enabled=True, dead_zone_deg=0.0))
+def test_hmd_pose_mapper_requires_hmd_and_spine3_orientations() -> None:
+    mapper = HmdPoseMapper(NeckConfig(enabled=True))
 
-    neutral = mapper.map_frame(Pico4InputProvider._convert_body_joints_to_frame(body_poses))
-    assert neutral is not None
-    assert neutral.yaw_deg == pytest_approx(0.0)
-    assert neutral.pitch_deg == pytest_approx(0.0)
-
-    head_idx = BODY_JOINT_NAMES.index("Head")
-    body_poses[head_idx, 4] = math.sin(math.radians(30.0) / 2.0)
-    body_poses[head_idx, 6] = math.cos(math.radians(30.0) / 2.0)
-    command = mapper.map_frame(Pico4InputProvider._convert_body_joints_to_frame(body_poses))
-    assert command is not None
-    assert command.yaw_deg == pytest_approx(-30.0)
-    assert command.pitch_deg == pytest_approx(0.0)
-
-
-def test_head_pose_mapper_requires_spine3_joint() -> None:
-    mapper = HeadPoseMapper(NeckConfig(enabled=True))
-
-    assert mapper.map_frame(_frame(_quat_y(30.0))) is None
+    assert mapper.map_pose(
+        hmd_rotation_wxyz=_quat_y(30.0),
+        spine3_rotation_wxyz=None,
+    ) is None
+    assert mapper.map_pose(
+        hmd_rotation_wxyz=None,
+        spine3_rotation_wxyz=_quat_y(0.0),
+    ) is None
 
 
 def test_neck_runtime_sends_degrees_and_returns_applied_target() -> None:
@@ -116,14 +109,16 @@ def test_neck_runtime_sends_degrees_and_returns_applied_target() -> None:
 
     runtime.start()
     command = runtime.tick(
-        frame=_frame(_quat_y(30.0), _quat_y(0.0)),
-        frame_timestamp_s=1.0,
+        hmd_rotation_wxyz=_quat_y(30.0),
+        spine3_rotation_wxyz=_quat_y(0.0),
+        pose_timestamp_s=1.0,
         active=True,
         now_s=1.01,
     )
     neutral_command = runtime.tick(
-        frame=_frame(_quat_y(0.0), _quat_y(0.0)),
-        frame_timestamp_s=1.02,
+        hmd_rotation_wxyz=_quat_y(0.0),
+        spine3_rotation_wxyz=_quat_y(0.0),
+        pose_timestamp_s=1.02,
         active=True,
         now_s=1.03,
     )
@@ -179,10 +174,44 @@ def test_neck_runtime_closes_after_shutdown_center_failure() -> None:
     assert device.closed is True
 
 
-def test_body_packet_frame_ignores_incomplete_packets() -> None:
-    assert body_packet_frame(None) == (None, None, -1)
-    assert body_packet_frame(SimpleNamespace(frame=_frame(_quat_y(0.0)))) == (None, None, -1)
-    assert body_packet_frame(SimpleNamespace(frame=_frame(_quat_y(0.0)), timestamp_s="bad", seq=1)) == (None, None, -1)
+def test_head_pose_packet_extracts_synchronized_snapshot() -> None:
+    snapshot = PicoHeadPoseSnapshot(
+        hmd_rotation_wxyz=_quat_y(20.0),
+        spine3_rotation_wxyz=_quat_y(5.0),
+        timestamp_s=1.0,
+        seq=4,
+    )
+
+    hmd_rotation, spine3_rotation, timestamp_s, seq = head_pose_packet(
+        SnapshotPacket(snapshot=snapshot, timestamp_s=1.0, seq=4)
+    )
+
+    np.testing.assert_allclose(hmd_rotation, _quat_y(20.0))
+    np.testing.assert_allclose(spine3_rotation, _quat_y(5.0))
+    assert timestamp_s == 1.0
+    assert seq == 4
+
+
+def test_head_pose_packet_ignores_incomplete_or_mismatched_packets() -> None:
+    assert head_pose_packet(None) == (None, None, None, -1)
+    assert head_pose_packet(SimpleNamespace(snapshot=object(), timestamp_s=1.0, seq=1)) == (
+        None,
+        None,
+        None,
+        -1,
+    )
+    snapshot = PicoHeadPoseSnapshot(
+        hmd_rotation_wxyz=_quat_y(0.0),
+        spine3_rotation_wxyz=_quat_y(0.0),
+        timestamp_s=1.0,
+        seq=2,
+    )
+    assert head_pose_packet(SnapshotPacket(snapshot=snapshot, timestamp_s=1.0, seq=3)) == (
+        None,
+        None,
+        None,
+        -1,
+    )
 
 
 def test_openneck_device_uses_angle_api_and_returns_applied_target(monkeypatch) -> None:
