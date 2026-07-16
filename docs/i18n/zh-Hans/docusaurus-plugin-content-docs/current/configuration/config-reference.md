@@ -125,6 +125,43 @@ MuJoCo 窗口显示重定向参考；`sim2sim`、`mocap`、`camera` 和 `all`
 | `mocap_switch.check_frames` | 切换到 MOCAP 前所需的连续有效帧数 | `10` |
 | `arm_mocap.controlled_joint_indices` | Pico `ARMS` 模式下由实时 retargeting 驱动的 G1 关节 | `[15..28]` |
 
+### 主机 High-Level Policy（独立 sim2real）
+
+`high_level_policy_sim2real.yaml` 只供
+`scripts/run/run_high_level_policy_sim2real.py` 使用。它会启动 camera、network
+client、robot-control、LinkerHand O6 和 OpenNeck worker；不会启动 PicoBridge、GMR
+或 retarget reference worker。主机 LeRobot 环境保持独立，并且必须跟随当前
+client/server 消息结构与协议测试。唯一共享的数据文件是 `hand_calibration.json`。
+
+| 字段 | 说明 | 默认值 |
+|------|------|--------|
+| `camera.source` | Onboard 策略相机：`realsense`，或仅供集成测试的 `test-pattern` | `realsense` |
+| `camera.width` / `height` / `fps` | 精确的策略图像契约 | `640` / `480` / `30` |
+| `camera.device` | 可选 RealSense 序列号 | `null` |
+| `high_level_policy.endpoint` | 主机策略 ZeroMQ TCP endpoint | `tcp://127.0.0.1:5555` |
+| `high_level_policy.task` | reset 和每个 observation 都会发送的非空任务 prompt | `demo` |
+| `high_level_policy.timeout_s` | 单次网络请求 deadline | `1.0` |
+| `high_level_policy.reconnect_backoff_s` | 建立新 session 时的重试间隔 | `1.0` |
+| `high_level_policy.replan_steps` | 两次请求之间的最小 30 Hz source-frame 间隔；不能超过主机 horizon | `3` |
+| `high_level_policy.jpeg_quality` | 640x480 RGB 帧的 JPEG 质量 | `90` |
+| `high_level_policy.max_observation_age_s` | 跳过请求前允许的最大 camera/observation age | `0.15` |
+| `high_level_policy.max_result_age_s` | 拒绝已接收结果前允许的最大本地 IPC age | `0.1` |
+| `high_level_policy.entry_timeout_s` | 保持 `STANDING` 等待首个有效 chunk 的最长时间 | `3.0` |
+| `high_level_policy.hold_s` | Watchdog 暂停 `POLICY` 前，最后一条有效 reference 的 grace period | `0.1` |
+| `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | 可接受的绝对 root 高度范围 | `0.55` / `1.05` |
+| `high_level_policy.safety.max_root_xy_speed_m_s` | 30 Hz reference 之间允许的最大 root XY 速度 | `2.5` |
+| `high_level_policy.safety.max_root_displacement_m` | reference 帧之间允许的最大 3D root 位移 | `0.1` |
+| `high_level_policy.safety.max_yaw_rate_rad_s` | 最大 root yaw rate | `2.5` |
+| `high_level_policy.safety.max_joint_rate_rad_s` | 最大单关节 reference rate | `10.0` |
+| `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | 可接受的 OpenNeck yaw 命令范围 | `-45` / `45` |
+| `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | 可接受的 OpenNeck pitch 命令范围 | `-40` / `40` |
+
+G1 reference joint position 会按 `real_robot.joint_pos_lower/upper` 检查。由于 canonical
+50D action 的所有字段都处于启用状态，初始运行时要求
+`hands.driver=linkerhand_o6`、左右两只手以及 `neck.driver=openneck`。OpenNeck 策略值
+在 chunk 验证后直接发送给 `move_deg(yaw, pitch)`；不会应用 Pico dead-zone 或 pitch-gain
+映射。
+
 ### 真机 SDK
 
 | 字段 | 说明 | 默认值 |

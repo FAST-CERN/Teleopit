@@ -24,6 +24,7 @@ dependencies = [
     "h5py",
     "onnxruntime",
     "pyzmq",
+    "msgpack",
     "rich",
     "loop-rate-limiters",
     "imageio",
@@ -71,3 +72,6 @@ dexhand = []
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["teleopit*", "train_mimic*"]
+
+[tool.setuptools.package-data]
+"teleopit.high_level_policy" = ["hand_calibration.json"]

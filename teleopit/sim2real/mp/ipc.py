@@ -23,6 +23,11 @@ VIDEO_TOPIC = "video"
 RECORD_TOPIC = "record"
 HEALTH_TOPIC = "health"
 COMMAND_TOPIC = "command"
+HIGH_LEVEL_POLICY_SESSION_TOPIC = "high_level_policy_session"
+HIGH_LEVEL_POLICY_OBSERVATION_TOPIC = "high_level_policy_observation"
+HIGH_LEVEL_POLICY_ACTION_TOPIC = "high_level_policy_action"
+HIGH_LEVEL_POLICY_STATUS_TOPIC = "high_level_policy_status"
+HIGH_LEVEL_POLICY_TARGET_TOPIC = "high_level_policy_target"
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,8 @@ class Sim2RealIpcEndpoints:
     health_pub: str
     command_pub: str
     reference_command_pub: str
+    high_level_policy_control_pub: str
+    high_level_policy_result_pub: str
 
 
 def default_endpoints(*, host: str = "127.0.0.1", base_port: int = 39700) -> Sim2RealIpcEndpoints:
@@ -61,6 +68,8 @@ def default_endpoints(*, host: str = "127.0.0.1", base_port: int = 39700) -> Sim
         health_pub=f"{prefix}{base_port + 9}",
         command_pub=f"{prefix}{base_port + 10}",
         reference_command_pub=f"{prefix}{base_port + 11}",
+        high_level_policy_control_pub=f"{prefix}{base_port + 14}",
+        high_level_policy_result_pub=f"{prefix}{base_port + 15}",
     )
 
 

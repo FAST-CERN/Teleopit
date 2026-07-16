@@ -128,6 +128,44 @@ timelines. Because recordings do not contain measured root XYZ, the observed
 pose is anchored to the reference root position; joint and root-orientation
 comparisons remain valid.
 
+## Host High-Level Policy Deployment
+
+Teleopit can run a host-served ReplayPolicy or LeRobot ACT policy through a
+dedicated onboard runtime. The host policy remains in the independent
+`lerobot-teleopit` repository/environment; Teleopit receives canonical 50D
+reference chunks over ZeroMQ, validates and interpolates them onboard, and
+rate-limits plan switches at 50 Hz before passing the 36D body reference
+through the existing motion tracker. The host never sends G1 motor commands.
+
+Pico and high-level-policy deployment use separate scripts. The policy runtime
+does not start PicoBridge, GMR, or the Pico reference worker:
+
+```bash
+python scripts/run/run_high_level_policy_sim2real.py \
+    controller.policy_path=track.onnx \
+    high_level_policy.endpoint=tcp://192.168.1.10:5555 \
+    high_level_policy.task="pick up the object" \
+    real_robot.network_interface=eth0
+```
+
+Use the Unitree remote: `Start` enters `STANDING`, `Y` requests policy
+takeover, `B` pauses/resumes, `X` returns to `STANDING`, and `L1+R1` enters
+`DAMPING`. While the first host chunk is being checked, the robot remains in
+`STANDING`; there is no separate starting mode. Invalid/stale chunks and
+watchdog expiry cannot block the local control loop and instead pause `POLICY`
+while holding the last reference. Host/network failure and loss of a required
+camera/client worker use the same ordinary pause state as remote `B`; after
+recovery, press `B` to resume on a fresh valid chunk. The runtime never enters
+`STANDING` automatically, and `X` remains the manual transition.
+
+The current client/server code and protocol tests define the network message
+structure. During active development, Teleopit and `lerobot-teleopit` must be
+updated together. Their only shared data file is `hand_calibration.json`, which
+contains the LinkerHand O6 open/close calibration. See the
+[host-policy deployment tutorial](https://BotRunner64.github.io/Teleopit/tutorials/high-level-policy-sim2real)
+for the 68D observation, 50D action layout, safety envelope, host startup, and
+operator procedure.
+
 ## OpenNeck Active Vision
 
 Pico sim2real can drive the optional OpenNeck two-axis active-vision gimbal from

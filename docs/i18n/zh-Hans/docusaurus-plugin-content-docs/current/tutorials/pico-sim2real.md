@@ -149,6 +149,7 @@ python scripts/view/view_recording.py \
 |------|------|
 | Unitree remote `Start` | 进入 `STANDING` |
 | Unitree remote `Y` | 进入 `MOCAP` |
+| Unitree remote `B` | 暂停 / 恢复实时动捕 |
 | Pico/controller `A` | 暂停 / 恢复实时动捕 |
 | Pico/controller `B` | 在 `MOCAP` / `ARMS` 之间切换 |
 | Unitree remote `X` | 返回 `STANDING` |
@@ -179,7 +180,8 @@ policy/reference 对齐，并使用同一套 Kp ramp 安全路径。
 
 ## 暂停 / 恢复
 
-Pico 暂停/恢复是 mocap-session control event。
+Pico 暂停/恢复是 mocap-session control event。可以使用 Unitree remote `B` 或
+Pico/controller `A`；Pico/controller `B` 仍用于切换 `MOCAP` / `ARMS`。
 
 - `ACTIVE`：暂停键冻结当前参考姿态。
 - `PAUSED`：再次按下会清空 policy/reference 状态，预热实时 buffer，重新居中 yaw/XY 对齐，

@@ -60,4 +60,5 @@ python scripts/run/run_sim.py controller.policy_path=track.onnx 'viewers=[retarg
 - [Standalone Standing](../tutorials/standalone-standing) - Check G1 bridge, network, and policy standing
 - [Pico Sim2Real](../tutorials/pico-sim2real) - Deploy Pico teleoperation to Unitree G1
 - [BVH Sim2Real](../tutorials/bvh-sim2real) - Replay offline BVH motions on Unitree G1
+- [Host Policy Sim2Real](../tutorials/high-level-policy-sim2real) - Connect an independent LeRobot policy host to the onboard motion tracker
 - [Training](../tutorials/training) - Train your own policy

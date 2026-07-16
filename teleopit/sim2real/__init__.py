@@ -1,5 +1,6 @@
 __all__ = [
     "Sim2RealRuntime",
+    "HighLevelPolicySim2RealRuntime",
     "UnitreeG1Robot",
     "UnitreeRemote",
     "Button",
@@ -11,6 +12,10 @@ def __getattr__(name: str):
         from teleopit.sim2real.mp import Sim2RealRuntime
 
         return Sim2RealRuntime
+    if name == "HighLevelPolicySim2RealRuntime":
+        from teleopit.sim2real.mp import HighLevelPolicySim2RealRuntime
+
+        return HighLevelPolicySim2RealRuntime
     if name == "UnitreeG1Robot":
         from teleopit.sim2real.unitree_g1 import UnitreeG1Robot
 

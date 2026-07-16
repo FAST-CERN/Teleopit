@@ -18,6 +18,25 @@ InputProvider (BVH file / Pico4)
 
 Offline/online inference is assembled by `teleopit/runtime/` and `teleopit/pipeline.py`. The hardware state machine runs through the process-isolated runtime in `teleopit/sim2real/mp/`. Training is provided by `train_mimic/`.
 
+Host-served imitation policies use a second, independent deployment path:
+
+```text
+lerobot-teleopit host environment
+  policy server -> strict ZeroMQ/msgpack messages
+                       |
+Teleopit onboard environment
+  RealSense/state -> non-critical client worker -> validated action scheduler
+  -> existing 50 Hz motion tracker -> G1 joint-angle targets
+  -> dedicated LinkerHand O6 and OpenNeck workers
+```
+
+The host and onboard environments share semantic data and one identical
+`hand_calibration.json`; they do not import each other's Python packages. The
+current client/server code and protocol tests define the network structure, so
+both repositories must change together during active development. Pico
+teleoperation and host-policy deployment also have separate run scripts and
+process assemblies.
+
 ## Code Structure
 
 ```text
@@ -44,6 +63,7 @@ train_mimic/scripts/data
 | `teleopit/runtime/` | Config parsing, path normalization, component assembly, CLI validation |
 | `teleopit/pipeline.py` | Lightweight facade for offline sim |
 | `teleopit/sim2real/mp/` | Process-isolated sim2real state machine, IPC, and robot-control loop |
+| `teleopit/high_level_policy/` | Host-policy protocol, session-local frame transform, validation, and 30-to-50 Hz scheduler |
 | `teleopit/controllers/observation.py` | ObservationBuilder |
 | `teleopit/controllers/rl_policy.py` | Accepts dual-input ONNX whose observation dimension matches the runtime builder |
 | `train_mimic/app.py` | Shared train/play/benchmark assembly |
@@ -61,6 +81,9 @@ train_mimic/scripts/data
 | Training sampling | Default `rewind`; also supports `uniform`; playback uses `start`; benchmark pins exact clips and disables clip-end resampling |
 | Training `window_steps` | `[0]` |
 | Data format | Minimal recursive HDF5 shards (`shard_*.h5`) |
+| Host-policy observation | JPEG RGB + `observation.state(68)` |
+| Host-policy action | `float32[T,50]` canonical reference at 30 Hz |
+| Host-policy body control | 36D root/joint reference through the existing 50 Hz motion tracker |
 
 ## Constraints
 
@@ -69,10 +92,14 @@ train_mimic/scripts/data
 - `viewers` is the sole viewer configuration entry
 - Observation/ONNX dimension mismatch causes immediate startup error
 - sim2real also requires a dual-input ONNX whose observation dimension matches the runtime builder
+- Host-policy message-envelope or schema mismatches are rejected while the robot remains in `STANDING`
+- Host action chunks are validated and interpolated onboard; the host cannot bypass the motion tracker or send motor commands
+- Waiting for the first host chunk is not a robot mode: the formal takeover mode is only `POLICY`
 
 ## Public Surface
 
-**Stable run modes:** offline sim2sim, offline sim2real playback, Pico4 sim2sim, G1 sim2real
+**Stable run modes:** offline sim2sim, offline sim2real playback, Pico4 sim2sim,
+G1 sim2real, independent host-policy G1 sim2real
 
 **Stable training entry points:** `train.py`, `play.py`, `benchmark.py`, `save_onnx.py`
 

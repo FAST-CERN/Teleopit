@@ -16,6 +16,7 @@ Runtime assembly is centralized in `teleopit/runtime/`. Scripts, `TeleopPipeline
 | `teleopit/configs/pico4_sim.yaml` | Pico 4 VR sim2sim |
 | `teleopit/configs/sim2real.yaml` | BVH sim2real on Unitree G1 |
 | `teleopit/configs/pico4_sim2real.yaml` | Pico 4 VR sim2real on Unitree G1 |
+| `teleopit/configs/high_level_policy_sim2real.yaml` | Independent host-policy sim2real on Unitree G1 |
 
 These compose sub-configs:
 

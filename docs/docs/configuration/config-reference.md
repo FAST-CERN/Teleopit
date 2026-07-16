@@ -106,6 +106,45 @@ and `all` are simulation-only viewer modes.
 | `mocap_switch.check_frames` | Consecutive valid frames required before switching to MOCAP | `10` |
 | `arm_mocap.controlled_joint_indices` | G1 joints driven by live retargeting in Pico `ARMS` mode | `[15..28]` |
 
+### Host High-Level Policy (independent sim2real)
+
+`high_level_policy_sim2real.yaml` is used only by
+`scripts/run/run_high_level_policy_sim2real.py`. It starts camera, network
+client, robot-control, LinkerHand O6, and OpenNeck workers. It does not start
+PicoBridge, GMR, or a retarget reference worker. The host LeRobot environment
+remains separate and must track the current client/server message structure and
+protocol tests. The only shared data file is `hand_calibration.json`.
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `camera.source` | Onboard policy camera: `realsense` or integration-only `test-pattern` | `realsense` |
+| `camera.width` / `height` / `fps` | Exact policy image contract | `640` / `480` / `30` |
+| `camera.device` | Optional RealSense serial | `null` |
+| `high_level_policy.endpoint` | Host policy ZeroMQ TCP endpoint | `tcp://127.0.0.1:5555` |
+| `high_level_policy.task` | Non-empty task prompt sent on reset and every observation | `demo` |
+| `high_level_policy.timeout_s` | Per-request network deadline | `1.0` |
+| `high_level_policy.reconnect_backoff_s` | Retry delay while establishing a new session | `1.0` |
+| `high_level_policy.replan_steps` | Minimum 30 Hz source-frame interval between requests; must not exceed host horizon | `3` |
+| `high_level_policy.jpeg_quality` | JPEG quality for the 640x480 RGB frame | `90` |
+| `high_level_policy.max_observation_age_s` | Maximum camera/observation age before a request is skipped | `0.15` |
+| `high_level_policy.max_result_age_s` | Maximum local IPC age before a received result is rejected | `0.1` |
+| `high_level_policy.entry_timeout_s` | Maximum wait for the first valid chunk while remaining in `STANDING` | `3.0` |
+| `high_level_policy.hold_s` | Final validated-reference grace period before the watchdog pauses `POLICY` | `0.1` |
+| `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | Accepted absolute root-height range | `0.55` / `1.05` |
+| `high_level_policy.safety.max_root_xy_speed_m_s` | Maximum root XY speed across 30 Hz references | `2.5` |
+| `high_level_policy.safety.max_root_displacement_m` | Maximum 3D root displacement between reference frames | `0.1` |
+| `high_level_policy.safety.max_yaw_rate_rad_s` | Maximum root yaw rate | `2.5` |
+| `high_level_policy.safety.max_joint_rate_rad_s` | Maximum per-joint reference rate | `10.0` |
+| `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | Accepted OpenNeck yaw command range | `-45` / `45` |
+| `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | Accepted OpenNeck pitch command range | `-40` / `40` |
+
+G1 reference joint positions are checked against
+`real_robot.joint_pos_lower/upper`. The initial runtime requires
+`hands.driver=linkerhand_o6`, both hand sides, and `neck.driver=openneck` because
+all canonical 50D action fields are active. OpenNeck policy values go directly
+to `move_deg(yaw, pitch)` after chunk validation; Pico dead-zone and pitch-gain
+mapping are not applied.
+
 ### Real Robot
 
 | Field | Description | Default |

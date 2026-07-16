@@ -12,9 +12,14 @@ Config: Hydra/OmegaConf YAML files in `teleopit/configs/`
 
 ```
 InputProvider (BVH file / Pico4 VR) → Retargeter (GMR) → ObservationBuilder (167D) → Controller (dual-input TemporalCNN ONNX) → Robot (MuJoCo + PD / Unitree SDK)
+
+Host policy service → onboard policy client/scheduler → 36D reference → same ObservationBuilder/Controller → Unitree SDK
 ```
 
-Module-internal isolation: all modules run in-process and communicate via `InProcessBus` (zero-copy). Core interfaces are defined as `typing.Protocol` in `teleopit/interfaces.py`.
+Offline core modules communicate through `InProcessBus` (zero-copy). Sim2real
+workers use localhost ZMQ plus shared-memory video rings, while the external
+host-policy boundary uses strict msgpack/ZeroMQ without pickle. Core interfaces
+are defined as `typing.Protocol` in `teleopit/interfaces.py`.
 
 ## Supported Surface
 
@@ -22,6 +27,7 @@ Module-internal isolation: all modules run in-process and communicate via `InPro
 - Inference observation: `velcmd_history` (167D, dual-input ONNX with `obs` + `obs_history`)
 - TemporalCNN actor/critic with scaled dims (2048,1024,512,256,128)
 - Realtime inference uses a retargeted-reference timeline before observation build; `reference_steps=[0]` is the default production path
+- Host high-level-policy deployment uses an independent script/environment boundary; its network structure is defined by the current client/server code and protocol tests, and LeRobot is not a Teleopit dependency
 
 ## Directory Structure
 
@@ -58,10 +64,12 @@ teleopit/                 # Core inference package
 │   ├── mp/               # Process-isolated sim2real runtime and IPC
 │   ├── hands/            # Optional LinkerHand driver/mapper plugins
 │   └── neck/             # Optional OpenNeck active-vision gimbal control
+├── high_level_policy/    # Host-policy protocol, strict client, frame transform, and action scheduler
 └── recording/            # Pico motion NPZ recording helpers
 scripts/
 ├── run/run_sim.py        # Offline sim2sim pipeline
 ├── run/run_sim2real.py   # G1 sim2real control; supports offline BVH playback and Pico4
+├── run/run_high_level_policy_sim2real.py # Independent host-policy deployment runtime
 ├── run/record_pico_motion.py # Interactive Pico recording → G1 motion NPZ clips
 ├── render/render_sim.py  # Render single BVH → 3 MuJoCo videos (mocap input, retarget, sim2sim)
 ├── view/view_recording.py # Read-only synchronized sim2real recording reviewer
@@ -143,7 +151,7 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - Pico sim2sim supports a keyboard-driven top-level mode state machine: `STANDING → MOCAP ↔ ARMS`, `X` returns to `STANDING`
 - Default Pico sim2sim keyboard mappings are `Y` → `MOCAP`, `A` → pause/resume mocap, `B` → toggle `MOCAP`/`ARMS`, `X` → back to `STANDING`, `Q` → quit
 - Pico4 sim2real pause/resume is handled as a mocap-session control event (`toggle_pause`), not as a mode switch to `STANDING`
-- Default Pico pause button is `A`; resume resets policy/reference state and yaw/XY root-offset alignment while the process-isolated realtime reference worker continues its live input timeline
+- Default Pico/controller pause button is `A`; Unitree remote `B` also pauses/resumes Pico sim2real. Resume resets policy/reference state and yaw/XY root-offset alignment while the process-isolated realtime reference worker continues its live input timeline
 - Pico4 sim2real arms the process-isolated reference worker only when entering `MOCAP`; `STANDING` and `DAMPING` disarm it so cold startup frames do not warm-start GMR before mocap entry
 - Pico4 sim2sim/sim2real support `ARMS` mode toggled from `MOCAP` with Pico/controller `B`; retargeting continues, while the control loop sends the motion tracker a composed reference with stand-pose body/legs/waist and live retargeted arms
 - `ARMS` entering/exiting/resume resets policy/reference alignment and uses Kp ramp; offline BVH sim2real does not use `ARMS`, and Unitree remote `B` remains BVH replay
@@ -166,6 +174,22 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - In `vr_hand_pose` mode, missing/inactive hand pose holds the last commanded pose for that side instead of opening the hand
 - Optional OpenNeck active-vision gimbal control uses `neck.enabled=true` and `neck.driver=openneck`; it requires `input.provider=pico4`, reuses the existing Pico receiver, and must not start a second `PicoBridge`
 - OpenNeck is integrated as a non-critical sim2real `neck_worker`; failures should not stop the G1 control loop, and no OpenNeck state is added to the 167D policy observation
+
+### Host High-Level Policy
+- `scripts/run/run_high_level_policy_sim2real.py` is independent from the Pico `run_sim2real.py` runtime; it must not start PicoBridge, GMR, or the realtime retarget reference worker
+- The host LeRobot/ReplayPolicy service runs in the separate `lerobot-teleopit` repository and environment; Teleopit must not depend on LeRobot, Transformers, or host policy classes
+- The current client/server code and protocol tests define the ZeroMQ request/response structure. During active development, Teleopit and `lerobot-teleopit` must update that structure together; no legacy network envelope is supported
+- The only shared data file is `hand_calibration.json`, which contains the LinkerHand O6 open/close calibration and must stay identical in both repositories
+- The host boundary uses ZeroMQ REQ/REP with msgpack and non-pickle float32 arrays. The onboard network client runs in a non-critical worker and never blocks the 50 Hz robot loop
+- Policy observation is RGB JPEG plus `observation.state(68)`; only `state[58:62]` is rotated into the session-local yaw frame
+- Canonical action is `float32[T,50]`: local root `xyz(3)` + local root quaternion `wxyz(4)` + G1 joint reference `29` + left/right O6 closure `12` + OpenNeck yaw/pitch degrees `2`
+- The body reference `[0:36]` is yaw/XY-delocalized once and sent through the existing motion tracker. It is never sent directly as a G1 motor command and must not pass through the mocap alignment a second time
+- High-level-policy formal robot modes are `IDLE`, `STANDING`, `POLICY`, and `DAMPING`. After Unitree remote `Y`, first-chunk handshake remains an internal pending condition while the robot stays in `STANDING`; do not add a `POLICY_STARTING` mode
+- Unitree remote controls are `Start -> STANDING`, `Y -> request POLICY`, `B -> pause/resume`, `X -> STANDING/cancel pending`, and `L1+R1 -> DAMPING`
+- Policy pause freezes the scheduler/body reference and holds the latest hand/neck command. Leaving `POLICY` opens LinkerHand and centers OpenNeck
+- The onboard scheduler rejects whole chunks on shape/finiteness, session/sequence, quaternion, root displacement/height/speed/yaw-rate, G1 joint position/rate, hand closure, OpenNeck degree range, or staleness failures; never pad, trim, or safety-clip invalid host output
+- A short cached-reference grace period is allowed; exhaustion, host/network failure, or loss of a required camera/client worker puts `POLICY` into the same resumable pause state used by remote `B`. The runtime never enters `STANDING` automatically; `B` resumes after a fresh valid chunk is available, while `X` remains the manual transition to `STANDING`
+- Initial production hardware support requires two LinkerHand O6 hands and OpenNeck because all 50 canonical action dimensions are active
 - OpenNeck 0.2.0 is the supported runtime; Teleopit sends physical degrees through `move_deg()`, and the direct-drive OpenNeck package converts degrees to servo steps and clips them to its calibrated mechanical limits; the removed normalized API and config fields are unsupported
 - OpenNeck maps the independent HMD `PicoFrame.head.rotation` relative to the same-frame full-body `Body.Spine3` orientation; it must never use the full-body `Body.Head` skeleton joint for neck control, and HMD pose updates must remain independent of duplicate-body-frame filtering
 - OpenNeck uses a fixed identity neutral pose and no neck-side EMA; it must not capture the first live frame as a runtime zero pose, so tracking can start while the operator's head is turned

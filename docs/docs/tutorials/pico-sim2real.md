@@ -161,6 +161,7 @@ Keep the Unitree remote in hand. `L1+R1` is the emergency stop path into
 |---------|--------|
 | Unitree remote `Start` | Enter `STANDING` |
 | Unitree remote `Y` | Enter `MOCAP` |
+| Unitree remote `B` | Pause / resume live mocap |
 | Pico/controller `A` | Pause / resume live mocap |
 | Pico/controller `B` | Toggle `MOCAP` / `ARMS` |
 | Unitree remote `X` | Return to `STANDING` |
@@ -195,7 +196,9 @@ resets policy/reference alignment and uses the same Kp ramp safety path.
 
 ## Pause / Resume
 
-Pico pause/resume is a mocap-session control event.
+Pico pause/resume is a mocap-session control event. Use either Unitree remote
+`B` or Pico/controller `A`; Pico/controller `B` remains the `MOCAP` / `ARMS`
+toggle.
 
 - `ACTIVE`: the pause button freezes the current reference pose.
 - `PAUSED`: pressing it again clears policy/reference state, warms the realtime

@@ -16,6 +16,7 @@ Teleopit 使用 [Hydra](https://hydra.cc/) 组合配置。大多数运行入口�
 | `teleopit/configs/pico4_sim.yaml` | Pico 4 VR sim2sim |
 | `teleopit/configs/sim2real.yaml` | BVH sim2real（Unitree G1 真机） |
 | `teleopit/configs/pico4_sim2real.yaml` | Pico 4 VR sim2real（Unitree G1 真机） |
+| `teleopit/configs/high_level_policy_sim2real.yaml` | 独立主机策略 sim2real（Unitree G1 真机） |
 
 它们会组合以下子配置：
 

@@ -21,6 +21,7 @@ const sidebars: SidebarsConfig = {
         'tutorials/standalone-standing',
         'tutorials/pico-sim2real',
         'tutorials/bvh-sim2real',
+        'tutorials/high-level-policy-sim2real',
         'tutorials/training',
       ],
     },
