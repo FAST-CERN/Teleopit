@@ -101,6 +101,16 @@ pip package:
 conda install -c conda-forge pyrealsense2
 ```
 
+### Recording Review
+
+```bash
+pip install -e '.[review]'
+```
+
+Adds the OpenCV and MuJoCo/Viser dependencies used by the read-only synchronized
+sim2real recording reviewer. The review extra does not install Pico, RealSense,
+or G1 control dependencies.
+
 ## Verify Installation
 
 ```bash

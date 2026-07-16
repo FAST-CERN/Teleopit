@@ -64,6 +64,7 @@ scripts/
 ├── run/run_sim2real.py   # G1 sim2real control; supports offline BVH playback and Pico4
 ├── run/record_pico_motion.py # Interactive Pico recording → G1 motion NPZ clips
 ├── render/render_sim.py  # Render single BVH → 3 MuJoCo videos (mocap input, retarget, sim2sim)
+├── view/view_recording.py # Read-only synchronized sim2real recording reviewer
 └── dev/compute_ik_offsets.py # Compute IK quaternion offsets for new BVH formats
 train_mimic/              # Training package
 ├── app.py                # Shared app helpers for train/play/benchmark
@@ -154,6 +155,7 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - Sim2real recording uses an editable source layout: `schema.json`, `episodes.jsonl`, per-episode HDF5 files under `recording.output_dir/data/`, and compressed MP4 files under `recording.output_dir/videos/d435i_rgb/`; task prompts live only in `episodes.jsonl`, and HDF5 files contain only frame arrays with no metadata attributes or raw RGB datasets
 - Recording `schema.json` stores `robot_type=unitree_g1_29dof`, `hand_type=none|linkerhand_l6|linkerhand_o6`, `neck_type=none|openneck`, FPS, and feature definitions; optional action fields are controlled directly by `hands.enabled` and `neck.enabled`; the recording worker rejects an existing mismatched schema without writing episodes, but remains non-critical and must not stop the G1 control runtime; the previous attribute-based HDF5 layout is unsupported
 - Episodes interrupted before their `episodes.jsonl` entry is committed are discarded on the next recording-worker startup and do not consume an episode index
+- Review saved sim2real recordings with `scripts/view/view_recording.py`; it validates manifest/HDF5/MP4 alignment and synchronizes camera video, an observed-vs-reference MuJoCo overlay, joint/mode plots, and optional hand/neck signals; because measured root XYZ is not recorded, the observed robot is anchored to the reference root position
 - `gripper` mode reuses `Pico4InputProvider.get_controller_snapshot()` for Pico grip/trigger open-close control and supports LinkerHand L6 and O6
 - `vr_hand_pose` mode reuses `Pico4InputProvider.get_hand_snapshot()` and somehand 0.2.0 public `somehand.api` for continuous Pico hand-pose retargeting; do not start a second `PicoBridge` for hand control
 - Teleopit owns Pico 26-joint hand-state to 21-landmark conversion; do not import `somehand.pico_input`

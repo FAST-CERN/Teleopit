@@ -127,6 +127,31 @@ control is enabled, it stores the latest mechanically clamped
 `[yaw_deg, pitch_deg]` target in degrees as `action.neck(2)`. Disabled devices
 do not add their action fields.
 
+### Review Saved Episodes
+
+Install the lightweight review dependencies and launch the read-only web
+reviewer against a recording root:
+
+```bash
+pip install -e '.[review]'
+python scripts/view/view_recording.py \
+    --recording data/recordings/sim2real_hdf5
+```
+
+Open the printed local URL in a browser. The reviewer synchronizes the D435i
+MP4 with a MuJoCo view of the observed G1 pose and a translucent green
+reference pose. Use the episode selector, frame scrubber, playback speed, and
+joint selector to inspect tracking. The side panel includes the mode timeline,
+per-body-group joint error, optional LinkerHand channels, and optional OpenNeck
+yaw/pitch.
+
+The reviewer validates `schema.json`, every manifest path, HDF5 shapes and
+finite values, and MP4 frame count/FPS before playback. It never modifies the
+recording. `observation.state` does not contain measured root XYZ, so the
+observed robot is anchored to the reference root position in the overlay;
+joint tracking and root-orientation comparisons remain valid, but global root
+translation cannot be evaluated from this recording format.
+
 ## Operator Flow
 
 Keep the Unitree remote in hand. `L1+R1` is the emergency stop path into

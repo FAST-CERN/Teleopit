@@ -113,6 +113,21 @@ Recording is non-critical: an incompatible output schema stops only the
 recording worker while G1 control continues. Episodes interrupted before their
 manifest entry is committed are discarded on the next recording startup.
 
+Review saved episodes in a synchronized read-only web UI:
+
+```bash
+pip install -e '.[review]'
+python scripts/view/view_recording.py \
+    --recording data/recordings/sim2real_hdf5
+```
+
+The reviewer validates the manifest, HDF5 arrays, and MP4 frame count before
+playback. It shows D435i video beside the observed G1 pose with a translucent
+green reference overlay, plus mode, joint-tracking, LinkerHand, and OpenNeck
+timelines. Because recordings do not contain measured root XYZ, the observed
+pose is anchored to the reference root position; joint and root-orientation
+comparisons remain valid.
+
 ## OpenNeck Active Vision
 
 Pico sim2real can drive the optional OpenNeck two-axis active-vision gimbal from

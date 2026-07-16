@@ -62,6 +62,10 @@ recording = [
     "opencv-python",
     "imageio[ffmpeg]",
 ]
+review = [
+    "opencv-python",
+    "mjviser>=0.0.14",
+]
 dexhand = []
 
 [tool.setuptools.packages.find]

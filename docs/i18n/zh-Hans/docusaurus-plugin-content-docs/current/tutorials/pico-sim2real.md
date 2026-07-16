@@ -121,6 +121,26 @@ episode 会保存为 `data/recordings/sim2real_hdf5/data/` 下的 `.h5` 文件�
 `[yaw_deg, pitch_deg]` 目标以度为单位保存为 `action.neck(2)`。未启用的设备不会添加
 对应的 action 字段。
 
+### Review 已保存的 Episode
+
+安装轻量 review 依赖，然后对录制根目录启动只读 Web reviewer：
+
+```bash
+pip install -e '.[review]'
+python scripts/view/view_recording.py \
+    --recording data/recordings/sim2real_hdf5
+```
+
+在浏览器中打开终端输出的本地 URL。reviewer 会同步显示 D435i MP4、MuJoCo
+中的 G1 实测姿态以及绿色半透明 reference 姿态。可以通过 episode 选择器、帧拖动条、
+播放速度和关节选择器检查跟踪效果。侧栏还包含模式时间线、各身体分组的关节误差，
+以及可选的 LinkerHand 通道和 OpenNeck yaw/pitch。
+
+播放前，reviewer 会验证 `schema.json`、manifest 中的所有路径、HDF5 shape 和有限值，
+以及 MP4 帧数/FPS；它不会修改录制数据。`observation.state` 不包含实测 root XYZ，
+因此叠加画面会把实测机器人锚定到 reference root 位置。关节跟踪和 root 朝向比较仍然
+有效，但无法通过当前录制格式评价全局 root 平移。
+
 ## 操作流程
 
 始终把 Unitree 遥控器拿在手里。`L1+R1` 是进入 `DAMPING` 的急停路径。

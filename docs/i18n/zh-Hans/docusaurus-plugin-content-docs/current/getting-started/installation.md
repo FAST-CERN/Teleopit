@@ -99,6 +99,15 @@ conda-forge，而不是 pip 包：
 conda install -c conda-forge pyrealsense2
 ```
 
+### 录制 Review
+
+```bash
+pip install -e '.[review]'
+```
+
+该 extra 会安装只读 sim2real 录制同步 reviewer 使用的 OpenCV 和 MuJoCo/Viser 依赖，
+不会安装 Pico、RealSense 或 G1 控制依赖。
+
 ## 验证安装
 
 ```bash
