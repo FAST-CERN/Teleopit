@@ -39,7 +39,7 @@ def test_pico_video_config_rejects_enabled_unknown_source() -> None:
         parse_pico_video_config({"video": {"enabled": True, "source": "webcam"}})
 
 
-def test_realsense_video_runtime_pushes_rgb_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_realsense_video_runtime_continues_after_frame_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_rs = ModuleType("pyrealsense2")
     fake_rs.stream = SimpleNamespace(color="color")
     fake_rs.format = SimpleNamespace(rgb8="rgb8")
@@ -60,11 +60,17 @@ def test_realsense_video_runtime_pushes_rgb_frames(monkeypatch: pytest.MonkeyPat
             return FakeColorFrame()
 
     class FakePipeline:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def start(self, _config: object) -> None:
             pass
 
         def wait_for_frames(self) -> FakeFrames:
+            self.calls += 1
             time.sleep(0.005)
+            if self.calls == 1:
+                raise RuntimeError("Frame didn't arrive within 5000")
             return FakeFrames()
 
         def stop(self) -> None:

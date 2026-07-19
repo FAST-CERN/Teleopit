@@ -211,7 +211,15 @@ class _RealSenseVideoProducer(_VideoProducer):
             self._ready_event.set()
             try:
                 while not self._stop_event.is_set():
-                    frames = pipeline.wait_for_frames()
+                    try:
+                        frames = pipeline.wait_for_frames()
+                    except RuntimeError as exc:
+                        message = str(exc).lower()
+                        is_timeout = "timeout" in message or "timed out" in message or "frame didn't arrive" in message
+                        if self._config.fail_on_error or not is_timeout:
+                            raise
+                        logger.warning("RealSense Pico video frame timeout; continuing: %s", exc)
+                        continue
                     color_frame = frames.get_color_frame()
                     if not color_frame:
                         continue
