@@ -204,7 +204,7 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - Realtime inferred `motion_joint_vel`, anchor linear velocity, and anchor angular velocity can be EMA-smoothed via `reference_velocity_smoothing_alpha` and `reference_anchor_velocity_smoothing_alpha`
 - Sim2real Pico pause/resume uses mocap-session states `ACTIVE ↔ PAUSED`; resume clears policy/reference state, rebuilds yaw/XY root alignment, and does not interpolate retarget qpos from the paused pose
 - Realtime sim2sim with Pico control events uses the same mocap-session pause/resume semantics and rebuilds the realtime reference path on resume, including the configured warmup
-- Realtime sim2sim `STANDING ↔ MOCAP` transitions rebuild the realtime reference path on entry; Pico sim2real `STANDING -> MOCAP` additionally rearms and resets the process-isolated reference worker before accepting fresh references
+- Realtime Pico sim2sim `STANDING -> MOCAP` resets GMR, seeds its floating root from the current live pelvis target, and rebuilds the realtime reference path before accepting references; Pico sim2real performs the same GMR cold start through its rearmed process-isolated reference worker
 - Realtime Pico sim2sim can start directly in `STANDING` with keyboard mode control enabled via top-level `keyboard.enabled`
 
 ### Inference Observation

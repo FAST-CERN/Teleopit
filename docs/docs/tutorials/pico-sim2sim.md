@@ -79,6 +79,12 @@ enter `MOCAP`.
 sim2sim viewers. Use `viewers=sim2sim` or `viewers=none` when you want fewer
 windows.
 
+Each `STANDING -> MOCAP` entry resets GMR, seeds its floating root from the
+current live pelvis target, and rebuilds the realtime reference path. The
+operator can therefore change heading while in `STANDING` without reusing the
+previous mocap session's IK warm-start. Pause/resume and `MOCAP <-> ARMS`
+switches retain the current IK warm-start.
+
 ## Pause / Resume
 
 Pico pause/resume freezes the mocap session; it is not a switch back to

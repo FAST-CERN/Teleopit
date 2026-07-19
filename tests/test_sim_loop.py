@@ -604,6 +604,7 @@ def test_simulation_loop_realtime_keyboard_mode_transitions(monkeypatch) -> None
                 (),
                 (TerminalKeyEvent("y"),),
                 (TerminalKeyEvent("x"),),
+                (TerminalKeyEvent("y"),),
             ]
             self._idx = 0
 
@@ -642,16 +643,19 @@ def test_simulation_loop_realtime_keyboard_mode_transitions(monkeypatch) -> None
         viewers=set(),
     )
 
+    retargeter = _DummyRetargeter()
     result = loop.run(
         input_provider=_RealtimeInputProvider(),
-        retargeter=_DummyRetargeter(),
-        num_steps=3,
+        retargeter=retargeter,
+        num_steps=4,
     )
 
-    assert result["steps"] == 3
+    assert result["steps"] == 4
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[0], np.array([0.0], dtype=np.float32), atol=1e-6)
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[1], np.array([0.3], dtype=np.float32), atol=1e-6)
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[2], np.array([0.0], dtype=np.float32), atol=1e-6)
+    np.testing.assert_allclose(obs_builder.mimic_obs_calls[3], np.array([0.6], dtype=np.float32), atol=1e-6)
+    assert retargeter.reset_calls == 2
 
 
 @requires_mujoco
@@ -716,6 +720,9 @@ def test_simulation_loop_pico_arms_mode_composes_standing_body_with_live_arm(mon
             return packet
 
     class _Retargeter:
+        def __init__(self) -> None:
+            self.reset_calls = 0
+
         def retarget(self, frame: object) -> np.ndarray:
             pelvis = np.asarray(frame["Pelvis"][0], dtype=np.float64)
             qpos = np.zeros(36, dtype=np.float64)
@@ -724,6 +731,9 @@ def test_simulation_loop_pico_arms_mode_composes_standing_body_with_live_arm(mon
             qpos[7] = pelvis[0]
             qpos[8] = pelvis[0] + 10.0
             return qpos
+
+        def reset(self) -> None:
+            self.reset_calls += 1
 
     class _KeyboardReader:
         def __init__(self) -> None:
@@ -770,9 +780,10 @@ def test_simulation_loop_pico_arms_mode_composes_standing_body_with_live_arm(mon
         viewers=set(),
     )
 
+    retargeter = _Retargeter()
     result = loop.run(
         input_provider=_RealtimeInputProvider(),
-        retargeter=_Retargeter(),
+        retargeter=retargeter,
         num_steps=4,
     )
 
@@ -784,6 +795,7 @@ def test_simulation_loop_pico_arms_mode_composes_standing_body_with_live_arm(mon
     # Step 3 toggles back to full-body MOCAP; root XY is reanchored, while non-arm joints follow retarget again.
     np.testing.assert_allclose(obs_builder.motion_qpos_calls[3][0], 0.0, atol=1e-6)
     np.testing.assert_allclose(obs_builder.motion_qpos_calls[3][7], 1.2, atol=1e-6)
+    assert retargeter.reset_calls == 1
 
 
 @requires_mujoco

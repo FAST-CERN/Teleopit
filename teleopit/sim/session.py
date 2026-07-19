@@ -252,6 +252,10 @@ class SimLoopSession:
             return False
         state = loop.robot.get_state()
         start_qpos = loop._resolve_hold_qpos(None, None, None, state)
+        # STANDING does not run retargeting, so the live subject may have
+        # changed pose or heading discontinuously since the previous MOCAP
+        # session. Cold-start GMR from the current live root on the next frame.
+        self._retargeter.reset()
         self.reset_policy_reference_state()
         self._step_runner.last_retarget_qpos = start_qpos.copy()
         self.last_commanded_motion_qpos = start_qpos.copy()

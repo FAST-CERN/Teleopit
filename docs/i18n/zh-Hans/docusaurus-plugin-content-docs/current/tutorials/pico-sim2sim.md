@@ -76,6 +76,11 @@ python scripts/run/run_sim.py \
 `pico4_sim.yaml` 默认使用 `viewers=all`，会打开 mocap、retarget 和 sim2sim
 三个 viewer。需要更少窗口时，可使用 `viewers=sim2sim` 或 `viewers=none`。
 
+每次从 `STANDING` 进入 `MOCAP` 时，Teleopit 都会重置 GMR、使用当前实时 pelvis
+目标初始化其浮动根，并重建实时参考路径。因此，操作者可以在 `STANDING` 中改变朝向，
+而不会复用上一次 mocap session 的 IK warm-start。暂停/恢复和
+`MOCAP <-> ARMS` 切换会保留当前 IK warm-start。
+
 ## 暂停 / 恢复
 
 Pico 暂停/恢复会冻结 mocap session；它不是切回 `STANDING`。
