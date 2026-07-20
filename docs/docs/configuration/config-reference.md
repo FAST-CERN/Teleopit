@@ -128,7 +128,7 @@ protocol tests. The only shared data file is `hand_calibration.json`.
 | `high_level_policy.jpeg_quality` | JPEG quality for the 640x480 RGB frame | `90` |
 | `high_level_policy.max_observation_age_s` | Maximum camera/observation age before a request is skipped | `0.15` |
 | `high_level_policy.max_result_age_s` | Maximum local IPC age before a received result is rejected | `0.1` |
-| `high_level_policy.entry_timeout_s` | Maximum wait for the first valid chunk while remaining in `STANDING` | `3.0` |
+| `high_level_policy.entry_timeout_s` | Maximum total entry duration (candidate, Kp ramp, fresh session) and maximum fresh-chunk wait on resume | `3.0` |
 | `high_level_policy.hold_s` | Final validated-reference grace period before the watchdog pauses `POLICY` | `0.1` |
 | `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | Accepted absolute root-height range | `0.55` / `1.05` |
 | `high_level_policy.safety.max_root_xy_speed_m_s` | Maximum root XY speed across 30 Hz references | `2.5` |

@@ -128,10 +128,18 @@ python scripts/run/run_high_level_policy_sim2real.py \
 | Unitree remote `X` | 返回 `STANDING`，或取消等待中的请求 |
 | Unitree remote `L1+R1` | 紧急切换到 `DAMPING` |
 
-按下 `Y` 后，Teleopit 会创建新 session，以当前 root XY/yaw 建立锚点，并等待第一个
-兼容且完整通过验证的 action chunk。握手期间机器人在形式上仍处于 `STANDING`；没有
-单独的“policy starting”状态。只有首个 chunk 就绪后才会进入 `POLICY`。超时后机器人
-仍保持 `STANDING`。
+按下 `Y` 后，Teleopit 会创建 entry session，以当前 root XY/yaw 建立锚点，并请求一个
+候选 chunk。该 chunk 的所有绝对限制、root 边界限制和 chunk 内部跳变都会进行验证；
+仅不检查实测姿态到 `action[0]` 的 G1 关节 rate 边界。随后 Teleopit 会冻结
+`action[0]` 作为静态 body reference，并通过现有 motion tracker 在一次 Kp ramp 期间
+跟踪该 reference。
+
+整个 entry 期间，机器人在形式上仍处于 `STANDING`；没有单独的“policy starting”
+状态。Kp ramp 结束后，Teleopit 会创建第二个 session：它会把 ReplayPolicy 重置到所
+配置的起始帧（默认为第 0 帧），或重置 ACT 状态，并根据 ramp 后的 observation 请求
+新 chunk。该新 chunk
+必须通过包含“实测姿态到第一帧关节 rate 边界”在内的正常验证，运行时才会进入
+`POLICY`。失败或超时会安全地返回普通 standing reference。
 
 暂停会冻结 body reference，并保持最后一条 LinkerHand 和 OpenNeck 命令。恢复时会请求
 新的 action chunk，并在等待期间继续保持暂停姿态。按 `X` 会停止策略 session；运行时
@@ -154,6 +162,12 @@ Watchdog、主机/网络、相机或 policy client 故障也会进入同一个�
 - LinkerHand closure `[0,1]` 和配置的 OpenNeck 角度范围；
 - observation/result 时效、source timestamp 和 action horizon。
 
+entry 候选 chunk 只有一个严格限定的例外：实测姿态到第一帧的 G1 关节 rate 边界由
+静态 tracker 对齐处理，而不是直接拒绝 chunk。root 边界检查和候选 chunk 内部的所有
+跳变仍然是强制检查项。一次 Kp ramp 期间会暂停主机请求，随后新 host session 会提供
+真正进入 `POLICY` 的新鲜 chunk；候选 chunk 绝不会作为实时 timeline 继续播放。若新鲜
+chunk 被拒绝，entry 会直接终止，不会开始另一轮对齐。
+
 通过验证的 30 Hz body reference 会在本地插值到 50 Hz 并执行 rate limit；网络延迟
 导致跳过 source frame 或新 chunk 替换旧计划时同样如此。在短暂推理延迟期间，可以在
 配置的短 grace period 内继续使用最后一条已验证 reference。如果不再有有效 action，
@@ -169,12 +183,13 @@ Watchdog、主机/网络、相机或 policy client 故障也会进入同一个�
 ## 7. 故障排查
 
 **按 `Y` 后始终不进入 `POLICY`：** 检查主机 endpoint、防火墙、server 日志、
-`describe` schema、消息 envelope、task、checkpoint manifest 和 `replan_steps`。
-任何握手或首个 chunk 检查失败时，
-Teleopit 都会按设计保持 `STANDING`。
+`describe` schema、消息 envelope、task、checkpoint manifest、`replan_steps` 和 entry
+日志。Teleopit 在对齐第一帧 reference，以及候选 chunk 或新鲜 chunk 检查失败时，都会
+保持 `STANDING`。
 
-**首个 chunk 因 rate limit 被拒绝：** 第一条预测 reference 距离当前 G1 姿态太远。
-请从示范的站立姿态启动，或修正 policy/replay 起始帧；不要绕过边界检查。
+**新鲜 entry chunk 被拒绝或 entry 超时：** 请确认 episode 从稳定姿态开始，检查关节
+顺序和绝对 reference 约定，并确认继承的 `standing_return_ramp_duration` 是否足够。
+不要关闭 chunk 内部 rate 检查。
 
 **策略短暂运行后进入暂停：** 检查 timeout、推理延迟、stale result、worker 退出和
 安全拒绝日志。底层 50 Hz tracker 不会等待主机推理。恢复故障输入路径后按 `B` 继续。

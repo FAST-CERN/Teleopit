@@ -1259,6 +1259,7 @@ class _RobotControlWorker:
         )
         self._policy_entry_pending = False
         self._policy_entry_deadline_s: float | None = None
+        self._policy_entry_target_qpos: Float64Array | None = None
         self._policy_session_id: str | None = None
         self._policy_frame_transform: PolicyFrameTransform | None = None
         self._policy_paused = False
@@ -1513,6 +1514,13 @@ class _RobotControlWorker:
         packet = self._policy_action_sub.recv_latest()
         if not isinstance(packet, HighLevelPolicyActionPacket):
             return
+        if packet.session_id != self._policy_session_id:
+            logger.debug(
+                "Discarded high-level policy action for inactive session: active=%r received=%r",
+                self._policy_session_id,
+                packet.session_id,
+            )
+            return
         # A request may already be in flight when the operator pauses. Drain
         # its result without replacing the reference frozen at the B press.
         if self._policy_paused and not self._policy_resume_pending:
@@ -1522,6 +1530,21 @@ class _RobotControlWorker:
         if scheduler is None or policy_cfg is None:
             return
         now_s = time.monotonic()
+        if self.mode == RobotMode.STANDING and self._policy_entry_pending:
+            deadline_s = self._policy_entry_deadline_s
+            if deadline_s is not None and now_s > deadline_s:
+                operator_logger.warning(
+                    "High-level policy entry timed out; remaining in STANDING"
+                )
+                self._enter_standing()
+                return
+        if self.mode == RobotMode.POLICY and self._policy_resume_pending:
+            deadline_s = self._policy_resume_deadline_s
+            if deadline_s is not None and now_s > deadline_s:
+                self._handle_high_level_policy_fault(
+                    "resume timed out waiting for a fresh action chunk"
+                )
+                return
         result_age_s = now_s - float(packet.received_timestamp_s)
         if (
             not np.isfinite(result_age_s)
@@ -1533,6 +1556,11 @@ class _RobotControlWorker:
                 result_age_s,
                 policy_cfg.max_result_age_s,
             )
+            if self.mode == RobotMode.STANDING and self._policy_entry_pending:
+                operator_logger.warning(
+                    "High-level policy entry failed; received a stale action result"
+                )
+                self._enter_standing()
             return
         minimum_source_timestamp_ns = self._policy_resume_source_timestamp_ns
         if (
@@ -1543,21 +1571,46 @@ class _RobotControlWorker:
         ):
             logger.warning("Discarded pre-resume high-level policy action chunk")
             return
+        if self.mode == RobotMode.STANDING and not self._policy_entry_pending:
+            return
+        chunk = PolicyActionChunk(
+            session_id=packet.session_id,
+            source_sequence_id=int(packet.source_sequence_id),
+            source_onboard_monotonic_timestamp_ns=int(
+                packet.source_onboard_monotonic_timestamp_ns
+            ),
+            action_fps=int(packet.action_fps),
+            actions=np.asarray(packet.actions, dtype=np.float32),
+            policy_id=str(packet.policy_id),
+            server_inference_ms=float(packet.server_inference_ms),
+        )
+        if self.mode == RobotMode.STANDING:
+            first_chunk = self._policy_entry_target_qpos is None
+            try:
+                if first_chunk:
+                    first_action = scheduler.accept_entry(chunk, now_s=now_s)
+                else:
+                    scheduler.reset(
+                        packet.session_id,
+                        initial_action=self._build_high_level_policy_boundary_action(
+                            self.robot.get_state()
+                        ),
+                    )
+                    scheduler.accept(chunk, now_s=now_s)
+            except (RuntimeError, ValueError) as exc:
+                logger.warning("Rejected high-level policy entry chunk: %s", exc)
+                operator_logger.warning(
+                    "High-level policy entry failed; remaining in STANDING"
+                )
+                self._enter_standing()
+                return
+            if first_chunk:
+                self._begin_policy_entry_alignment(first_action)
+            else:
+                self._transition_to_high_level_policy()
+            return
         try:
-            scheduler.accept(
-                PolicyActionChunk(
-                    session_id=packet.session_id,
-                    source_sequence_id=int(packet.source_sequence_id),
-                    source_onboard_monotonic_timestamp_ns=int(
-                        packet.source_onboard_monotonic_timestamp_ns
-                    ),
-                    action_fps=int(packet.action_fps),
-                    actions=np.asarray(packet.actions, dtype=np.float32),
-                    policy_id=str(packet.policy_id),
-                    server_inference_ms=float(packet.server_inference_ms),
-                ),
-                now_s=now_s,
-            )
+            scheduler.accept(chunk, now_s=now_s)
         except ValueError as exc:
             logger.warning("Rejected high-level policy action chunk: %s", exc)
             return
@@ -1578,21 +1631,20 @@ class _RobotControlWorker:
         if self.mode == RobotMode.STANDING:
             if self.remote.X.on_pressed and self._policy_entry_pending:
                 operator_logger.info("X -> cancel high-level policy entry")
-                self._stop_high_level_policy_session()
+                self._enter_standing()
                 return
             if self.remote.Y.on_pressed and not self._policy_entry_pending:
                 operator_logger.info("Y -> request high-level policy")
                 self._begin_high_level_policy_entry()
             if self._policy_entry_pending:
-                self._publish_high_level_policy_session("start", repeat=True)
-                scheduler = self._high_level_policy_scheduler
-                if scheduler is not None and scheduler.has_chunk:
-                    self._transition_to_high_level_policy()
-                    return
+                self._publish_high_level_policy_session(
+                    "pause" if self._policy_paused else "start",
+                    repeat=True,
+                )
                 deadline_s = self._policy_entry_deadline_s
                 if deadline_s is not None and time.monotonic() > deadline_s:
                     operator_logger.warning("High-level policy entry timed out; remaining in STANDING")
-                    self._stop_high_level_policy_session()
+                    self._enter_standing()
             return
         if self.mode == RobotMode.POLICY:
             if self.remote.X.on_pressed:
@@ -1614,10 +1666,26 @@ class _RobotControlWorker:
             self._enter_standing()
 
     def _begin_high_level_policy_entry(self) -> None:
+        self._policy_entry_target_qpos = None
+        self._start_high_level_policy_entry_session()
+
+    def _build_high_level_policy_boundary_action(self, state: object) -> np.ndarray:
+        transform = self._policy_frame_transform
+        if transform is None:
+            raise RuntimeError("High-level policy entry is missing its frame transform")
+        initial_action = np.zeros(50, dtype=np.float32)
+        initial_action[:36] = transform.localize_body_action(
+            self._build_robot_state_qpos(state)
+        )
+        return initial_action
+
+    def _start_high_level_policy_entry_session(self) -> None:
         policy_cfg = self._high_level_policy_cfg
         scheduler = self._high_level_policy_scheduler
         if policy_cfg is None or scheduler is None:
             raise RuntimeError("High-level policy runtime is not configured")
+        if self._policy_session_id is not None:
+            self._publish_high_level_policy_session("stop")
         state = self.robot.get_state()
         root_pos = self._resolve_base_pos(state)
         self._policy_frame_transform = PolicyFrameTransform.from_robot_pose(
@@ -1625,13 +1693,13 @@ class _RobotControlWorker:
             getattr(state, "quat"),
         )
         self._policy_session_id = uuid.uuid4().hex
-        initial_action = np.zeros(50, dtype=np.float32)
-        initial_action[:36] = self._policy_frame_transform.localize_body_action(
-            self._build_robot_state_qpos(state)
+        scheduler.reset(
+            self._policy_session_id,
+            initial_action=self._build_high_level_policy_boundary_action(state),
         )
-        scheduler.reset(self._policy_session_id, initial_action=initial_action)
         self._policy_entry_pending = True
-        self._policy_entry_deadline_s = time.monotonic() + policy_cfg.entry_timeout_s
+        if self._policy_entry_target_qpos is None:
+            self._policy_entry_deadline_s = time.monotonic() + policy_cfg.entry_timeout_s
         self._policy_paused = False
         self._policy_resume_pending = False
         self._policy_resume_deadline_s = None
@@ -1645,6 +1713,25 @@ class _RobotControlWorker:
         )
         self._last_policy_session_publish_s = 0.0
         self._publish_high_level_policy_session("start", repeat=False)
+
+    def _begin_policy_entry_alignment(self, first_action: np.ndarray) -> None:
+        transform = self._policy_frame_transform
+        if transform is None:
+            raise RuntimeError("High-level policy entry is missing its frame transform")
+        target_qpos = np.asarray(
+            transform.delocalize_body_action(first_action[:36]),
+            dtype=np.float64,
+        )
+        self._policy_entry_target_qpos = target_qpos
+        self._policy_paused = True
+        self._reset_policy_state()
+        self._last_retarget_qpos = None
+        self._safety.start_kp_ramp(
+            duration_s=self._standing_return_ramp_duration,
+            floor_ratio=self._standing_return_kp_ramp_floor_ratio,
+        )
+        self._publish_high_level_policy_session("pause")
+        operator_logger.info("Aligning to high-level policy first reference in STANDING")
 
     def _publish_high_level_policy_session(self, command: str, *, repeat: bool = False) -> None:
         publisher = self._policy_control_pub
@@ -1708,12 +1795,9 @@ class _RobotControlWorker:
         self._last_retarget_qpos = None
         self._last_commanded_motion_qpos = resume_qpos.copy()
         self._policy_hold_qpos = resume_qpos.copy()
-        self._safety.start_kp_ramp(
-            duration_s=self._standing_return_ramp_duration,
-            floor_ratio=self._standing_return_kp_ramp_floor_ratio,
-        )
         self._policy_entry_pending = False
         self._policy_entry_deadline_s = None
+        self._policy_entry_target_qpos = None
         self._policy_resume_pending = False
         self._policy_resume_deadline_s = None
         self._policy_resume_source_timestamp_ns = None
@@ -1754,6 +1838,7 @@ class _RobotControlWorker:
             scheduler.clear()
         self._policy_entry_pending = False
         self._policy_entry_deadline_s = None
+        self._policy_entry_target_qpos = None
         self._policy_session_id = None
         self._policy_frame_transform = None
         self._policy_paused = False
@@ -1788,9 +1873,22 @@ class _RobotControlWorker:
                 "High-level policy entry failed; remaining in STANDING: %s",
                 detail,
             )
-            self._stop_high_level_policy_session()
+            self._enter_standing()
 
     def _standing_step(self) -> None:
+        target_qpos = self._policy_entry_target_qpos
+        if self._policy_entry_pending and target_qpos is not None:
+            robot_state = self._run_static_mocap_step(target_qpos)
+            if self._policy_paused:
+                if not self._safety.kp_ramp_active:
+                    operator_logger.info(
+                        "High-level policy first-reference Kp ramp complete; "
+                        "requesting fresh session"
+                    )
+                    self._start_high_level_policy_entry_session()
+            else:
+                self._publish_high_level_policy_observation(robot_state)
+            return
         robot_state = self.robot.get_state()
         qpos = self._standing_qpos.copy()
         motion_joint_vel = np.zeros(self.num_actions, dtype=np.float32)
@@ -2003,6 +2101,12 @@ class _RobotControlWorker:
 
     def _enter_standing(self) -> None:
         prev_mode = self.mode
+        policy_entry_alignment_active = bool(
+            getattr(self, "high_level_policy_enabled", False)
+            and prev_mode == RobotMode.STANDING
+            and self._policy_entry_pending
+            and self._policy_entry_target_qpos is not None
+        )
         if bool(getattr(self, "high_level_policy_enabled", False)) and (
             prev_mode == RobotMode.POLICY or self._policy_entry_pending
         ):
@@ -2010,6 +2114,8 @@ class _RobotControlWorker:
         self._disarm_mocap_reference_if_needed()
         self._clear_reference_gate()
         self._mocap_entry_requested = False
+        if prev_mode == RobotMode.STANDING and not policy_entry_alignment_active:
+            return
         already_in_debug = self.mode in (
             RobotMode.STANDING,
             RobotMode.MOCAP,
@@ -2025,7 +2131,12 @@ class _RobotControlWorker:
             time.sleep(0.5)
 
         state = self.robot.get_state()
-        if prev_mode not in (RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY):
+        if prev_mode not in (
+            RobotMode.STANDING,
+            RobotMode.MOCAP,
+            RobotMode.ARMS,
+            RobotMode.POLICY,
+        ):
             logger.info("Locking joints to current position...")
             self.robot.lock_all_joints()
             time.sleep(0.3)
@@ -2037,7 +2148,11 @@ class _RobotControlWorker:
         self._last_commanded_motion_qpos = None
         self._set_default_standing_reference(state)
         self._reset_policy_state()
-        if prev_mode in (RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY):
+        if policy_entry_alignment_active or prev_mode in (
+            RobotMode.MOCAP,
+            RobotMode.ARMS,
+            RobotMode.POLICY,
+        ):
             self._safety.start_kp_ramp(
                 duration_s=self._standing_return_ramp_duration,
                 floor_ratio=self._standing_return_kp_ramp_floor_ratio,
@@ -2284,7 +2399,7 @@ class _RobotControlWorker:
             raise RuntimeError("Paused mocap session is missing a hold_qpos")
         self._run_static_mocap_step(hold_qpos)
 
-    def _run_static_mocap_step(self, hold_qpos: Float64Array) -> None:
+    def _run_static_mocap_step(self, hold_qpos: Float64Array) -> object:
         robot_state = self.robot.get_state()
         qpos = np.asarray(hold_qpos, dtype=np.float64).copy()
         motion_joint_vel = np.zeros(self.num_actions, dtype=np.float32)
@@ -2311,6 +2426,7 @@ class _RobotControlWorker:
         self._last_commanded_motion_qpos = qpos.copy()
         self._publish_record_step(robot_state=robot_state, reference_qpos=qpos)
         self._write_retarget_viewer(qpos)
+        return robot_state
 
     def _hold_mocap_reference(self, reason: str, *, detail: str | None = None) -> None:
         if self._last_mocap_hold_reason != reason:

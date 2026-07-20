@@ -170,6 +170,27 @@ class HighLevelPolicyScheduler:
         self._last_output_action = None
 
     def accept(self, chunk: PolicyActionChunk, *, now_s: float) -> None:
+        self._accept(chunk, now_s=now_s, validate_joint_boundary=True)
+
+    def accept_entry(self, chunk: PolicyActionChunk, *, now_s: float) -> np.ndarray:
+        """Accept an entry candidate without comparing its first joint target.
+
+        Root boundary limits, absolute limits, and every transition inside the
+        chunk are still validated. The runtime tracks the first action for one
+        Kp ramp, then starts a fresh policy session whose first chunk uses the
+        normal boundary validation path.
+        """
+        self._accept(chunk, now_s=now_s, validate_joint_boundary=False)
+        assert self._chunk is not None
+        return self._chunk.actions[0].copy()
+
+    def _accept(
+        self,
+        chunk: PolicyActionChunk,
+        *,
+        now_s: float,
+        validate_joint_boundary: bool,
+    ) -> None:
         if not np.isfinite(now_s):
             raise ValueError("High-level policy scheduler now_s must be finite")
         if self._session_id is None or chunk.session_id != self._session_id:
@@ -223,6 +244,7 @@ class HighLevelPolicyScheduler:
             chunk.actions,
             action_fps=chunk.action_fps,
             boundary_action=boundary_action,
+            validate_joint_boundary=validate_joint_boundary,
         )
         valid_until_s = source_s + len(actions) / float(chunk.action_fps) + self.hold_s
         if float(now_s) > valid_until_s:
@@ -349,6 +371,7 @@ class HighLevelPolicyScheduler:
         *,
         action_fps: int,
         boundary_action: np.ndarray | None,
+        validate_joint_boundary: bool,
     ) -> np.ndarray:
         actions = np.asarray(values)
         if actions.ndim != 2 or actions.shape[1] != ACTION_DIM or not 1 <= len(actions) <= 15:
@@ -374,6 +397,7 @@ class HighLevelPolicyScheduler:
                 validated,
                 action_fps=action_fps,
                 boundary_action=boundary_action,
+                validate_joint_boundary=validate_joint_boundary,
                 safety=safety,
             )
         return validated
@@ -397,6 +421,7 @@ class HighLevelPolicyScheduler:
         *,
         action_fps: int,
         boundary_action: np.ndarray | None,
+        validate_joint_boundary: bool,
         safety: HighLevelPolicySafetyConfig,
     ) -> None:
         root_height = actions[:, 2]
@@ -477,7 +502,10 @@ class HighLevelPolicyScheduler:
                 f"{max_yaw_rate:.6g} > {safety.max_yaw_rate_rad_s:.6g} rad/s"
             )
 
-        joint_rate = np.abs(np.diff(sequence[:, 7:36], axis=0)) * float(action_fps)
+        joint_sequence = sequence if validate_joint_boundary else actions
+        if len(joint_sequence) < 2:
+            return
+        joint_rate = np.abs(np.diff(joint_sequence[:, 7:36], axis=0)) * float(action_fps)
         max_joint_rate = float(np.max(joint_rate))
         if max_joint_rate > safety.max_joint_rate_rad_s:
             raise ValueError(

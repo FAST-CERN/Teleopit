@@ -136,11 +136,20 @@ Keep the Unitree remote in hand. The runtime has only the formal robot modes
 | Unitree remote `X` | Return to `STANDING` or cancel a pending request |
 | Unitree remote `L1+R1` | Emergency transition to `DAMPING` |
 
-After `Y`, Teleopit creates a new session, establishes the current root XY/yaw
-anchor, and waits for the first compatible, fully validated action chunk. The
-robot remains formally in `STANDING` during this handshake; there is no
-separate "policy starting" state. It enters `POLICY` only after that first
-chunk is ready. A timeout leaves the robot in `STANDING`.
+After `Y`, Teleopit creates an entry session, establishes the current root
+XY/yaw anchor, and requests one candidate chunk. All absolute limits, root
+boundary limits, and transitions inside that chunk are validated. Only the G1
+joint-rate boundary from the measured pose to `action[0]` is excluded. Teleopit
+then freezes `action[0]` as a static body reference and uses the existing
+motion tracker for one Kp ramp.
+
+The robot remains formally in `STANDING` throughout entry; there is no separate
+"policy starting" state. When the ramp finishes, Teleopit creates a second
+session, which resets ReplayPolicy to its configured start frame (frame 0 by
+default) or resets ACT state, and requests a fresh chunk from the post-ramp
+observation. That fresh chunk must pass normal validation, including the
+measured-pose-to-first-frame joint-rate boundary, before the runtime enters
+`POLICY`. A failure or timeout safely returns to the normal standing reference.
 
 Pause freezes the body reference and holds the last LinkerHand and OpenNeck
 commands. Resume requests a fresh action chunk while continuing to hold the
@@ -165,6 +174,14 @@ pads, trims, or safety-clips a malformed host result. Checks include:
 - LinkerHand closure `[0,1]` and configured OpenNeck degree ranges;
 - observation/result age, source timestamp, and action horizon.
 
+The entry candidate has one narrow exception: its measured-pose-to-first-frame
+G1 joint-rate boundary is handled by static tracker alignment instead of chunk
+rejection. Root boundary checks and all transitions inside the candidate remain
+mandatory. Host requests are paused for one Kp ramp. A new host session then
+supplies the fresh chunk that will actually enter `POLICY`; the candidate chunk
+is never continued as a live timeline. A rejected fresh chunk aborts entry
+instead of starting another alignment cycle.
+
 Validated 30 Hz body references are interpolated and rate-limited locally at
 50 Hz, including when latency skips source frames or a new chunk replaces the
 old plan. A short configured grace period can reuse the final validated
@@ -182,13 +199,15 @@ data, G1 joint limits, and the installed OpenNeck calibration.
 ## 7. Troubleshooting
 
 **`Y` never enters `POLICY`:** check the host endpoint, firewall, server log,
-`describe` schemas, message envelope, task, checkpoint manifest, and
-`replan_steps`. Teleopit stays
-in `STANDING` by design when any handshake or first-chunk check fails.
+`describe` schemas, message envelope, task, checkpoint manifest,
+`replan_steps`, and the entry logs. Teleopit stays in `STANDING` while it aligns
+to the first reference and when any candidate or fresh-chunk check fails.
 
-**The first chunk is rejected for rate limits:** the first predicted reference
-is too far from the current G1 pose. Start from the demonstrated standing pose
-or fix the policy/replay start frame; do not bypass the boundary check.
+**The fresh entry chunk is rejected or entry times out:** verify that the
+episode starts with a stable pose, inspect the joint ordering and absolute
+reference convention, and check whether the inherited
+`standing_return_ramp_duration` is sufficient. Do not disable the
+chunk-internal rate checks.
 
 **Policy runs briefly and becomes paused:** inspect timeout, inference
 latency, stale-result, worker-exit, and safety-rejection logs. The low-level

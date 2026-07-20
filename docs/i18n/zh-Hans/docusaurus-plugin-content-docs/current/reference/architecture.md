@@ -91,7 +91,7 @@ train_mimic/scripts/data
 - sim2real 也要求双输入 ONNX，且观测维度必须与运行时 builder 匹配
 - 主机策略消息 envelope 或 schema 不匹配时会被拒绝，机器人保持在 `STANDING`
 - 主机 action chunk 在 onboard 完成验证与插值；主机不能绕过 motion tracker 或发送电机命令
-- 等待第一个主机 chunk 不是机器人模式：正式接管模式只有 `POLICY`
+- 策略 entry 保持为 `STANDING` 内部流程：通过一次 Kp ramp 保持经过验证的候选第一帧，然后要求一个新 host session 提供完整通过验证的 chunk；正式接管模式只有 `POLICY`
 
 ## 公共接口
 
