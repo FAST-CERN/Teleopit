@@ -112,6 +112,12 @@ frame-aligned arrays: `observation.state(68)`, scalar `observation.mode`, and
 Recording is non-critical: an incompatible output schema stops only the
 recording worker while G1 control continues. Episodes interrupted before their
 manifest entry is committed are discarded on the next recording startup.
+RealSense frame timeouts and disconnects trigger background camera reconnection
+without stopping Pico input or G1 control. Recording requires a fresh camera
+frame to start and discards an active episode after one second without video;
+press `R` again after the camera recovers. If the entire Pico input worker exits,
+G1 control remains active and holds the latest command so the operator can use
+the Unitree remote to return to `STANDING` or request `DAMPING`.
 
 Review saved episodes in a synchronized read-only web UI:
 

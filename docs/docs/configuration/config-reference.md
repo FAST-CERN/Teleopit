@@ -75,7 +75,6 @@ Complete reference for all configurable fields.
 | `input.video.source` | Video source: `mujoco`, `realsense`, or `test-pattern` | `null` |
 | `input.video.width` / `height` / `fps` | Video capture/render settings | `1280` / `720` / `30` |
 | `input.video.device` | Optional RealSense serial | `null` |
-| `input.video.fail_on_error` | Fail startup instead of disabling video on error | `false` |
 
 ### Realtime
 
@@ -266,7 +265,14 @@ same frames produced by `pico_input`.
 | `recording.camera.device` | Optional RealSense serial | `null` |
 | `recording.video.codec` / `quality` / `pixelformat` | MP4 sidecar encoder settings | `libx264` / `8` / `yuv420p` |
 
-Camera failure behavior is controlled by `input.video.fail_on_error`.
+RealSense frame timeouts and disconnects rebuild the capture pipeline in the
+background and never stop Pico input or G1 control. Recording requires a fresh
+camera frame before accepting `R`. An active episode is discarded after one
+second without a fresh frame, and recording remains idle after the camera
+recovers until the operator presses `R` again. If the entire `pico_input`
+worker exits, `robot_control` remains active and holds the latest command; the
+Unitree remote remains available for returning to `STANDING` or requesting
+`DAMPING`.
 
 The recorder creates an editable source dataset:
 

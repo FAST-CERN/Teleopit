@@ -5,6 +5,7 @@ import json
 import logging
 from pathlib import Path
 import shutil
+import time
 from types import SimpleNamespace
 
 import h5py
@@ -347,8 +348,11 @@ def test_neck_enabled_adds_neck_worker() -> None:
     assert started_names == ["pico_input", "reference", "robot_control", "neck_worker"]
 
 
-@pytest.mark.parametrize("failure_stage", ["setup", "snapshot", "publish", "close"])
-def test_head_pose_ipc_failure_does_not_stop_pico_input(monkeypatch, failure_stage: str) -> None:
+@pytest.mark.parametrize(
+    "failure_stage",
+    ["setup", "snapshot", "publish", "close", "video_start", "video_tick", "video_stop"],
+)
+def test_pico_auxiliary_failure_does_not_stop_pico_input(monkeypatch, failure_stage: str) -> None:
     endpoints = default_endpoints(base_port=39890)
     closed_publishers: list[str] = []
     provider_closed = False
@@ -403,12 +407,18 @@ def test_head_pose_ipc_failure_does_not_stop_pico_input(monkeypatch, failure_sta
             return None
 
         def start(self) -> None:
+            if failure_stage == "video_start":
+                raise RuntimeError("video startup failed")
             return None
 
         def tick(self) -> None:
+            if failure_stage == "video_tick":
+                raise RuntimeError("video tick failed")
             return None
 
         def stop(self) -> None:
+            if failure_stage == "video_stop":
+                raise RuntimeError("video stop failed")
             return None
 
     class FakeSubscriber:
@@ -504,7 +514,8 @@ def test_neck_command_publisher_is_only_created_for_recording(monkeypatch, recor
     assert published_topics == (["neck_command"] if recording_enabled else [])
 
 
-def test_noncritical_worker_exit_warning_is_not_repeated(monkeypatch, caplog) -> None:
+@pytest.mark.parametrize("worker_name", ["neck_worker", "pico_input"])
+def test_noncritical_worker_exit_warning_is_not_repeated(monkeypatch, caplog, worker_name: str) -> None:
     class FakeStopEvent:
         def __init__(self) -> None:
             self.polls = 0
@@ -520,8 +531,10 @@ def test_noncritical_worker_exit_warning_is_not_repeated(monkeypatch, caplog) ->
             self.stopped = True
 
     class FakeProcess:
-        name = "neck_worker"
         exitcode = 1
+
+        def __init__(self) -> None:
+            self.name = worker_name
 
         def is_alive(self) -> bool:
             return False
@@ -542,7 +555,7 @@ def test_noncritical_worker_exit_warning_is_not_repeated(monkeypatch, caplog) ->
         runtime.run()
 
     warnings = [message for message in caplog.messages if "non-critical worker exited" in message]
-    assert warnings == ["non-critical worker exited: neck_worker"]
+    assert warnings == [f"non-critical worker exited: {worker_name}; G1 control remains active"]
 
 
 def test_recording_key_mapping() -> None:
@@ -1525,6 +1538,11 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             seq=2,
         )
         worker._start_episode()
+        assert calls == []
+
+        ready_desc = writer.write(np.full((2, 2, 3), 4, dtype=np.uint8), timestamp_s=2.0)
+        worker._handle_video(ready_desc)
+        worker._start_episode()
         worker._save_episode()
         assert calls == ["start", "discard"]
 
@@ -1570,6 +1588,17 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
         )
         worker._start_episode()
         worker._discard_episode("test")
+        assert calls[-2:] == ["start", "discard"]
+
+        worker._start_episode()
+        worker._latest_video_received_s = time.monotonic() - worker._CAMERA_TIMEOUT_S - 0.1
+        assert worker._discard_if_camera_stale() is True
+        assert calls[-2:] == ["start", "discard"]
+
+        worker._latest_video_received_s = time.monotonic()
+        worker._start_episode()
+        worker._latest_video_received_s = time.monotonic() - worker._CAMERA_TIMEOUT_S - 0.1
+        worker._save_episode()
         assert calls[-2:] == ["start", "discard"]
     finally:
         writer.close(unlink=True)

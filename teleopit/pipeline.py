@@ -43,7 +43,6 @@ class TeleopPipeline:
         self.video_runtime = PicoVideoRuntime(
             provider=self.input_provider,
             config=parse_pico_video_config(input_cfg),
-            mode="sim2sim",
             robot=self.robot,
         )
         self.loop = SimulationLoop(

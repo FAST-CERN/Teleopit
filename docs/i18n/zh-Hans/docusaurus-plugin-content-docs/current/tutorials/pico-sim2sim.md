@@ -107,8 +107,7 @@ python scripts/run/run_sim.py \
 ```
 
 使用 `input.video.source=test-pattern` 可以做 receiver 侧视频 sanity check。如果视频启动失败，
-Teleopit 会记录错误、关闭视频，并继续运行追踪和控制。设置
-`input.video.fail_on_error=true` 可改为启动失败。
+Teleopit 会记录错误、关闭视频，并继续运行追踪和控制。
 
 ## 常用参数
 

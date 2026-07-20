@@ -127,6 +127,14 @@ control is enabled, it stores the latest mechanically clamped
 `[yaw_deg, pitch_deg]` target in degrees as `action.neck(2)`. Disabled devices
 do not add their action fields.
 
+Recording starts only when a fresh RealSense frame is available. RealSense
+timeouts or disconnects trigger background reconnection without stopping Pico
+input or G1 control. If video is unavailable for one second during recording,
+the active episode is discarded; press `R` again after video recovers. If the
+entire Pico input worker exits, G1 control remains active and holds the latest
+command so the Unitree remote can return the robot to `STANDING` or request
+`DAMPING`.
+
 ### Review Saved Episodes
 
 Install the lightweight review dependencies and launch the read-only web
@@ -319,7 +327,8 @@ python scripts/run/run_sim2real.py \
     input.video.device=<optional-realsense-serial>
 ```
 
-If video fails, control continues unless `input.video.fail_on_error=true`.
+RealSense frame timeouts and disconnects reconnect in the background and never
+stop Pico tracking or G1 control.
 
 ## Common Parameters
 

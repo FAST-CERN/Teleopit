@@ -222,7 +222,7 @@ def main(cfg: DictConfig) -> None:
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)
     provider = _build_provider(cfg, video_cfg.enabled)
-    video_runtime = PicoVideoRuntime(provider=provider, config=video_cfg, mode="sim2real")
+    video_runtime = PicoVideoRuntime(provider=provider, config=video_cfg)
     total = 0
     valid = 0
     invalid_reasons: Counter[str] = Counter()

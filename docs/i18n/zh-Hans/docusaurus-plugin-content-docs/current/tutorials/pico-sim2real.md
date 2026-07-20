@@ -121,6 +121,12 @@ episode 会保存为 `data/recordings/sim2real_hdf5/data/` 下的 `.h5` 文件�
 `[yaw_deg, pitch_deg]` 目标以度为单位保存为 `action.neck(2)`。未启用的设备不会添加
 对应的 action 字段。
 
+只有存在新鲜 RealSense 帧时才能开始录制。RealSense 超时或断连会触发后台重连，
+不会停止 Pico 输入或 G1 控制。录制期间视频不可用达到一秒时，当前 episode 会被
+丢弃；视频恢复后需要再次按 `R`。如果整个 Pico 输入 worker 退出，G1 控制会继续
+运行并保持最新命令，操作员仍可使用 Unitree 遥控器让机器人返回 `STANDING` 或请求
+`DAMPING`。
+
 ### Review 已保存的 Episode
 
 安装轻量 review 依赖，然后对录制根目录启动只读 Web reviewer：
@@ -297,7 +303,7 @@ python scripts/run/run_sim2real.py \
     input.video.device=<optional-realsense-serial>
 ```
 
-如果视频失败，控制会继续运行，除非设置了 `input.video.fail_on_error=true`。
+RealSense 帧超时或断连时会在后台重连，绝不会停止 Pico 追踪或 G1 控制。
 
 ## 常用参数
 

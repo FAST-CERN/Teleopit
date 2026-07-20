@@ -92,7 +92,6 @@ target = clip(action, clip_range) * action_scale + default_dof_pos
 | `video.source` | str/null | `null` | 视频源：`mujoco`、`realsense` 或 `test-pattern` |
 | `video.width` / `height` / `fps` | int | `1280` / `720` / `30` | 视频采集/渲染设置 |
 | `video.device` | str/null | `null` | 可选的 RealSense 序列号 |
-| `video.fail_on_error` | bool | `false` | 视频失败时是否让启动失败，而不是关闭视频后继续 |
 
 ## Realtime 字段
 
@@ -272,7 +271,11 @@ OpenNeck 归一化配置；运行 `openneck calibrate` 创建当前格式的文�
 | `recording.camera.device` | 可选 RealSense 序列号 | `null` |
 | `recording.video.codec` / `quality` / `pixelformat` | MP4 sidecar 编码设置 | `libx264` / `8` / `yuv420p` |
 
-相机失败时的行为由 `input.video.fail_on_error` 控制。
+RealSense 帧超时或断连时会在后台重建采集 pipeline，绝不会停止 Pico 输入或 G1
+控制。按 `R` 开始录制前必须存在新鲜相机帧。录制期间一秒内没有新鲜帧时，当前
+episode 会被丢弃；相机恢复后录制仍保持空闲，直到操作员再次按 `R`。
+如果整个 `pico_input` worker 退出，`robot_control` 会继续运行并保持最新命令；
+Unitree 遥控器仍可用于返回 `STANDING` 或请求 `DAMPING`。
 
 录制器会创建一份便于编辑的源数据集：
 

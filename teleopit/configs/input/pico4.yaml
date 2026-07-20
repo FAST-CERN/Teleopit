@@ -22,4 +22,3 @@ video:
   height: 720
   fps: 30
   device: null
-  fail_on_error: false

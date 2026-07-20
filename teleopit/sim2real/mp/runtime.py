@@ -488,8 +488,6 @@ class Sim2RealRuntime:
                 self._poll_terminal_recording_controls()
                 time.sleep(0.2)
                 critical_names = {"robot_control", "reference"}
-                if _input_provider_kind(self.cfg) == "pico4":
-                    critical_names.add("pico_input")
                 critical_dead = [
                     process.name
                     for process in self._processes
@@ -510,7 +508,10 @@ class Sim2RealRuntime:
                     and process.name not in reported_noncritical_dead
                 ]
                 if noncritical_dead:
-                    operator_logger.warning("non-critical worker exited: %s", ", ".join(noncritical_dead))
+                    operator_logger.warning(
+                        "non-critical worker exited: %s; G1 control remains active",
+                        ", ".join(noncritical_dead),
+                    )
                     reported_noncritical_dead.update(noncritical_dead)
         except KeyboardInterrupt:
             operator_logger.info("keyboard interrupt -> shutting down")
@@ -690,7 +691,6 @@ def _run_pico_io_worker(
         video_runtime = PicoVideoRuntime(
             provider=provider,
             config=video_cfg,
-            mode="sim2real",
             frame_callback=_publish_recording_frame if _recording_enabled(cfg) else None,
         )
 
@@ -703,9 +703,19 @@ def _run_pico_io_worker(
         last_video_seq = -1
         last_health_s = 0.0
         try:
-            video_runtime.start()
+            try:
+                video_runtime.start()
+            except Exception:
+                logger.exception(
+                    "Pico video startup failed; video is disabled while pico_input and robot control continue"
+                )
             while not stop_event.is_set():
-                video_runtime.tick()
+                try:
+                    video_runtime.tick()
+                except Exception:
+                    logger.exception(
+                        "Pico video runtime failed; video is disabled while pico_input and robot control continue"
+                    )
                 command = command_sub.recv_latest()
                 if isinstance(command, CommandPacket) and command.command == "shutdown":
                     stop_event.set()
@@ -800,7 +810,10 @@ def _run_pico_io_worker(
                     last_health_s = now
                 time.sleep(sleep_s)
         finally:
-            video_runtime.stop()
+            try:
+                video_runtime.stop()
+            except Exception:
+                logger.exception("Failed to stop Pico video runtime during pico_input cleanup")
             if frame_writer is not None:
                 frame_writer.close(unlink=True)
             command_sub.close()
@@ -2563,6 +2576,8 @@ def _run_robot_control_worker(
 
 
 class _RecordingWorker:
+    _CAMERA_TIMEOUT_S = 1.0
+
     def __init__(
         self,
         cfg: dict[str, Any],
@@ -2611,6 +2626,7 @@ class _RecordingWorker:
             seq=0,
         )
         self._latest_video_seq = -1
+        self._latest_video_received_s: float | None = None
         self._active = False
         self._episode_started_s = 0.0
         self._episode_frames = 0
@@ -2659,6 +2675,7 @@ class _RecordingWorker:
                 video = self._video_sub.recv_latest()
                 if isinstance(video, SharedFrameDescriptor):
                     self._handle_video(video)
+                self._discard_if_camera_stale()
 
                 time.sleep(idle_sleep_s)
         finally:
@@ -2706,6 +2723,9 @@ class _RecordingWorker:
                 record.recordable,
             )
             return
+        if not self._camera_is_fresh():
+            operator_logger.warning("cannot start recording: no fresh RealSense frame")
+            return
         self._recorder.start_episode()
         self._active = True
         self._episode_started_s = time.monotonic()
@@ -2715,6 +2735,9 @@ class _RecordingWorker:
     def _save_episode(self) -> None:
         if not self._active:
             operator_logger.info("no active recording episode to save")
+            return
+        if not self._camera_is_fresh():
+            self._discard_episode("camera stream timeout")
             return
         duration_s = time.monotonic() - self._episode_started_s
         if self._episode_frames <= 0:
@@ -2741,6 +2764,7 @@ class _RecordingWorker:
         if int(descriptor.seq) == self._latest_video_seq:
             return
         self._latest_video_seq = int(descriptor.seq)
+        self._latest_video_received_s = time.monotonic()
         if not self._active:
             return
         record = self._latest_record
@@ -2779,6 +2803,19 @@ class _RecordingWorker:
             frame_kwargs["neck_action"] = neck_action
         self._recorder.add_frame(**frame_kwargs)
         self._episode_frames += 1
+
+    def _camera_is_fresh(self, *, now_s: float | None = None) -> bool:
+        if self._latest_video_received_s is None:
+            return False
+        now = time.monotonic() if now_s is None else float(now_s)
+        return now - self._latest_video_received_s <= self._CAMERA_TIMEOUT_S
+
+    def _discard_if_camera_stale(self, *, now_s: float | None = None) -> bool:
+        if not self._active or self._camera_is_fresh(now_s=now_s):
+            return False
+        self._discard_episode("camera stream timeout")
+        return True
+
 
 def _run_recording_worker(
     cfg: dict[str, Any],

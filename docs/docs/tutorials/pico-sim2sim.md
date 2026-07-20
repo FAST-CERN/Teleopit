@@ -116,8 +116,7 @@ python scripts/run/run_sim.py \
 
 Use `input.video.source=test-pattern` for a receiver-side video sanity check. If
 video startup fails, Teleopit logs the error, disables video, and keeps tracking
-and control running. Set `input.video.fail_on_error=true` to fail startup
-instead.
+and control running.
 
 ## Common Parameters
 
