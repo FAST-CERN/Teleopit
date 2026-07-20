@@ -87,6 +87,7 @@ def _safety_config() -> HighLevelPolicySafetyConfig:
         max_root_displacement_m=0.1,
         max_yaw_rate_rad_s=2.5,
         max_joint_rate_rad_s=10.0,
+        max_joint_projection_rad=0.1,
         joint_pos_lower=(-3.0,) * 29,
         joint_pos_upper=(3.0,) * 29,
         neck_yaw_min_deg=-45.0,
@@ -239,16 +240,39 @@ def test_scheduler_accepts_entry_boundary_and_internal_reference_discontinuities
     assert first_action[7] == pytest.approx(-0.08)
 
 
+def test_scheduler_clips_joint_positions_to_onboard_limits() -> None:
+    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
+    actions = _safe_actions(1)
+    actions[0, 7] = -3.08
+    actions[0, 8] = 3.08
+
+    first_action = scheduler.accept_entry(_safe_chunk(actions), now_s=1.01)
+
+    assert first_action[7] == pytest.approx(-3.0)
+    assert first_action[8] == pytest.approx(3.0)
+
+
+def test_scheduler_rejects_joint_projection_above_limit() -> None:
+    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
+    actions = _safe_actions(1)
+    actions[0, 7] = -3.11
+
+    with pytest.raises(ValueError, match="joint projection correction exceeds"):
+        scheduler.accept(_safe_chunk(actions), now_s=1.01)
+    assert not scheduler.has_chunk
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
         (lambda value: value.__setitem__((1, 2), 0.4), "root height"),
-        (lambda value: value.__setitem__((1, 7), 4.0), "joint position"),
         (lambda value: value.__setitem__((1, 48), 46.0), "OpenNeck yaw"),
         (lambda value: value.__setitem__((1, 49), -41.0), "OpenNeck pitch"),
     ],
 )
-def test_scheduler_rejects_entire_unsafe_chunk(mutate, message: str) -> None:  # type: ignore[no-untyped-def]
+def test_scheduler_rejects_entire_unsafe_non_joint_chunk(mutate, message: str) -> None:  # type: ignore[no-untyped-def]
     scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
     scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
     actions = _safe_actions()

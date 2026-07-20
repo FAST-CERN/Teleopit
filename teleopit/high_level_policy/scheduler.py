@@ -368,6 +368,23 @@ class HighLevelPolicyScheduler:
             raise ValueError("High-level policy LinkerHand closure must be within [0, 1]")
         safety = self.safety
         if safety is not None:
+            joints = validated[:, 7:36]
+            projected = np.clip(
+                joints,
+                np.asarray(safety.joint_pos_lower, dtype=np.float32),
+                np.asarray(safety.joint_pos_upper, dtype=np.float32),
+            )
+            correction = np.abs(projected - joints)
+            violations = np.argwhere(correction > safety.max_joint_projection_rad)
+            if len(violations):
+                frame, joint = (int(value) for value in violations[0])
+                raise ValueError(
+                    "High-level policy joint projection correction exceeds "
+                    f"{safety.max_joint_projection_rad:.6g} rad: "
+                    f"action[{frame}, {7 + joint}] correction="
+                    f"{float(correction[frame, joint]):.6g} rad"
+                )
+            validated[:, 7:36] = projected
             self._validate_safety_limits(validated, safety=safety)
         return validated
 

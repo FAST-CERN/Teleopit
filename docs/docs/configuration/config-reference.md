@@ -136,11 +136,14 @@ protocol tests. The only shared data file is `hand_calibration.json`.
 | `high_level_policy.safety.max_root_displacement_m` | Source-frame-equivalent 3D root step used by the 50 Hz output limiter | `0.1` |
 | `high_level_policy.safety.max_yaw_rate_rad_s` | Root yaw-rate limit applied to the 50 Hz scheduler output | `2.5` |
 | `high_level_policy.safety.max_joint_rate_rad_s` | Per-joint rate limit applied to the 50 Hz scheduler output | `10.0` |
+| `high_level_policy.safety.max_joint_projection_rad` | Maximum correction allowed when clipping a G1 joint reference to its position limit | `0.1` |
 | `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | Accepted OpenNeck yaw command range | `-45` / `45` |
 | `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | Accepted OpenNeck pitch command range | `-40` / `40` |
 
-G1 reference joint positions are checked against
-`real_robot.joint_pos_lower/upper`. The initial runtime requires
+G1 reference joint positions are clipped to
+`real_robot.joint_pos_lower/upper` when the required correction does not exceed
+`high_level_policy.safety.max_joint_projection_rad`; larger corrections reject
+the chunk. The initial runtime requires
 `hands.driver=linkerhand_o6`, both hand sides, and `neck.driver=openneck` because
 all canonical 50D action fields are active. OpenNeck policy values go directly
 to `move_deg(yaw, pitch)` after chunk validation; Pico dead-zone and pitch-gain

@@ -36,6 +36,7 @@ high_level_policy:
     max_root_displacement_m: 0.1
     max_yaw_rate_rad_s: 2.5
     max_joint_rate_rad_s: 10.0
+    max_joint_projection_rad: 0.1
     neck_yaw_min_deg: -45.0
     neck_yaw_max_deg: 45.0
     neck_pitch_min_deg: -40.0

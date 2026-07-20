@@ -151,21 +151,22 @@ Watchdog、主机/网络、相机或 policy client 故障也会进入同一个�
 
 ## 6. Onboard 验证与 Watchdog
 
-如果任一帧违反契约，Teleopit 会拒绝整个 chunk。它不会对错误的主机结果进行补齐、
-裁剪或安全限幅。检查包括：
+当修正量不超过 `max_joint_projection_rad` 时，Teleopit 会先把 G1 关节 reference 裁剪到
+配置的真机关节位置范围；如果任一帧违反其余契约，则拒绝整个 chunk。它不会对错误的
+主机结果进行补齐或删减。检查包括：
 
 - 精确且有限的 `float32[T,50]`、当前 session，以及递增的 source sequence；
 - 归一化 root quaternion 与时间连续的符号；
 - 绝对 root 高度限制；
-- 绝对 G1 关节位置限制；
+- 按 `real_robot.joint_pos_lower/upper` 裁剪 G1 关节位置，并拒绝更大的修正量；
 - LinkerHand closure `[0,1]` 和配置的 OpenNeck 角度范围；
 - observation/result 时效、source timestamp 和 action horizon。
 
 reference 连续性不是接收条件。entry、chunk 内部和 chunk 之间的 root translation、root
 yaw 与 G1 关节 reference 跳变都会被接受，因为录制的 pause/resume 转换可能有意地不
 连续。一次 Kp ramp 期间会暂停主机请求，随后新 host session 会提供真正进入 `POLICY`
-的新鲜 chunk；候选 chunk 绝不会作为实时 timeline 继续播放。格式错误、过期或超出绝对
-范围的新鲜 chunk 会终止 entry，而不会开始另一轮对齐。
+的新鲜 chunk；候选 chunk 绝不会作为实时 timeline 继续播放。格式错误、过期、非关节字段
+超出绝对范围或关节修正量过大的新鲜 chunk 会终止 entry，而不会开始另一轮对齐。
 
 通过验证的 30 Hz body reference 会在本地插值到 50 Hz 并执行 rate limit；网络延迟
 导致跳过 source frame 或新 chunk 替换旧计划时同样如此。配置的 root displacement/XY

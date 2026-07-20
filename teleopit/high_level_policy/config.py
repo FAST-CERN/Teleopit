@@ -40,6 +40,7 @@ class HighLevelPolicySafetyConfig:
     max_root_displacement_m: float
     max_yaw_rate_rad_s: float
     max_joint_rate_rad_s: float
+    max_joint_projection_rad: float
     joint_pos_lower: tuple[float, ...]
     joint_pos_upper: tuple[float, ...]
     neck_yaw_min_deg: float
@@ -188,6 +189,10 @@ def parse_high_level_policy_safety_config(cfg: Any) -> HighLevelPolicySafetyConf
         max_joint_rate_rad_s=_positive_float(
             cfg_get(safety_cfg, "max_joint_rate_rad_s", 10.0),
             "safety.max_joint_rate_rad_s",
+        ),
+        max_joint_projection_rad=_positive_float(
+            cfg_get(safety_cfg, "max_joint_projection_rad", 0.1),
+            "safety.max_joint_projection_rad",
         ),
         joint_pos_lower=joint_pos_lower,
         joint_pos_upper=joint_pos_upper,
