@@ -75,7 +75,7 @@ def parse_high_level_policy_config(cfg: Any) -> HighLevelPolicyConfig:
         cfg_get(policy_cfg, "max_result_age_s", 0.1), "max_result_age_s"
     )
     entry_timeout_s = _positive_float(
-        cfg_get(policy_cfg, "entry_timeout_s", 3.0), "entry_timeout_s"
+        cfg_get(policy_cfg, "entry_timeout_s", 5.0), "entry_timeout_s"
     )
     hold_s = float(cfg_get(policy_cfg, "hold_s", 0.1))
     if not math.isfinite(hold_s) or hold_s < 0.0:
