@@ -210,56 +210,31 @@ def test_scheduler_validates_complete_chunk_against_onboard_safety_limits() -> N
     assert scheduler.has_chunk
 
 
-def test_scheduler_entry_ignores_only_current_pose_boundary() -> None:
+def test_scheduler_accepts_entry_boundary_and_internal_reference_discontinuities() -> None:
     scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
     initial = _safe_actions(1)[0]
     initial[7] = 0.8
     actions = _safe_actions()
-    actions[:, 7] = -0.08
+    actions[0, 0] = 0.2
+    actions[0, 7] = -0.08
+    actions[1, 0] = -0.2
+    actions[1, 7] = 0.5
+    yaw = 0.2
+    actions[1, 3:7] = [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)]
     scheduler.reset("session-1", initial_action=initial)
 
-    with pytest.raises(ValueError, match="joint rate"):
-        scheduler.accept(_safe_chunk(actions), now_s=1.01)
-
-    scheduler.reset("session-1", initial_action=initial)
     first_action = scheduler.accept_entry(_safe_chunk(actions), now_s=1.01)
 
+    assert scheduler.has_chunk
+    assert first_action[0] == pytest.approx(0.2)
     assert first_action[7] == pytest.approx(-0.08)
-
-
-def test_scheduler_entry_still_rejects_internal_chunk_discontinuity() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
-    actions = _safe_actions()
-    actions[0, 7] = -0.08
-    actions[1:, 7] = 0.5
-    scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
-
-    with pytest.raises(ValueError, match="joint rate"):
-        scheduler.accept_entry(_safe_chunk(actions), now_s=1.01)
-
-    assert not scheduler.has_chunk
-
-
-def test_scheduler_entry_still_rejects_root_boundary_displacement() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
-    initial = _safe_actions(1)[0]
-    actions = _safe_actions()
-    actions[:, 0] += 0.2
-    scheduler.reset("session-1", initial_action=initial)
-
-    with pytest.raises(ValueError, match="root per-frame displacement"):
-        scheduler.accept_entry(_safe_chunk(actions), now_s=1.01)
-
-    assert not scheduler.has_chunk
 
 
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
         (lambda value: value.__setitem__((1, 2), 0.4), "root height"),
-        (lambda value: value.__setitem__((1, 0), 0.2), "displacement"),
         (lambda value: value.__setitem__((1, 7), 4.0), "joint position"),
-        (lambda value: value.__setitem__((1, 7), 0.5), "joint rate"),
         (lambda value: value.__setitem__((1, 48), 46.0), "OpenNeck yaw"),
         (lambda value: value.__setitem__((1, 49), -41.0), "OpenNeck pitch"),
     ],
@@ -275,18 +250,7 @@ def test_scheduler_rejects_entire_unsafe_chunk(mutate, message: str) -> None:  #
     assert not scheduler.has_chunk
 
 
-def test_scheduler_rejects_root_yaw_rate() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
-    scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
-    actions = _safe_actions()
-    yaw = 0.2
-    actions[1, 3:7] = [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)]
-
-    with pytest.raises(ValueError, match="yaw rate"):
-        scheduler.accept(_safe_chunk(actions), now_s=1.01)
-
-
-def test_scheduler_rate_limits_valid_plan_at_50hz_after_latency_skip() -> None:
+def test_scheduler_accepts_discontinuous_plan_and_rate_limits_output_at_50hz() -> None:
     scheduler = HighLevelPolicyScheduler(
         hold_s=0.1,
         safety=_safety_config(),
@@ -295,9 +259,9 @@ def test_scheduler_rate_limits_valid_plan_at_50hz_after_latency_skip() -> None:
     initial = _safe_actions(1)[0]
     scheduler.reset("session-1", initial_action=initial)
     actions = _safe_actions(2)
-    actions[1, 0] = 0.08
-    actions[1, 7] = 0.3
-    yaw = 0.08
+    actions[1, 0] = 0.2
+    actions[1, 7] = 0.5
+    yaw = 0.2
     actions[1, 3:7] = [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)]
     scheduler.accept(_safe_chunk(actions), now_s=1.01)
 
@@ -706,7 +670,7 @@ def test_policy_entry_rejects_action_received_after_total_deadline() -> None:
     assert accepted == []
 
 
-def test_policy_entry_fresh_chunk_uses_current_measured_joint_boundary() -> None:
+def test_policy_entry_fresh_chunk_uses_held_reference_boundary() -> None:
     worker = object.__new__(_RobotControlWorker)
     now_s = time.monotonic()
     worker.mode = RobotMode.STANDING
@@ -732,7 +696,10 @@ def test_policy_entry_fresh_chunk_uses_current_measured_joint_boundary() -> None
     worker._policy_resume_source_timestamp_ns = None
     worker._policy_entry_pending = True
     worker._policy_entry_deadline_s = now_s + 1.0
-    worker._policy_entry_target_qpos = np.zeros(36, dtype=np.float64)
+    held_qpos = np.zeros(36, dtype=np.float64)
+    held_qpos[2] = 0.76
+    held_qpos[3] = 1.0
+    worker._policy_entry_target_qpos = held_qpos
     worker._policy_frame_transform = PolicyFrameTransform.from_robot_pose(
         [0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
@@ -745,19 +712,22 @@ def test_policy_entry_fresh_chunk_uses_current_measured_joint_boundary() -> None
     worker.robot = SimpleNamespace(get_state=lambda: state)
     worker._build_robot_state_qpos = lambda _state: current_qpos.copy()
     scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
-    scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
+    boundary_action = worker._build_high_level_policy_boundary_action(state)
+    scheduler.reset("session-1", initial_action=boundary_action)
     worker._high_level_policy_scheduler = scheduler
     worker._high_level_policy_cfg = SimpleNamespace(max_result_age_s=1.0)
-    standing: list[str] = []
-    worker._enter_standing = lambda: standing.append("standing")
-    worker._transition_to_high_level_policy = lambda: pytest.fail(
-        "fresh chunk must be rejected against the current measured pose"
+    worker._enter_standing = lambda: pytest.fail(
+        "fresh chunk must not be compared with measured tracker joints"
     )
+    transitions: list[str] = []
+    worker._transition_to_high_level_policy = lambda: transitions.append("policy")
 
     worker._drain_high_level_policy_ipc()
 
-    assert standing == ["standing"]
-    assert not scheduler.has_chunk
+    assert boundary_action[7] == pytest.approx(0.0)
+    assert current_qpos[7] == pytest.approx(0.8)
+    assert transitions == ["policy"]
+    assert scheduler.has_chunk
 
 
 def test_policy_entry_stale_result_aborts_current_session() -> None:

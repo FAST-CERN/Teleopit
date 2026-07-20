@@ -153,9 +153,12 @@ takeover, `B` pauses/resumes, `X` returns to `STANDING`, and `L1+R1` enters
 `DAMPING`. Policy entry remains an internal `STANDING` phase with no separate
 starting mode: Teleopit validates a candidate chunk, holds its first body
 reference through one motion-tracker Kp ramp, then creates one fresh host
-session. A normally validated chunk from that session is required before
-entering `POLICY`, so Replay restarts from its configured start frame and ACT
-recomputes from the post-ramp observation. Entry failure returns to `STANDING`.
+session. A valid chunk from that session is required before entering `POLICY`;
+Replay therefore restarts from its configured start frame and ACT recomputes
+from the post-ramp observation. The 50 Hz output limiter starts from the held
+reference, not the tracker's measured joint pose. Temporal reference jumps are
+accepted so recorded pause/resume transitions can be replayed, then rate-limited
+on output. Entry failure returns to `STANDING`.
 Invalid/stale live chunks and watchdog expiry cannot block the local control
 loop and instead pause `POLICY` while holding the last reference. Host/network
 failure and loss of a required camera/client worker use the same ordinary pause

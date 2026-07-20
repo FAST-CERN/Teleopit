@@ -150,10 +150,10 @@ client/server 消息结构与协议测试。唯一共享的数据文件是 `hand
 | `high_level_policy.entry_timeout_s` | 候选请求、Kp ramp 和新 session 的 entry 最长总时间，以及恢复时等待新鲜 chunk 的最长时间 | `5.0` |
 | `high_level_policy.hold_s` | Watchdog 暂停 `POLICY` 前，最后一条有效 reference 的 grace period | `0.1` |
 | `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | 可接受的绝对 root 高度范围 | `0.55` / `1.05` |
-| `high_level_policy.safety.max_root_xy_speed_m_s` | 30 Hz reference 之间允许的最大 root XY 速度 | `2.5` |
-| `high_level_policy.safety.max_root_displacement_m` | reference 帧之间允许的最大 3D root 位移 | `0.1` |
-| `high_level_policy.safety.max_yaw_rate_rad_s` | 最大 root yaw rate | `2.5` |
-| `high_level_policy.safety.max_joint_rate_rad_s` | 最大单关节 reference rate | `10.0` |
+| `high_level_policy.safety.max_root_xy_speed_m_s` | 应用于 50 Hz scheduler 输出的 root XY 速度限制 | `2.5` |
+| `high_level_policy.safety.max_root_displacement_m` | 50 Hz 输出 rate limiter 使用的 source-frame 等效 3D root 步长 | `0.1` |
+| `high_level_policy.safety.max_yaw_rate_rad_s` | 应用于 50 Hz scheduler 输出的 root yaw rate 限制 | `2.5` |
+| `high_level_policy.safety.max_joint_rate_rad_s` | 应用于 50 Hz scheduler 输出的单关节 rate 限制 | `10.0` |
 | `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | 可接受的 OpenNeck yaw 命令范围 | `-45` / `45` |
 | `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | 可接受的 OpenNeck pitch 命令范围 | `-40` / `40` |
 

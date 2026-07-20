@@ -1590,14 +1590,8 @@ class _RobotControlWorker:
                 if first_chunk:
                     first_action = scheduler.accept_entry(chunk, now_s=now_s)
                 else:
-                    scheduler.reset(
-                        packet.session_id,
-                        initial_action=self._build_high_level_policy_boundary_action(
-                            self.robot.get_state()
-                        ),
-                    )
                     scheduler.accept(chunk, now_s=now_s)
-            except (RuntimeError, ValueError) as exc:
+            except ValueError as exc:
                 logger.warning("Rejected high-level policy entry chunk: %s", exc)
                 operator_logger.warning(
                     "High-level policy entry failed; remaining in STANDING"
@@ -1673,10 +1667,11 @@ class _RobotControlWorker:
         transform = self._policy_frame_transform
         if transform is None:
             raise RuntimeError("High-level policy entry is missing its frame transform")
+        boundary_qpos = self._policy_entry_target_qpos
+        if boundary_qpos is None:
+            boundary_qpos = self._build_robot_state_qpos(state)
         initial_action = np.zeros(50, dtype=np.float32)
-        initial_action[:36] = transform.localize_body_action(
-            self._build_robot_state_qpos(state)
-        )
+        initial_action[:36] = transform.localize_body_action(boundary_qpos)
         return initial_action
 
     def _start_high_level_policy_entry_session(self) -> None:

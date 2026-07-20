@@ -132,10 +132,10 @@ protocol tests. The only shared data file is `hand_calibration.json`.
 | `high_level_policy.entry_timeout_s` | Maximum total entry duration (candidate, Kp ramp, fresh session) and maximum fresh-chunk wait on resume | `5.0` |
 | `high_level_policy.hold_s` | Final validated-reference grace period before the watchdog pauses `POLICY` | `0.1` |
 | `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | Accepted absolute root-height range | `0.55` / `1.05` |
-| `high_level_policy.safety.max_root_xy_speed_m_s` | Maximum root XY speed across 30 Hz references | `2.5` |
-| `high_level_policy.safety.max_root_displacement_m` | Maximum 3D root displacement between reference frames | `0.1` |
-| `high_level_policy.safety.max_yaw_rate_rad_s` | Maximum root yaw rate | `2.5` |
-| `high_level_policy.safety.max_joint_rate_rad_s` | Maximum per-joint reference rate | `10.0` |
+| `high_level_policy.safety.max_root_xy_speed_m_s` | Root XY speed limit applied to the 50 Hz scheduler output | `2.5` |
+| `high_level_policy.safety.max_root_displacement_m` | Source-frame-equivalent 3D root step used by the 50 Hz output limiter | `0.1` |
+| `high_level_policy.safety.max_yaw_rate_rad_s` | Root yaw-rate limit applied to the 50 Hz scheduler output | `2.5` |
+| `high_level_policy.safety.max_joint_rate_rad_s` | Per-joint rate limit applied to the 50 Hz scheduler output | `10.0` |
 | `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | Accepted OpenNeck yaw command range | `-45` / `45` |
 | `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | Accepted OpenNeck pitch command range | `-40` / `40` |
 

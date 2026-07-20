@@ -129,17 +129,16 @@ python scripts/run/run_high_level_policy_sim2real.py \
 | Unitree remote `L1+R1` | 紧急切换到 `DAMPING` |
 
 按下 `Y` 后，Teleopit 会创建 entry session，以当前 root XY/yaw 建立锚点，并请求一个
-候选 chunk。该 chunk 的所有绝对限制、root 边界限制和 chunk 内部跳变都会进行验证；
-仅不检查实测姿态到 `action[0]` 的 G1 关节 rate 边界。随后 Teleopit 会冻结
-`action[0]` 作为静态 body reference，并通过现有 motion tracker 在一次 Kp ramp 期间
-跟踪该 reference。
+候选 chunk。运行时会验证其结构、有限值、四元数和绝对硬件范围；root、yaw 和关节
+reference 的时间跳变会被接受。随后 Teleopit 会冻结 `action[0]` 作为静态 body
+reference，并通过现有 motion tracker 在一次 Kp ramp 期间跟踪该 reference。
 
 整个 entry 期间，机器人在形式上仍处于 `STANDING`；没有单独的“policy starting”
 状态。Kp ramp 结束后，Teleopit 会创建第二个 session：它会把 ReplayPolicy 重置到所
 配置的起始帧（默认为第 0 帧），或重置 ACT 状态，并根据 ramp 后的 observation 请求
-新 chunk。该新 chunk
-必须通过包含“实测姿态到第一帧关节 rate 边界”在内的正常验证，运行时才会进入
-`POLICY`。失败或超时会安全地返回普通 standing reference。
+新 chunk。该新 chunk 必须通过正常验证，运行时才会进入 `POLICY`。scheduler 的 50 Hz
+输出 limiter 从正在保持的 `action[0]` reference 开始，而不是从无需等于 motion
+reference 的 tracker 实测关节开始。失败或超时会安全地返回普通 standing reference。
 
 暂停会冻结 body reference，并保持最后一条 LinkerHand 和 OpenNeck 命令。恢复时会请求
 新的 action chunk，并在等待期间继续保持暂停姿态。按 `X` 会停止策略 session；运行时
@@ -157,20 +156,21 @@ Watchdog、主机/网络、相机或 policy client 故障也会进入同一个�
 
 - 精确且有限的 `float32[T,50]`、当前 session，以及递增的 source sequence；
 - 归一化 root quaternion 与时间连续的符号；
-- root 高度、逐帧位移、XY 速度和 yaw rate 限制；
-- G1 关节位置和关节 rate 限制；
+- 绝对 root 高度限制；
+- 绝对 G1 关节位置限制；
 - LinkerHand closure `[0,1]` 和配置的 OpenNeck 角度范围；
 - observation/result 时效、source timestamp 和 action horizon。
 
-entry 候选 chunk 只有一个严格限定的例外：实测姿态到第一帧的 G1 关节 rate 边界由
-静态 tracker 对齐处理，而不是直接拒绝 chunk。root 边界检查和候选 chunk 内部的所有
-跳变仍然是强制检查项。一次 Kp ramp 期间会暂停主机请求，随后新 host session 会提供
-真正进入 `POLICY` 的新鲜 chunk；候选 chunk 绝不会作为实时 timeline 继续播放。若新鲜
-chunk 被拒绝，entry 会直接终止，不会开始另一轮对齐。
+reference 连续性不是接收条件。entry、chunk 内部和 chunk 之间的 root translation、root
+yaw 与 G1 关节 reference 跳变都会被接受，因为录制的 pause/resume 转换可能有意地不
+连续。一次 Kp ramp 期间会暂停主机请求，随后新 host session 会提供真正进入 `POLICY`
+的新鲜 chunk；候选 chunk 绝不会作为实时 timeline 继续播放。格式错误、过期或超出绝对
+范围的新鲜 chunk 会终止 entry，而不会开始另一轮对齐。
 
 通过验证的 30 Hz body reference 会在本地插值到 50 Hz 并执行 rate limit；网络延迟
-导致跳过 source frame 或新 chunk 替换旧计划时同样如此。在短暂推理延迟期间，可以在
-配置的短 grace period 内继续使用最后一条已验证 reference。如果不再有有效 action，
+导致跳过 source frame 或新 chunk 替换旧计划时同样如此。配置的 root displacement/XY
+speed、yaw rate 和 joint rate 是输出限制，而不是 chunk 拒绝阈值。在短暂推理延迟期间，
+可以在配置的短 grace period 内继续使用最后一条已验证 reference。如果不再有有效 action，
 网络交换失败，或必要的 camera/client worker 退出，Teleopit 会保持在 `POLICY`，进入
 普通的可恢复暂停状态，并保持最后一条 body、hand 和 neck 命令。故障恢复后按 `B`
 请求恢复；在收到新的有效 chunk 前，执行仍保持暂停。只有 `X` 会把模式切换到
@@ -187,9 +187,9 @@ chunk 被拒绝，entry 会直接终止，不会开始另一轮对齐。
 日志。Teleopit 在对齐第一帧 reference，以及候选 chunk 或新鲜 chunk 检查失败时，都会
 保持 `STANDING`。
 
-**新鲜 entry chunk 被拒绝或 entry 超时：** 请确认 episode 从稳定姿态开始，检查关节
-顺序和绝对 reference 约定，并确认继承的 `standing_return_ramp_duration` 是否足够。
-不要关闭 chunk 内部 rate 检查。
+**新鲜 entry chunk 被拒绝或 entry 超时：** 请检查日志中的契约错误、关节顺序、绝对
+reference 约定、硬件范围以及 host/network 延迟。单纯的 reference 跳变不会导致 chunk
+被拒绝。`standing_return_ramp_duration` 控制对候选第一帧的物理对齐。
 
 **策略短暂运行后进入暂停：** 检查 timeout、推理延迟、stale result、worker 退出和
 安全拒绝日志。底层 50 Hz tracker 不会等待主机推理。恢复故障输入路径后按 `B` 继续。
