@@ -7,6 +7,9 @@ defaults:
 input:
   provider: high_level_policy
 
+# Hold the entry candidate through the tracker before requesting the fresh session.
+standing_return_ramp_duration: 2.0
+
 camera:
   source: realsense  # realsense | test-pattern
   width: 640

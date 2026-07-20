@@ -138,6 +138,7 @@ client/server 消息结构与协议测试。唯一共享的数据文件是 `hand
 | `camera.source` | Onboard 策略相机：`realsense`，或仅供集成测试的 `test-pattern` | `realsense` |
 | `camera.width` / `height` / `fps` | 精确的策略图像契约 | `640` / `480` / `30` |
 | `camera.device` | 可选 RealSense 序列号 | `null` |
+| `standing_return_ramp_duration` | 跟踪策略 entry 候选第一帧时的 Kp ramp 时长 | `2.0` |
 | `high_level_policy.endpoint` | 主机策略 ZeroMQ TCP endpoint | `tcp://127.0.0.1:5555` |
 | `high_level_policy.task` | reset 和每个 observation 都会发送的非空任务 prompt | `demo` |
 | `high_level_policy.timeout_s` | 单次网络请求 deadline | `1.0` |

@@ -120,6 +120,7 @@ protocol tests. The only shared data file is `hand_calibration.json`.
 | `camera.source` | Onboard policy camera: `realsense` or integration-only `test-pattern` | `realsense` |
 | `camera.width` / `height` / `fps` | Exact policy image contract | `640` / `480` / `30` |
 | `camera.device` | Optional RealSense serial | `null` |
+| `standing_return_ramp_duration` | Kp-ramp duration while tracking the policy-entry candidate first frame | `2.0` |
 | `high_level_policy.endpoint` | Host policy ZeroMQ TCP endpoint | `tcp://127.0.0.1:5555` |
 | `high_level_policy.task` | Non-empty task prompt sent on reset and every observation | `demo` |
 | `high_level_policy.timeout_s` | Per-request network deadline | `1.0` |
