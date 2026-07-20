@@ -148,7 +148,7 @@ client/server 消息结构与协议测试。唯一共享的数据文件是 `hand
 | `high_level_policy.max_observation_age_s` | 跳过请求前允许的最大 camera/observation age | `0.15` |
 | `high_level_policy.max_result_age_s` | 拒绝已接收结果前允许的最大本地 IPC age | `0.1` |
 | `high_level_policy.entry_timeout_s` | 候选请求、Kp ramp 和新 session 的 entry 最长总时间，以及恢复时等待新鲜 chunk 的最长时间 | `5.0` |
-| `high_level_policy.hold_s` | Watchdog 暂停 `POLICY` 前，最后一条有效 reference 的 grace period | `0.1` |
+| `high_level_policy.hold_s` | Watchdog 暂停 `POLICY` 前，最后一条有效 reference 的 grace period | `0.5` |
 | `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | 可接受的绝对 root 高度范围 | `0.55` / `1.05` |
 | `high_level_policy.safety.max_root_xy_speed_m_s` | 应用于 50 Hz scheduler 输出的 root XY 速度限制 | `2.5` |
 | `high_level_policy.safety.max_root_displacement_m` | 50 Hz 输出 rate limiter 使用的 source-frame 等效 3D root 步长 | `0.1` |

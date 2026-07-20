@@ -109,7 +109,7 @@ class HighLevelPolicyScheduler:
     def __init__(
         self,
         *,
-        hold_s: float = 0.1,
+        hold_s: float = 0.5,
         safety: HighLevelPolicySafetyConfig | None = None,
         output_hz: float = 50.0,
     ) -> None:

@@ -10,7 +10,10 @@ import pytest
 import zmq
 
 from teleopit.high_level_policy.client import HighLevelPolicyClient, PolicyActionChunk
-from teleopit.high_level_policy.config import HighLevelPolicySafetyConfig
+from teleopit.high_level_policy.config import (
+    HighLevelPolicySafetyConfig,
+    parse_high_level_policy_config,
+)
 from teleopit.high_level_policy.hand_calibration import HandCalibration
 from teleopit.high_level_policy.protocol import (
     MAX_REQUEST_BYTES,
@@ -103,6 +106,12 @@ def _safe_chunk(actions: np.ndarray, *, source_s: float = 1.0, sequence: int = 0
         policy_id="test",
         server_inference_ms=1.0,
     )
+
+
+def test_high_level_policy_default_hold_covers_transport_jitter() -> None:
+    config = parse_high_level_policy_config({"high_level_policy": {"task": "demo"}})
+
+    assert config.hold_s == pytest.approx(0.5)
 
 
 def test_packaged_hand_calibration_loads() -> None:
