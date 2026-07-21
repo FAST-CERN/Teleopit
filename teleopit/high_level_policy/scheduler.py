@@ -385,6 +385,16 @@ class HighLevelPolicyScheduler:
                     f"{float(correction[frame, joint]):.6g} rad"
                 )
             validated[:, 7:36] = projected
+            validated[:, 48] = np.clip(
+                validated[:, 48],
+                safety.neck_yaw_min_deg,
+                safety.neck_yaw_max_deg,
+            )
+            validated[:, 49] = np.clip(
+                validated[:, 49],
+                safety.neck_pitch_min_deg,
+                safety.neck_pitch_max_deg,
+            )
             self._validate_safety_limits(validated, safety=safety)
         return validated
 
@@ -427,22 +437,6 @@ class HighLevelPolicyScheduler:
                 "High-level policy joint position exceeds real_robot limits: "
                 f"action[{frame}, {7 + joint}]={float(joints[frame, joint]):.6g}, "
                 f"range=[{float(lower[joint]):.6g}, {float(upper[joint]):.6g}]"
-            )
-
-        yaw = actions[:, 48]
-        pitch = actions[:, 49]
-        if float(np.min(yaw)) < safety.neck_yaw_min_deg or float(np.max(yaw)) > safety.neck_yaw_max_deg:
-            raise ValueError(
-                "High-level policy OpenNeck yaw is outside "
-                f"[{safety.neck_yaw_min_deg}, {safety.neck_yaw_max_deg}] degrees"
-            )
-        if (
-            float(np.min(pitch)) < safety.neck_pitch_min_deg
-            or float(np.max(pitch)) > safety.neck_pitch_max_deg
-        ):
-            raise ValueError(
-                "High-level policy OpenNeck pitch is outside "
-                f"[{safety.neck_pitch_min_deg}, {safety.neck_pitch_max_deg}] degrees"
             )
 
 

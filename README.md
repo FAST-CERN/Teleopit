@@ -164,7 +164,9 @@ Replay therefore restarts from its configured start frame and ACT recomputes
 from the post-ramp observation. The 50 Hz output limiter starts from the held
 reference, not the tracker's measured joint pose. Temporal reference jumps are
 accepted so recorded pause/resume transitions can be replayed, then rate-limited
-on output. Entry failure returns to `STANDING`.
+on output. OpenNeck yaw/pitch values are clipped to the configured degree ranges
+before scheduling, so a neck-only overshoot does not reject the action chunk.
+Entry failure returns to `STANDING`.
 Invalid/stale live chunks and watchdog expiry cannot block the local control
 loop and instead pause `POLICY` while holding the last reference. Host/network
 failure and loss of a required camera/client worker use the same ordinary pause

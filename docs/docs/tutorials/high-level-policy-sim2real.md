@@ -166,7 +166,8 @@ enters `STANDING` automatically; `X` remains the manual transition.
 ## 6. Onboard Validation and Watchdog
 
 Teleopit clips a G1 joint reference to the configured real-robot position
-limits when the correction is at most `max_joint_projection_rad`, then rejects
+limits when the correction is at most `max_joint_projection_rad`, and clips
+OpenNeck yaw/pitch commands to their configured degree ranges. It then rejects
 a complete chunk if any frame violates the remaining contract. It never pads
 or trims a malformed host result. Checks include:
 
@@ -175,7 +176,8 @@ or trims a malformed host result. Checks include:
 - absolute root-height limits;
 - G1 joint-position clipping to `real_robot.joint_pos_lower/upper`, with larger
   corrections rejected;
-- LinkerHand closure `[0,1]` and configured OpenNeck degree ranges;
+- LinkerHand closure `[0,1]`;
+- OpenNeck yaw/pitch clipping to the configured degree ranges;
 - observation/result age, source timestamp, and action horizon.
 
 Reference continuity is not an acceptance condition. Root translation, root
@@ -184,8 +186,9 @@ across chunks because a recorded pause/resume transition can intentionally be
 discontinuous. Host requests are paused for one Kp ramp. A new host session
 then supplies the fresh chunk that will actually enter `POLICY`; the candidate
 chunk is never continued as a live timeline. A malformed or stale chunk, an
-out-of-range non-joint field, or an excessive joint correction in a fresh chunk
-aborts entry instead of starting another alignment cycle.
+out-of-range non-joint field other than the projected OpenNeck angles, or an
+excessive joint correction in a fresh chunk aborts entry instead of starting
+another alignment cycle.
 
 Validated 30 Hz body references are interpolated and rate-limited locally at
 50 Hz, including when latency skips source frames or a new chunk replaces the

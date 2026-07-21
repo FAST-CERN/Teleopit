@@ -154,15 +154,16 @@ client/server 消息结构与协议测试。唯一共享的数据文件是 `hand
 | `high_level_policy.safety.max_yaw_rate_rad_s` | 应用于 50 Hz scheduler 输出的 root yaw rate 限制 | `2.5` |
 | `high_level_policy.safety.max_joint_rate_rad_s` | 应用于 50 Hz scheduler 输出的单关节 rate 限制 | `10.0` |
 | `high_level_policy.safety.max_joint_projection_rad` | 将 G1 关节 reference 裁剪到位置限位时允许的最大修正量 | `0.1` |
-| `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | 可接受的 OpenNeck yaw 命令范围 | `-45` / `45` |
-| `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | 可接受的 OpenNeck pitch 命令范围 | `-40` / `40` |
+| `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | OpenNeck yaw 裁剪范围 | `-45` / `45` |
+| `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | OpenNeck pitch 裁剪范围 | `-40` / `40` |
 
 当所需修正量不超过 `high_level_policy.safety.max_joint_projection_rad` 时，G1 reference
-joint position 会裁剪到 `real_robot.joint_pos_lower/upper`；更大的修正量会导致 chunk 被拒绝。由于 canonical
+joint position 会裁剪到 `real_robot.joint_pos_lower/upper`；更大的修正量会导致 chunk 被拒绝。
+OpenNeck yaw/pitch 会裁剪到配置范围，单纯的 neck 越界不会导致 chunk 被拒绝。由于 canonical
 50D action 的所有字段都处于启用状态，初始运行时要求
 `hands.driver=linkerhand_o6`、左右两只手以及 `neck.driver=openneck`。OpenNeck 策略值
-在 chunk 验证后直接发送给 `move_deg(yaw, pitch)`；不会应用 Pico dead-zone 或 pitch-gain
-映射。
+在 onboard 裁剪并完成 chunk 验证后直接发送给 `move_deg(yaw, pitch)`；不会应用 Pico
+dead-zone 或 pitch-gain 映射。
 
 ### 真机 SDK
 

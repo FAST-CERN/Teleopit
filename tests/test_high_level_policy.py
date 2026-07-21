@@ -253,6 +253,23 @@ def test_scheduler_clips_joint_positions_to_onboard_limits() -> None:
     assert first_action[8] == pytest.approx(3.0)
 
 
+def test_scheduler_clips_openneck_angles_to_onboard_limits() -> None:
+    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
+    actions = _safe_actions()
+    actions[:, 48] = [-46.0, 0.0, 46.0]
+    actions[:, 49] = [41.0, 0.0, -41.0]
+
+    first_action = scheduler.accept_entry(_safe_chunk(actions), now_s=1.01)
+    final_action = scheduler.sample(1.0 + 2.0 / 30.0)
+
+    assert first_action[48] == pytest.approx(-45.0)
+    assert first_action[49] == pytest.approx(40.0)
+    assert final_action is not None
+    assert final_action[48] == pytest.approx(45.0)
+    assert final_action[49] == pytest.approx(-40.0)
+
+
 def test_scheduler_rejects_joint_projection_above_limit() -> None:
     scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
     scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
@@ -264,21 +281,13 @@ def test_scheduler_rejects_joint_projection_above_limit() -> None:
     assert not scheduler.has_chunk
 
 
-@pytest.mark.parametrize(
-    ("mutate", "message"),
-    [
-        (lambda value: value.__setitem__((1, 2), 0.4), "root height"),
-        (lambda value: value.__setitem__((1, 48), 46.0), "OpenNeck yaw"),
-        (lambda value: value.__setitem__((1, 49), -41.0), "OpenNeck pitch"),
-    ],
-)
-def test_scheduler_rejects_entire_unsafe_non_joint_chunk(mutate, message: str) -> None:  # type: ignore[no-untyped-def]
+def test_scheduler_rejects_entire_unsafe_non_joint_chunk() -> None:
     scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
     scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
     actions = _safe_actions()
-    mutate(actions)
+    actions[1, 2] = 0.4
 
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match="root height"):
         scheduler.accept(_safe_chunk(actions), now_s=1.01)
     assert not scheduler.has_chunk
 
