@@ -108,8 +108,9 @@ python scripts/run/run_high_level_policy_sim2real.py \
   real_robot.network_interface=eth0
 ```
 
-对于 15 帧 ReplayPolicy chunk，使用 `high_level_policy.replan_steps=15`。初始 ACT
-配置使用 `replan_steps=3`。该值不能超过主机报告的 horizon。
+协议接受 1 到 50 帧的 action chunk。正式 ACT checkpoint 使用 50 帧 horizon，并配置
+`high_level_policy.replan_steps=3`。对于 15 帧 ReplayPolicy chunk，仍可使用
+`replan_steps=15`。请求步长不能超过主机报告的 horizon。
 
 生产相机契约固定为 30 Hz 的 RGB `uint8[480,640,3]`。
 `camera.source=test-pattern` 只用于受控集成测试；部署时应使用

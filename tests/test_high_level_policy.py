@@ -16,6 +16,7 @@ from teleopit.high_level_policy.config import (
 )
 from teleopit.high_level_policy.hand_calibration import HandCalibration
 from teleopit.high_level_policy.protocol import (
+    MAX_ACTION_HORIZON,
     MAX_REQUEST_BYTES,
     MAX_RESPONSE_BYTES,
     PolicyProtocolError,
@@ -115,6 +116,29 @@ def test_high_level_policy_default_hold_covers_inference_and_transport_jitter() 
     assert config.hold_s == pytest.approx(3.0)
 
 
+def test_high_level_policy_replan_steps_uses_protocol_horizon_limit() -> None:
+    config = parse_high_level_policy_config(
+        {
+            "high_level_policy": {
+                "task": "demo",
+                "replan_steps": MAX_ACTION_HORIZON,
+            }
+        }
+    )
+
+    assert config.replan_steps == MAX_ACTION_HORIZON
+
+    with pytest.raises(ValueError, match=rf"\[1, {MAX_ACTION_HORIZON}\]"):
+        parse_high_level_policy_config(
+            {
+                "high_level_policy": {
+                    "task": "demo",
+                    "replan_steps": MAX_ACTION_HORIZON + 1,
+                }
+            }
+        )
+
+
 def test_packaged_hand_calibration_loads() -> None:
     calibration = HandCalibration.load()
 
@@ -167,6 +191,14 @@ def test_scheduler_uses_source_timestamp_and_interpolates_at_30hz() -> None:
     assert halfway is not None
     assert halfway[0] == pytest.approx(0.5)
     assert halfway[48] == pytest.approx(5.0)
+
+
+def test_scheduler_accepts_protocol_max_action_horizon() -> None:
+    scheduler = HighLevelPolicyScheduler(hold_s=0.1)
+    scheduler.reset("session-1")
+    scheduler.accept(_chunk(source_s=10.0, frames=MAX_ACTION_HORIZON), now_s=10.01)
+
+    assert scheduler.has_chunk
 
 
 def test_scheduler_pause_freezes_and_resume_shifts_plan_time() -> None:

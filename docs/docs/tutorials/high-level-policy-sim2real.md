@@ -115,9 +115,10 @@ python scripts/run/run_high_level_policy_sim2real.py \
   real_robot.network_interface=eth0
 ```
 
-Use `high_level_policy.replan_steps=15` for a 15-frame ReplayPolicy chunk. The
-initial ACT setup uses `replan_steps=3`. The value must not exceed the horizon
-reported by the host.
+The protocol accepts action chunks from 1 to 50 frames. The production ACT
+checkpoint uses a 50-frame horizon with `high_level_policy.replan_steps=3`.
+For a 15-frame ReplayPolicy chunk, `replan_steps=15` remains valid. The request
+stride must not exceed the horizon reported by the host.
 
 The production camera contract is exactly RGB `uint8[480,640,3]` at 30 Hz.
 `camera.source=test-pattern` exists only for controlled integration testing;

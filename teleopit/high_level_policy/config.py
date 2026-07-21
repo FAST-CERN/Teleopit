@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from teleopit.high_level_policy.protocol import MAX_ACTION_HORIZON
 from teleopit.runtime.common import cfg_get
 
 
@@ -64,8 +65,11 @@ def parse_high_level_policy_config(cfg: Any) -> HighLevelPolicyConfig:
         cfg_get(policy_cfg, "reconnect_backoff_s", 1.0), "reconnect_backoff_s"
     )
     replan_steps = int(cfg_get(policy_cfg, "replan_steps", 3))
-    if not 1 <= replan_steps <= 15:
-        raise ValueError("high_level_policy.replan_steps must be in [1, 15]")
+    if not 1 <= replan_steps <= MAX_ACTION_HORIZON:
+        raise ValueError(
+            "high_level_policy.replan_steps must be in "
+            f"[1, {MAX_ACTION_HORIZON}]"
+        )
     jpeg_quality = int(cfg_get(policy_cfg, "jpeg_quality", 90))
     if not 1 <= jpeg_quality <= 100:
         raise ValueError("high_level_policy.jpeg_quality must be in [1, 100]")

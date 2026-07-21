@@ -180,8 +180,8 @@ structure. During active development, Teleopit and `lerobot-teleopit` must be
 updated together. Their only shared data file is `hand_calibration.json`, which
 contains the LinkerHand O6 open/close calibration. See the
 [host-policy deployment tutorial](https://BotRunner64.github.io/Teleopit/tutorials/high-level-policy-sim2real)
-for the 68D observation, 50D action layout, safety envelope, host startup, and
-operator procedure.
+for the 68D observation, 50D action layout, supported 1-to-50-frame action
+horizon, safety envelope, host startup, and operator procedure.
 
 ## OpenNeck Active Vision
 

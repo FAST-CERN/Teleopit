@@ -10,6 +10,7 @@ import numpy as np
 from teleopit.high_level_policy.client import PolicyActionChunk
 from teleopit.high_level_policy.config import HighLevelPolicySafetyConfig
 from teleopit.high_level_policy.hand_calibration import HandCalibration
+from teleopit.high_level_policy.protocol import MAX_ACTION_HORIZON
 from teleopit.math_utils import quat_inv_np, quat_mul_np
 from teleopit.sim.reference_motion import interpolate_retarget_qpos
 
@@ -349,8 +350,15 @@ class HighLevelPolicyScheduler:
         values: object,
     ) -> np.ndarray:
         actions = np.asarray(values)
-        if actions.ndim != 2 or actions.shape[1] != ACTION_DIM or not 1 <= len(actions) <= 15:
-            raise ValueError(f"High-level policy actions must have shape [T, {ACTION_DIM}] with T in [1, 15]")
+        if (
+            actions.ndim != 2
+            or actions.shape[1] != ACTION_DIM
+            or not 1 <= len(actions) <= MAX_ACTION_HORIZON
+        ):
+            raise ValueError(
+                f"High-level policy actions must have shape [T, {ACTION_DIM}] "
+                f"with T in [1, {MAX_ACTION_HORIZON}]"
+            )
         if not np.issubdtype(actions.dtype, np.number) or not np.all(np.isfinite(actions)):
             raise ValueError("High-level policy actions must be finite numeric values")
         validated = np.ascontiguousarray(actions, dtype=np.float32)
