@@ -168,7 +168,9 @@ on output. OpenNeck yaw/pitch values are clipped to the configured degree ranges
 before scheduling, so a neck-only overshoot does not reject the action chunk.
 Entry failure returns to `STANDING`.
 Invalid/stale live chunks and watchdog expiry cannot block the local control
-loop and instead pause `POLICY` while holding the last reference. Host/network
+loop and instead pause `POLICY` while holding the last reference. The default
+three-second cached-reference grace period covers transient host inference and
+transport delays before watchdog expiry. Host/network
 failure and loss of a required camera/client worker use the same ordinary pause
 state as remote `B`; after recovery, press `B` to resume on a fresh valid chunk.
 Only `X` returns active `POLICY` to `STANDING`.

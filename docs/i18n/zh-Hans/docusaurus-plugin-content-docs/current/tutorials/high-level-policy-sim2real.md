@@ -172,8 +172,8 @@ entry，而不会开始另一轮对齐。
 
 通过验证的 30 Hz body reference 会在本地插值到 50 Hz 并执行 rate limit；网络延迟
 导致跳过 source frame 或新 chunk 替换旧计划时同样如此。配置的 root displacement/XY
-speed、yaw rate 和 joint rate 是输出限制，而不是 chunk 拒绝阈值。在短暂推理延迟期间，
-可以在配置的短 grace period 内继续使用最后一条已验证 reference。如果不再有有效 action，
+speed、yaw rate 和 joint rate 是输出限制，而不是 chunk 拒绝阈值。在短暂的推理或传输延迟
+期间，可以在配置的 grace period（默认三秒）内继续使用最后一条已验证 reference。如果不再有有效 action，
 网络交换失败，或必要的 camera/client worker 退出，Teleopit 会保持在 `POLICY`，进入
 普通的可恢复暂停状态，并保持最后一条 body、hand 和 neck 命令。故障恢复后按 `B`
 请求恢复；在收到新的有效 chunk 前，执行仍保持暂停。只有 `X` 会把模式切换到

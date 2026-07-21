@@ -193,8 +193,9 @@ another alignment cycle.
 Validated 30 Hz body references are interpolated and rate-limited locally at
 50 Hz, including when latency skips source frames or a new chunk replaces the
 old plan. The configured root displacement/XY speed, yaw-rate, and joint-rate
-values are output limits, not chunk-rejection thresholds. A short configured
-grace period can reuse the final validated reference during an inference delay.
+values are output limits, not chunk-rejection thresholds. The configured
+grace period (three seconds by default) reuses the final validated reference
+during transient inference or transport delays.
 If no valid action remains, a network
 exchange fails, or a required camera/client worker exits, Teleopit remains in
 `POLICY`, enters the normal resumable pause state, and holds the latest body,

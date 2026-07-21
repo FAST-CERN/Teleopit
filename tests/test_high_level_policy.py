@@ -109,10 +109,10 @@ def _safe_chunk(actions: np.ndarray, *, source_s: float = 1.0, sequence: int = 0
     )
 
 
-def test_high_level_policy_default_hold_covers_transport_jitter() -> None:
+def test_high_level_policy_default_hold_covers_inference_and_transport_jitter() -> None:
     config = parse_high_level_policy_config({"high_level_policy": {"task": "demo"}})
 
-    assert config.hold_s == pytest.approx(0.5)
+    assert config.hold_s == pytest.approx(3.0)
 
 
 def test_packaged_hand_calibration_loads() -> None:
