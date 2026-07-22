@@ -91,7 +91,7 @@ train_mimic/scripts/data
 - sim2real 也要求双输入 ONNX，且观测维度必须与运行时 builder 匹配
 - 主机策略消息 envelope 或 schema 不匹配时会被拒绝，机器人保持在 `STANDING`
 - 主机 action chunk 在 onboard 完成验证与插值；主机不能绕过 motion tracker 或发送电机命令
-- 策略 entry 保持为 `STANDING` 内部流程：通过一次 Kp ramp 保持经过验证的候选第一帧，然后要求新 host session 提供一个 chunk，并从所保持的 reference 而非 tracker 实测关节开始执行 rate-limited 输出；正式接管模式只有 `POLICY`
+- 策略 entry 仅在单个 host session 等待第一份有效 chunk 时保持为 `STANDING` 内部流程；该 chunk 会直接进入 `POLICY`，不进行候选 reference 对齐、不运行 entry Kp ramp，也不创建或 reset 第二个 session；50 Hz limiter 从 session 开始时捕获的机器人实测 reference 起步
 - chunk 边界和 chunk 内部的 root、yaw 与关节 reference 时间跳变都会被接受，再由 50 Hz scheduler 输出执行 rate limit，从而保留录制的 pause/resume 转换
 
 ## 公共接口

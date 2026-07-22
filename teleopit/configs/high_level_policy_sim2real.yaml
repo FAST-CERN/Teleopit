@@ -7,7 +7,7 @@ defaults:
 input:
   provider: high_level_policy
 
-# Hold the entry candidate through the tracker before requesting the fresh session.
+# Smooth an explicit return from POLICY to STANDING.
 standing_return_ramp_duration: 2.0
 
 camera:

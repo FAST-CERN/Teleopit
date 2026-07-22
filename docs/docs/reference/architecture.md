@@ -94,7 +94,7 @@ train_mimic/scripts/data
 - sim2real also requires a dual-input ONNX whose observation dimension matches the runtime builder
 - Host-policy message-envelope or schema mismatches are rejected while the robot remains in `STANDING`
 - Host action chunks are validated and interpolated onboard; the host cannot bypass the motion tracker or send motor commands
-- Policy entry remains internal to `STANDING`: hold one validated candidate first frame for a Kp ramp, then require one fresh-session chunk and start its rate-limited output from the held reference rather than measured tracker joints; the only formal takeover mode is `POLICY`
+- Policy entry remains internal to `STANDING` only while one host session waits for its first valid chunk; that chunk enters `POLICY` directly, with no candidate alignment, entry Kp ramp, or second session/reset, and the 50 Hz limiter starts from the measured robot reference captured at session start
 - Temporal root, yaw, and joint-reference discontinuities are accepted at chunk boundaries and inside chunks, then rate-limited at the 50 Hz scheduler output so recorded pause/resume transitions remain usable
 
 ## Public Surface

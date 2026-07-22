@@ -137,7 +137,7 @@ client/server 消息结构与协议测试。唯一共享的数据文件是 `hand
 | `camera.source` | Onboard 策略相机：`realsense`，或仅供集成测试的 `test-pattern` | `realsense` |
 | `camera.width` / `height` / `fps` | 精确的策略图像契约 | `640` / `480` / `30` |
 | `camera.device` | 可选 RealSense 序列号 | `null` |
-| `standing_return_ramp_duration` | 跟踪策略 entry 候选第一帧时的 Kp ramp 时长 | `2.0` |
+| `standing_return_ramp_duration` | 从主动控制返回 `STANDING` 时的 Kp ramp 时长 | `2.0` |
 | `high_level_policy.endpoint` | 主机策略 ZeroMQ TCP endpoint | `tcp://127.0.0.1:5555` |
 | `high_level_policy.task` | reset 和每个 observation 都会发送的非空任务 prompt | `demo` |
 | `high_level_policy.timeout_s` | 单次网络请求 deadline | `1.0` |
@@ -146,7 +146,7 @@ client/server 消息结构与协议测试。唯一共享的数据文件是 `hand
 | `high_level_policy.jpeg_quality` | 640x480 RGB 帧的 JPEG 质量 | `90` |
 | `high_level_policy.max_observation_age_s` | 跳过请求前允许的最大 camera/observation age | `0.15` |
 | `high_level_policy.max_result_age_s` | 拒绝已接收结果前允许的最大本地 IPC age | `0.1` |
-| `high_level_policy.entry_timeout_s` | 候选请求、Kp ramp 和新 session 的 entry 最长总时间，以及恢复时等待新鲜 chunk 的最长时间 | `5.0` |
+| `high_level_policy.entry_timeout_s` | 建立 entry session 并收到其第一份有效 chunk 的最长时间，以及恢复时等待新鲜 chunk 的最长时间 | `5.0` |
 | `high_level_policy.hold_s` | Watchdog 暂停 `POLICY` 前，最后一条有效 reference 的 grace period；用于容忍短暂的主机推理和传输延迟 | `3.0` |
 | `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | 可接受的绝对 root 高度范围 | `0.55` / `1.05` |
 | `high_level_policy.safety.max_root_xy_speed_m_s` | 应用于 50 Hz scheduler 输出的 root XY 速度限制 | `2.5` |

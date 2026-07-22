@@ -171,12 +171,6 @@ class HighLevelPolicyScheduler:
     def accept(self, chunk: PolicyActionChunk, *, now_s: float) -> None:
         self._accept(chunk, now_s=now_s)
 
-    def accept_entry(self, chunk: PolicyActionChunk, *, now_s: float) -> np.ndarray:
-        """Accept an entry candidate and return its validated first action."""
-        self._accept(chunk, now_s=now_s)
-        assert self._chunk is not None
-        return self._chunk.actions[0].copy()
-
     def _accept(
         self,
         chunk: PolicyActionChunk,

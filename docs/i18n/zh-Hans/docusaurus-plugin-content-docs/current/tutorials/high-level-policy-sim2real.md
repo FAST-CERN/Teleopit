@@ -129,17 +129,13 @@ python scripts/run/run_high_level_policy_sim2real.py \
 | Unitree remote `X` | 返回 `STANDING`，或取消等待中的请求 |
 | Unitree remote `L1+R1` | 紧急切换到 `DAMPING` |
 
-按下 `Y` 后，Teleopit 会创建 entry session，以当前 root XY/yaw 建立锚点，并请求一个
-候选 chunk。运行时会验证其结构、有限值、四元数和绝对硬件范围；root、yaw 和关节
-reference 的时间跳变会被接受。随后 Teleopit 会冻结 `action[0]` 作为静态 body
-reference，并通过现有 motion tracker 在一次 Kp ramp 期间跟踪该 reference。
-
-整个 entry 期间，机器人在形式上仍处于 `STANDING`；没有单独的“policy starting”
-状态。Kp ramp 结束后，Teleopit 会创建第二个 session：它会把 ReplayPolicy 重置到所
-配置的起始帧（默认为第 0 帧），或重置 ACT 状态，并根据 ramp 后的 observation 请求
-新 chunk。该新 chunk 必须通过正常验证，运行时才会进入 `POLICY`。scheduler 的 50 Hz
-输出 limiter 从正在保持的 `action[0]` reference 开始，而不是从无需等于 motion
-reference 的 tracker 实测关节开始。失败或超时会安全地返回普通 standing reference。
+按下 `Y` 后，Teleopit 会创建一个 entry session，以当前 root XY/yaw 建立锚点，并请求
+该 session 的第一份 chunk。等待期间机器人在形式上仍处于 `STANDING`；没有单独的
+“policy starting”状态。运行时会验证 chunk 的结构、有限值、四元数和绝对硬件范围，
+同时接受 root、yaw 和关节 reference 的时间跳变。第一份有效 chunk 会直接进入
+`POLICY`。entry 不会对齐候选 reference、运行 Kp ramp、暂停/恢复 host 请求，也不会
+创建或 reset 第二个 session。scheduler 的 50 Hz 输出 limiter 从 session 开始时捕获的
+机器人实测 reference 起步。失败或超时会让机器人保持普通 standing reference。
 
 暂停会冻结 body reference，并保持最后一条 LinkerHand 和 OpenNeck 命令。恢复时会请求
 新的 action chunk，并在等待期间继续保持暂停姿态。按 `X` 会停止策略 session；运行时
@@ -166,10 +162,8 @@ Watchdog、主机/网络、相机或 policy client 故障也会进入同一个�
 
 reference 连续性不是接收条件。entry、chunk 内部和 chunk 之间的 root translation、root
 yaw 与 G1 关节 reference 跳变都会被接受，因为录制的 pause/resume 转换可能有意地不
-连续。一次 Kp ramp 期间会暂停主机请求，随后新 host session 会提供真正进入 `POLICY`
-的新鲜 chunk；候选 chunk 绝不会作为实时 timeline 继续播放。格式错误、过期、非关节字段
-超出绝对范围（已裁剪的 OpenNeck 角度除外）或关节修正量过大的新鲜 chunk 会终止
-entry，而不会开始另一轮对齐。
+连续。单个 entry session 的第一份有效 chunk 会立即开始实时执行。格式错误、过期、
+非关节字段超出绝对范围（已裁剪的 OpenNeck 角度除外）或关节修正量过大会终止 entry。
 
 通过验证的 30 Hz body reference 会在本地插值到 50 Hz 并执行 rate limit；网络延迟
 导致跳过 source frame 或新 chunk 替换旧计划时同样如此。配置的 root displacement/XY
@@ -188,12 +182,11 @@ speed、yaw rate 和 joint rate 是输出限制，而不是 chunk 拒绝阈值�
 
 **按 `Y` 后始终不进入 `POLICY`：** 检查主机 endpoint、防火墙、server 日志、
 `describe` schema、消息 envelope、task、checkpoint manifest、`replan_steps` 和 entry
-日志。Teleopit 在对齐第一帧 reference，以及候选 chunk 或新鲜 chunk 检查失败时，都会
-保持 `STANDING`。
+日志。Teleopit 会保持 `STANDING`，直到单个 entry session 返回第一份有效 chunk。
 
-**新鲜 entry chunk 被拒绝或 entry 超时：** 请检查日志中的契约错误、关节顺序、绝对
+**第一份 entry chunk 被拒绝或 entry 超时：** 请检查日志中的契约错误、关节顺序、绝对
 reference 约定、硬件范围以及 host/network 延迟。单纯的 reference 跳变不会导致 chunk
-被拒绝。`standing_return_ramp_duration` 控制对候选第一帧的物理对齐。
+被拒绝。
 
 **策略短暂运行后进入暂停：** 检查 timeout、推理延迟、stale result、worker 退出和
 安全拒绝日志。底层 50 Hz tracker 不会等待主机推理。恢复故障输入路径后按 `B` 继续。

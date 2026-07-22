@@ -137,21 +137,16 @@ Keep the Unitree remote in hand. The runtime has only the formal robot modes
 | Unitree remote `X` | Return to `STANDING` or cancel a pending request |
 | Unitree remote `L1+R1` | Emergency transition to `DAMPING` |
 
-After `Y`, Teleopit creates an entry session, establishes the current root
-XY/yaw anchor, and requests one candidate chunk. Its structure, finite values,
-quaternion, and absolute hardware ranges are validated. Temporal root, yaw, and
-joint-reference jumps are accepted. Teleopit then freezes `action[0]` as a
-static body reference and uses the existing motion tracker for one Kp ramp.
-
-The robot remains formally in `STANDING` throughout entry; there is no separate
-"policy starting" state. When the ramp finishes, Teleopit creates a second
-session, which resets ReplayPolicy to its configured start frame (frame 0 by
-default) or resets ACT state, and requests a fresh chunk from the post-ramp
-observation. That fresh chunk must pass normal validation before the runtime
-enters `POLICY`. The scheduler's 50 Hz output
-limiter starts from the held `action[0]` reference rather than measured tracker
-joints, which need not equal a motion reference. A failure or timeout safely
-returns to the normal standing reference.
+After `Y`, Teleopit creates one entry session, establishes the current root
+XY/yaw anchor, and requests its first chunk. The robot remains formally in
+`STANDING` while waiting; there is no separate "policy starting" state. The
+chunk's structure, finite values, quaternion, and absolute hardware ranges are
+validated, while temporal root, yaw, and joint-reference jumps are accepted.
+A valid first chunk enters `POLICY` directly. Entry does not align a candidate
+reference, run a Kp ramp, pause/resume host requests, or create/reset a second
+session. The scheduler's 50 Hz output limiter starts from the measured robot
+reference captured when the session begins. A failure or timeout leaves the
+robot on the normal standing reference.
 
 Pause freezes the body reference and holds the last LinkerHand and OpenNeck
 commands. Resume requests a fresh action chunk while continuing to hold the
@@ -184,12 +179,10 @@ or trims a malformed host result. Checks include:
 Reference continuity is not an acceptance condition. Root translation, root
 yaw, and G1 joint-reference jumps are accepted at entry, inside a chunk, and
 across chunks because a recorded pause/resume transition can intentionally be
-discontinuous. Host requests are paused for one Kp ramp. A new host session
-then supplies the fresh chunk that will actually enter `POLICY`; the candidate
-chunk is never continued as a live timeline. A malformed or stale chunk, an
-out-of-range non-joint field other than the projected OpenNeck angles, or an
-excessive joint correction in a fresh chunk aborts entry instead of starting
-another alignment cycle.
+discontinuous. The first valid chunk from the single entry session starts live
+execution immediately. A malformed or stale first chunk, an out-of-range
+non-joint field other than the projected OpenNeck angles, or an excessive joint
+correction aborts entry.
 
 Validated 30 Hz body references are interpolated and rate-limited locally at
 50 Hz, including when latency skips source frames or a new chunk replaces the
@@ -212,14 +205,12 @@ data, G1 joint limits, and the installed OpenNeck calibration.
 
 **`Y` never enters `POLICY`:** check the host endpoint, firewall, server log,
 `describe` schemas, message envelope, task, checkpoint manifest,
-`replan_steps`, and the entry logs. Teleopit stays in `STANDING` while it aligns
-to the first reference and when any candidate or fresh-chunk check fails.
+`replan_steps`, and the entry logs. Teleopit stays in `STANDING` until the single
+entry session returns its first valid chunk.
 
-**The fresh entry chunk is rejected or entry times out:** inspect the logged
+**The first entry chunk is rejected or entry times out:** inspect the logged
 contract error, joint ordering, absolute-reference convention, hardware ranges,
-and host/network latency. Reference discontinuity alone does not reject a
-chunk. `standing_return_ramp_duration` controls physical alignment to the
-candidate first frame.
+and host/network latency. Reference discontinuity alone does not reject a chunk.
 
 **Policy runs briefly and becomes paused:** inspect timeout, inference
 latency, stale-result, worker-exit, and safety-rejection logs. The low-level

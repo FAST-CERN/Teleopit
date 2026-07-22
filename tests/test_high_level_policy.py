@@ -31,7 +31,6 @@ from teleopit.high_level_policy.scheduler import (
     closure_to_o6_pose,
 )
 from teleopit.sim2real.mp.high_level_policy_runtime import (
-    _CameraFrameDiagnostics,
     HighLevelPolicySim2RealRuntime,
     _apply_policy_neck_target,
     _policy_target_is_current,
@@ -47,7 +46,6 @@ from teleopit.sim2real.mp.messages import (
     ModeStatePacket,
 )
 from teleopit.sim2real.mp.runtime import (
-    _PolicyObservationCameraDiagnostics,
     RobotMode,
     Sim2RealRuntime,
     _RobotControlWorker,
@@ -254,7 +252,7 @@ def test_scheduler_validates_complete_chunk_against_onboard_safety_limits() -> N
     assert scheduler.has_chunk
 
 
-def test_scheduler_accepts_entry_boundary_and_internal_reference_discontinuities() -> None:
+def test_scheduler_accepts_internal_reference_discontinuities() -> None:
     scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
     initial = _safe_actions(1)[0]
     initial[7] = 0.8
@@ -267,11 +265,9 @@ def test_scheduler_accepts_entry_boundary_and_internal_reference_discontinuities
     actions[1, 3:7] = [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)]
     scheduler.reset("session-1", initial_action=initial)
 
-    first_action = scheduler.accept_entry(_safe_chunk(actions), now_s=1.01)
+    scheduler.accept(_safe_chunk(actions), now_s=1.01)
 
     assert scheduler.has_chunk
-    assert first_action[0] == pytest.approx(0.2)
-    assert first_action[7] == pytest.approx(-0.08)
 
 
 def test_scheduler_clips_joint_positions_to_onboard_limits() -> None:
@@ -281,10 +277,14 @@ def test_scheduler_clips_joint_positions_to_onboard_limits() -> None:
     actions[0, 7] = -3.08
     actions[0, 8] = 3.08
 
-    first_action = scheduler.accept_entry(_safe_chunk(actions), now_s=1.01)
+    scheduler.accept(_safe_chunk(actions), now_s=1.01)
+    scheduled = None
+    for _ in range(20):
+        scheduled = scheduler.sample(1.0)
 
-    assert first_action[7] == pytest.approx(-3.0)
-    assert first_action[8] == pytest.approx(3.0)
+    assert scheduled is not None
+    assert scheduled[7] == pytest.approx(-3.0)
+    assert scheduled[8] == pytest.approx(3.0)
 
 
 def test_scheduler_clips_openneck_angles_to_onboard_limits() -> None:
@@ -294,9 +294,11 @@ def test_scheduler_clips_openneck_angles_to_onboard_limits() -> None:
     actions[:, 48] = [-46.0, 0.0, 46.0]
     actions[:, 49] = [41.0, 0.0, -41.0]
 
-    first_action = scheduler.accept_entry(_safe_chunk(actions), now_s=1.01)
+    scheduler.accept(_safe_chunk(actions), now_s=1.01)
+    first_action = scheduler.sample(1.0)
     final_action = scheduler.sample(1.0 + 2.0 / 30.0)
 
+    assert first_action is not None
     assert first_action[48] == pytest.approx(-45.0)
     assert first_action[49] == pytest.approx(40.0)
     assert final_action is not None
@@ -501,74 +503,6 @@ def test_high_level_policy_test_camera_is_exact_protocol_shape() -> None:
     assert np.all(frame[:, :, 2] == 7)
 
 
-def test_realsense_acquisition_diagnostics_are_rate_limited_and_report_recovery(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level("WARNING")
-    diagnostics = _CameraFrameDiagnostics(source="RealSense", log_interval_s=5.0)
-    diagnostics.note_frame(40, now_s=9.0)
-
-    diagnostics.note_failure("frame timeout", now_s=10.0)
-    diagnostics.note_failure("frame timeout", now_s=12.0)
-    diagnostics.note_failure("frame timeout", now_s=15.1)
-    diagnostics.note_frame(41, now_s=16.0)
-
-    stalled = [message for message in caplog.messages if "acquisition stalled" in message]
-    recovered = [message for message in caplog.messages if "acquisition recovered" in message]
-    assert len(stalled) == 2
-    assert "consecutive_failures=1" in stalled[0]
-    assert "last_frame_seq=40" in stalled[0]
-    assert "consecutive_failures=3" in stalled[1]
-    assert recovered == [
-        "High-level policy RealSense frame acquisition recovered: "
-        "outage_s=6.000 failed_attempts=3 frame_seq=41"
-    ]
-
-
-def test_policy_observation_camera_diagnostics_wait_for_freshness_limit_and_recover(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level("WARNING")
-    diagnostics = _PolicyObservationCameraDiagnostics(
-        max_age_s=0.15,
-        log_interval_s=5.0,
-    )
-
-    diagnostics.note_blocked(
-        "no_frame_received",
-        now_s=10.0,
-        frame_seq=None,
-        frame_age_s=None,
-    )
-    diagnostics.note_blocked(
-        "no_frame_received",
-        now_s=10.14,
-        frame_seq=None,
-        frame_age_s=None,
-    )
-    assert caplog.messages == []
-
-    diagnostics.note_blocked(
-        "no_frame_received",
-        now_s=10.16,
-        frame_seq=None,
-        frame_age_s=None,
-    )
-    diagnostics.note_blocked(
-        "no_frame_received",
-        now_s=11.0,
-        frame_seq=None,
-        frame_age_s=None,
-    )
-    diagnostics.note_published(now_s=11.1, frame_seq=8, frame_age_s=0.02)
-
-    assert len(caplog.messages) == 2
-    assert "reason=no_frame_received" in caplog.messages[0]
-    assert "freshness_limit_s=0.150" in caplog.messages[0]
-    assert "observation camera recovered" in caplog.messages[1]
-    assert "frame_seq=8" in caplog.messages[1]
-
-
 def test_openneck_policy_target_is_sent_directly_in_physical_degrees() -> None:
     calls: list[tuple[float, float]] = []
     device = SimpleNamespace(move_deg=lambda yaw, pitch: calls.append((yaw, pitch)))
@@ -686,56 +620,7 @@ def test_high_level_policy_y_requests_takeover_without_starting_mode_state() -> 
     assert worker.mode == RobotMode.STANDING
 
 
-def test_policy_entry_first_action_starts_static_tracker_alignment() -> None:
-    worker = object.__new__(_RobotControlWorker)
-    worker._policy_entry_pending = True
-    worker._policy_frame_transform = PolicyFrameTransform.from_robot_pose(
-        [0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0],
-    )
-    resets: list[str] = []
-    worker._reset_policy_state = lambda: resets.append("reset")
-    worker._last_retarget_qpos = np.zeros(36, dtype=np.float64)
-    ramps: list[tuple[float, float]] = []
-    worker._safety = SimpleNamespace(
-        start_kp_ramp=lambda *, duration_s, floor_ratio: ramps.append(
-            (float(duration_s), float(floor_ratio))
-        )
-    )
-    worker._standing_return_ramp_duration = 0.5
-    worker._standing_return_kp_ramp_floor_ratio = 0.5
-    commands: list[str] = []
-    worker._publish_high_level_policy_session = commands.append
-    action = _safe_actions(1)[0]
-    action[7:36] = 0.5
-
-    worker._begin_policy_entry_alignment(action)
-
-    assert worker._policy_paused
-    assert worker._policy_entry_target_qpos is not None
-    np.testing.assert_allclose(worker._policy_entry_target_qpos[7:36], 0.5)
-    assert resets == ["reset"]
-    assert ramps == [(0.5, 0.5)]
-    assert commands == ["pause"]
-
-
-def test_policy_entry_requests_fresh_session_after_kp_ramp() -> None:
-    worker = object.__new__(_RobotControlWorker)
-    worker._policy_entry_pending = True
-    worker._policy_paused = True
-    worker._policy_entry_target_qpos = np.zeros(36, dtype=np.float64)
-    worker._policy_entry_target_qpos[3] = 1.0
-    worker._safety = SimpleNamespace(kp_ramp_active=False)
-    worker._run_static_mocap_step = lambda _target: SimpleNamespace()
-    starts: list[str] = []
-    worker._start_high_level_policy_entry_session = lambda: starts.append("fresh")
-
-    worker._standing_step()
-
-    assert starts == ["fresh"]
-
-
-def test_policy_transition_after_entry_alignment_does_not_restart_kp_ramp() -> None:
+def test_policy_transition_after_first_chunk_does_not_start_kp_ramp() -> None:
     worker = object.__new__(_RobotControlWorker)
     worker.mode = RobotMode.STANDING
     worker.robot = SimpleNamespace(get_state=lambda: SimpleNamespace())
@@ -749,7 +634,7 @@ def test_policy_transition_after_entry_alignment_does_not_restart_kp_ramp() -> N
     worker._policy_hold_qpos = None
     worker._policy_entry_pending = True
     worker._policy_entry_deadline_s = 2.0
-    worker._policy_entry_target_qpos = np.ones(36, dtype=np.float64)
+    worker._policy_paused = True
     worker._policy_resume_pending = False
     worker._policy_resume_deadline_s = None
     worker._policy_resume_source_timestamp_ns = None
@@ -757,7 +642,7 @@ def test_policy_transition_after_entry_alignment_does_not_restart_kp_ramp() -> N
     worker._standing_return_kp_ramp_floor_ratio = 0.5
     worker._safety = SimpleNamespace(
         start_kp_ramp=lambda **_kwargs: pytest.fail(
-            "POLICY transition must not start a second Kp ramp"
+            "POLICY transition must not start an entry Kp ramp"
         )
     )
 
@@ -766,11 +651,11 @@ def test_policy_transition_after_entry_alignment_does_not_restart_kp_ramp() -> N
     assert worker.mode == RobotMode.POLICY
     assert resets == ["reset"]
     assert not worker._policy_entry_pending
-    assert worker._policy_entry_target_qpos is None
+    assert not worker._policy_paused
     np.testing.assert_array_equal(worker._policy_hold_qpos, resume_qpos)
 
 
-def test_policy_entry_rejects_action_received_after_total_deadline() -> None:
+def test_policy_entry_rejects_action_received_after_deadline() -> None:
     worker = object.__new__(_RobotControlWorker)
     now_s = time.monotonic()
     worker.mode = RobotMode.STANDING
@@ -796,7 +681,6 @@ def test_policy_entry_rejects_action_received_after_total_deadline() -> None:
     worker._policy_resume_source_timestamp_ns = None
     worker._policy_entry_pending = True
     worker._policy_entry_deadline_s = now_s - 0.01
-    worker._policy_entry_target_qpos = np.zeros(36, dtype=np.float64)
     accepted: list[object] = []
     worker._high_level_policy_scheduler = SimpleNamespace(
         accept=lambda *args, **kwargs: accepted.append((args, kwargs))
@@ -814,7 +698,7 @@ def test_policy_entry_rejects_action_received_after_total_deadline() -> None:
     assert accepted == []
 
 
-def test_policy_entry_fresh_chunk_uses_held_reference_boundary() -> None:
+def test_policy_entry_first_chunk_uses_measured_reference_boundary() -> None:
     worker = object.__new__(_RobotControlWorker)
     now_s = time.monotonic()
     worker.mode = RobotMode.STANDING
@@ -840,10 +724,6 @@ def test_policy_entry_fresh_chunk_uses_held_reference_boundary() -> None:
     worker._policy_resume_source_timestamp_ns = None
     worker._policy_entry_pending = True
     worker._policy_entry_deadline_s = now_s + 1.0
-    held_qpos = np.zeros(36, dtype=np.float64)
-    held_qpos[2] = 0.76
-    held_qpos[3] = 1.0
-    worker._policy_entry_target_qpos = held_qpos
     worker._policy_frame_transform = PolicyFrameTransform.from_robot_pose(
         [0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
@@ -861,17 +741,20 @@ def test_policy_entry_fresh_chunk_uses_held_reference_boundary() -> None:
     worker._high_level_policy_scheduler = scheduler
     worker._high_level_policy_cfg = SimpleNamespace(max_result_age_s=1.0)
     worker._enter_standing = lambda: pytest.fail(
-        "fresh chunk must not be compared with measured tracker joints"
+        "valid first chunk must enter POLICY"
     )
     transitions: list[str] = []
     worker._transition_to_high_level_policy = lambda: transitions.append("policy")
 
     worker._drain_high_level_policy_ipc()
 
-    assert boundary_action[7] == pytest.approx(0.0)
+    scheduled = scheduler.sample(now_s)
+    assert boundary_action[7] == pytest.approx(0.8)
     assert current_qpos[7] == pytest.approx(0.8)
     assert transitions == ["policy"]
     assert scheduler.has_chunk
+    assert scheduled is not None
+    assert scheduled[7] == pytest.approx(0.6)
 
 
 def test_policy_entry_stale_result_aborts_current_session() -> None:
@@ -900,7 +783,6 @@ def test_policy_entry_stale_result_aborts_current_session() -> None:
     worker._policy_resume_source_timestamp_ns = None
     worker._policy_entry_pending = True
     worker._policy_entry_deadline_s = now_s + 1.0
-    worker._policy_entry_target_qpos = np.zeros(36, dtype=np.float64)
     worker._high_level_policy_scheduler = SimpleNamespace()
     worker._high_level_policy_cfg = SimpleNamespace(max_result_age_s=0.1)
     standing: list[str] = []
@@ -911,59 +793,32 @@ def test_policy_entry_stale_result_aborts_current_session() -> None:
     assert standing == ["standing"]
 
 
-def test_policy_entry_alignment_abort_skips_standing_joint_lock() -> None:
+def test_policy_entry_cancel_from_standing_only_stops_session() -> None:
     worker = object.__new__(_RobotControlWorker)
     worker.high_level_policy_enabled = True
     worker.mode = RobotMode.STANDING
     worker._policy_entry_pending = True
-    worker._policy_entry_target_qpos = np.zeros(36, dtype=np.float64)
     worker._mocap_entry_requested = False
     stops: list[str] = []
 
     def stop_session() -> None:
         stops.append("stop")
         worker._policy_entry_pending = False
-        worker._policy_entry_target_qpos = None
 
     worker._stop_high_level_policy_session = stop_session
     worker._disarm_mocap_reference_if_needed = lambda: None
     worker._clear_reference_gate = lambda: None
-    state = SimpleNamespace()
     worker.robot = SimpleNamespace(
-        get_state=lambda: state,
+        get_state=lambda: pytest.fail("entry cancel must not rebuild STANDING"),
         lock_all_joints=lambda: pytest.fail(
-            "STANDING entry abort must not lock joints or block the control loop"
+            "entry cancel must not lock joints or block the control loop"
         ),
     )
-    current_qpos = np.zeros(36, dtype=np.float64)
-    current_qpos[3] = 1.0
-    worker._build_robot_state_qpos = lambda _state: current_qpos.copy()
-    worker._ref_proc = SimpleNamespace(last_reference_qpos=current_qpos.copy())
-    mocap_resets: list[str] = []
-    worker._mocap_session = SimpleNamespace(
-        reset=lambda: mocap_resets.append("reset")
-    )
-    standing_references: list[object] = []
-    worker._set_default_standing_reference = standing_references.append
-    policy_resets: list[str] = []
-    worker._reset_policy_state = lambda: policy_resets.append("reset")
-    ramps: list[tuple[float, float]] = []
-    worker._safety = SimpleNamespace(
-        start_kp_ramp=lambda *, duration_s, floor_ratio: ramps.append(
-            (float(duration_s), float(floor_ratio))
-        )
-    )
-    worker._standing_return_ramp_duration = 0.5
-    worker._standing_return_kp_ramp_floor_ratio = 0.5
 
     worker._enter_standing()
 
     assert stops == ["stop"]
     assert worker.mode == RobotMode.STANDING
-    assert mocap_resets == ["reset"]
-    assert standing_references == [state]
-    assert policy_resets == ["reset"]
-    assert ramps == [(0.5, 0.5)]
 
 
 def test_high_level_policy_body_action_uses_existing_tracker_without_second_alignment() -> None:

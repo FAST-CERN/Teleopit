@@ -150,74 +150,6 @@ class RobotMode(Enum):
     DAMPING = "damping"
 
 
-class _PolicyObservationCameraDiagnostics:
-    """Report why camera-backed policy observations stop being published."""
-
-    def __init__(self, *, max_age_s: float, log_interval_s: float = 5.0) -> None:
-        self._max_age_s = float(max_age_s)
-        self._log_interval_s = float(log_interval_s)
-        self.reset()
-
-    def reset(self) -> None:
-        self._blocked_started_s: float | None = None
-        self._last_warning_s: float | None = None
-        self._warning_emitted = False
-        self._last_reason: str | None = None
-
-    def note_blocked(
-        self,
-        reason: str,
-        *,
-        now_s: float,
-        frame_seq: int | None,
-        frame_age_s: float | None,
-    ) -> None:
-        now = float(now_s)
-        if self._blocked_started_s is None:
-            self._blocked_started_s = now
-        self._last_reason = str(reason)
-        blocked_for_s = max(0.0, now - self._blocked_started_s)
-        if frame_seq is None and blocked_for_s < self._max_age_s:
-            return
-        if (
-            self._last_warning_s is not None
-            and now - self._last_warning_s < self._log_interval_s
-        ):
-            return
-        operator_logger.warning(
-            "High-level policy observation blocked by camera: "
-            "reason=%s latest_frame_seq=%s frame_age_s=%s "
-            "freshness_limit_s=%.3f blocked_for_s=%.3f",
-            self._last_reason,
-            "none" if frame_seq is None else int(frame_seq),
-            "unknown" if frame_age_s is None else f"{float(frame_age_s):.3f}",
-            self._max_age_s,
-            blocked_for_s,
-        )
-        self._last_warning_s = now
-        self._warning_emitted = True
-
-    def note_published(
-        self,
-        *,
-        now_s: float,
-        frame_seq: int,
-        frame_age_s: float,
-    ) -> None:
-        now = float(now_s)
-        if self._warning_emitted:
-            started_s = self._blocked_started_s if self._blocked_started_s is not None else now
-            operator_logger.warning(
-                "High-level policy observation camera recovered: "
-                "previous_reason=%s frame_seq=%d frame_age_s=%.3f blocked_for_s=%.3f",
-                self._last_reason,
-                int(frame_seq),
-                float(frame_age_s),
-                max(0.0, now - started_s),
-            )
-        self.reset()
-
-
 class _LoopTimingReporter:
     def __init__(
         self,
@@ -1340,7 +1272,6 @@ class _RobotControlWorker:
         )
         self._policy_entry_pending = False
         self._policy_entry_deadline_s: float | None = None
-        self._policy_entry_target_qpos: Float64Array | None = None
         self._policy_session_id: str | None = None
         self._policy_frame_transform: PolicyFrameTransform | None = None
         self._policy_paused = False
@@ -1356,13 +1287,6 @@ class _RobotControlWorker:
         self._latest_policy_video: SharedFrameDescriptor | None = None
         self._latest_policy_status: HighLevelPolicyStatusPacket | None = None
         self._last_policy_status_seq = -1
-        self._policy_camera_diagnostics = (
-            _PolicyObservationCameraDiagnostics(
-                max_age_s=self._high_level_policy_cfg.max_observation_age_s
-            )
-            if self._high_level_policy_cfg is not None
-            else None
-        )
 
         self._latest_reference: ReferencePacket | None = None
         mp_cfg = _mp_cfg(cfg)
@@ -1673,12 +1597,8 @@ class _RobotControlWorker:
             server_inference_ms=float(packet.server_inference_ms),
         )
         if self.mode == RobotMode.STANDING:
-            first_chunk = self._policy_entry_target_qpos is None
             try:
-                if first_chunk:
-                    first_action = scheduler.accept_entry(chunk, now_s=now_s)
-                else:
-                    scheduler.accept(chunk, now_s=now_s)
+                scheduler.accept(chunk, now_s=now_s)
             except ValueError as exc:
                 logger.warning("Rejected high-level policy entry chunk: %s", exc)
                 operator_logger.warning(
@@ -1686,10 +1606,7 @@ class _RobotControlWorker:
                 )
                 self._enter_standing()
                 return
-            if first_chunk:
-                self._begin_policy_entry_alignment(first_action)
-            else:
-                self._transition_to_high_level_policy()
+            self._transition_to_high_level_policy()
             return
         try:
             scheduler.accept(chunk, now_s=now_s)
@@ -1720,7 +1637,7 @@ class _RobotControlWorker:
                 self._begin_high_level_policy_entry()
             if self._policy_entry_pending:
                 self._publish_high_level_policy_session(
-                    "pause" if self._policy_paused else "start",
+                    "start",
                     repeat=True,
                 )
                 deadline_s = self._policy_entry_deadline_s
@@ -1748,18 +1665,16 @@ class _RobotControlWorker:
             self._enter_standing()
 
     def _begin_high_level_policy_entry(self) -> None:
-        self._policy_entry_target_qpos = None
         self._start_high_level_policy_entry_session()
 
     def _build_high_level_policy_boundary_action(self, state: object) -> np.ndarray:
         transform = self._policy_frame_transform
         if transform is None:
             raise RuntimeError("High-level policy entry is missing its frame transform")
-        boundary_qpos = self._policy_entry_target_qpos
-        if boundary_qpos is None:
-            boundary_qpos = self._build_robot_state_qpos(state)
         initial_action = np.zeros(50, dtype=np.float32)
-        initial_action[:36] = transform.localize_body_action(boundary_qpos)
+        initial_action[:36] = transform.localize_body_action(
+            self._build_robot_state_qpos(state)
+        )
         return initial_action
 
     def _start_high_level_policy_entry_session(self) -> None:
@@ -1781,8 +1696,7 @@ class _RobotControlWorker:
             initial_action=self._build_high_level_policy_boundary_action(state),
         )
         self._policy_entry_pending = True
-        if self._policy_entry_target_qpos is None:
-            self._policy_entry_deadline_s = time.monotonic() + policy_cfg.entry_timeout_s
+        self._policy_entry_deadline_s = time.monotonic() + policy_cfg.entry_timeout_s
         self._policy_paused = False
         self._policy_resume_pending = False
         self._policy_resume_deadline_s = None
@@ -1794,30 +1708,8 @@ class _RobotControlWorker:
             if self._latest_policy_video is None
             else int(self._latest_policy_video.seq)
         )
-        diagnostics = getattr(self, "_policy_camera_diagnostics", None)
-        if diagnostics is not None:
-            diagnostics.reset()
         self._last_policy_session_publish_s = 0.0
         self._publish_high_level_policy_session("start", repeat=False)
-
-    def _begin_policy_entry_alignment(self, first_action: np.ndarray) -> None:
-        transform = self._policy_frame_transform
-        if transform is None:
-            raise RuntimeError("High-level policy entry is missing its frame transform")
-        target_qpos = np.asarray(
-            transform.delocalize_body_action(first_action[:36]),
-            dtype=np.float64,
-        )
-        self._policy_entry_target_qpos = target_qpos
-        self._policy_paused = True
-        self._reset_policy_state()
-        self._last_retarget_qpos = None
-        self._safety.start_kp_ramp(
-            duration_s=self._standing_return_ramp_duration,
-            floor_ratio=self._standing_return_kp_ramp_floor_ratio,
-        )
-        self._publish_high_level_policy_session("pause")
-        operator_logger.info("Aligning to high-level policy first reference in STANDING")
 
     def _publish_high_level_policy_session(self, command: str, *, repeat: bool = False) -> None:
         publisher = self._policy_control_pub
@@ -1851,38 +1743,12 @@ class _RobotControlWorker:
         transform = self._policy_frame_transform
         session_id = self._policy_session_id
         policy_cfg = self._high_level_policy_cfg
-        if publisher is None or transform is None or session_id is None or policy_cfg is None:
+        if publisher is None or frame is None or transform is None or session_id is None or policy_cfg is None:
+            return
+        if int(frame.seq) <= self._last_policy_video_seq:
             return
         now_s = time.monotonic()
-        diagnostics = getattr(self, "_policy_camera_diagnostics", None)
-        if frame is None:
-            if diagnostics is not None:
-                diagnostics.note_blocked(
-                    "no_frame_received",
-                    now_s=now_s,
-                    frame_seq=None,
-                    frame_age_s=None,
-                )
-            return
-        frame_seq = int(frame.seq)
-        frame_age_s = abs(now_s - float(frame.timestamp_s))
-        if int(frame.seq) <= self._last_policy_video_seq:
-            if diagnostics is not None and frame_age_s > policy_cfg.max_observation_age_s:
-                diagnostics.note_blocked(
-                    "no_new_frame",
-                    now_s=now_s,
-                    frame_seq=frame_seq,
-                    frame_age_s=frame_age_s,
-                )
-            return
-        if frame_age_s > policy_cfg.max_observation_age_s:
-            if diagnostics is not None:
-                diagnostics.note_blocked(
-                    "stale_frame",
-                    now_s=now_s,
-                    frame_seq=frame_seq,
-                    frame_age_s=frame_age_s,
-                )
+        if abs(now_s - float(frame.timestamp_s)) > policy_cfg.max_observation_age_s:
             return
         state = transform.localize_state(build_observation_state(robot_state))
         sequence_id = self._policy_observation_seq
@@ -1898,13 +1764,7 @@ class _RobotControlWorker:
             ),
         )
         self._policy_observation_seq += 1
-        self._last_policy_video_seq = frame_seq
-        if diagnostics is not None:
-            diagnostics.note_published(
-                now_s=now_s,
-                frame_seq=frame_seq,
-                frame_age_s=frame_age_s,
-            )
+        self._last_policy_video_seq = int(frame.seq)
 
     def _transition_to_high_level_policy(self) -> None:
         state = self.robot.get_state()
@@ -1915,7 +1775,7 @@ class _RobotControlWorker:
         self._policy_hold_qpos = resume_qpos.copy()
         self._policy_entry_pending = False
         self._policy_entry_deadline_s = None
-        self._policy_entry_target_qpos = None
+        self._policy_paused = False
         self._policy_resume_pending = False
         self._policy_resume_deadline_s = None
         self._policy_resume_source_timestamp_ns = None
@@ -1956,7 +1816,6 @@ class _RobotControlWorker:
             scheduler.clear()
         self._policy_entry_pending = False
         self._policy_entry_deadline_s = None
-        self._policy_entry_target_qpos = None
         self._policy_session_id = None
         self._policy_frame_transform = None
         self._policy_paused = False
@@ -1965,9 +1824,6 @@ class _RobotControlWorker:
         self._policy_resume_source_timestamp_ns = None
         self._policy_hold_qpos = None
         self._latest_policy_status = None
-        diagnostics = getattr(self, "_policy_camera_diagnostics", None)
-        if diagnostics is not None:
-            diagnostics.reset()
 
     def _handle_high_level_policy_fault(self, detail: str) -> None:
         if not bool(getattr(self, "high_level_policy_enabled", False)):
@@ -1997,19 +1853,6 @@ class _RobotControlWorker:
             self._enter_standing()
 
     def _standing_step(self) -> None:
-        target_qpos = self._policy_entry_target_qpos
-        if self._policy_entry_pending and target_qpos is not None:
-            robot_state = self._run_static_mocap_step(target_qpos)
-            if self._policy_paused:
-                if not self._safety.kp_ramp_active:
-                    operator_logger.info(
-                        "High-level policy first-reference Kp ramp complete; "
-                        "requesting fresh session"
-                    )
-                    self._start_high_level_policy_entry_session()
-            else:
-                self._publish_high_level_policy_observation(robot_state)
-            return
         robot_state = self.robot.get_state()
         qpos = self._standing_qpos.copy()
         motion_joint_vel = np.zeros(self.num_actions, dtype=np.float32)
@@ -2222,12 +2065,6 @@ class _RobotControlWorker:
 
     def _enter_standing(self) -> None:
         prev_mode = self.mode
-        policy_entry_alignment_active = bool(
-            getattr(self, "high_level_policy_enabled", False)
-            and prev_mode == RobotMode.STANDING
-            and self._policy_entry_pending
-            and self._policy_entry_target_qpos is not None
-        )
         if bool(getattr(self, "high_level_policy_enabled", False)) and (
             prev_mode == RobotMode.POLICY or self._policy_entry_pending
         ):
@@ -2235,7 +2072,7 @@ class _RobotControlWorker:
         self._disarm_mocap_reference_if_needed()
         self._clear_reference_gate()
         self._mocap_entry_requested = False
-        if prev_mode == RobotMode.STANDING and not policy_entry_alignment_active:
+        if prev_mode == RobotMode.STANDING:
             return
         already_in_debug = self.mode in (
             RobotMode.STANDING,
@@ -2269,7 +2106,7 @@ class _RobotControlWorker:
         self._last_commanded_motion_qpos = None
         self._set_default_standing_reference(state)
         self._reset_policy_state()
-        if policy_entry_alignment_active or prev_mode in (
+        if prev_mode in (
             RobotMode.MOCAP,
             RobotMode.ARMS,
             RobotMode.POLICY,

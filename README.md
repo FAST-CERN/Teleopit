@@ -157,16 +157,14 @@ python scripts/run/run_high_level_policy_sim2real.py \
 Use the Unitree remote: `Start` enters `STANDING`, `Y` requests policy
 takeover, `B` pauses/resumes, `X` returns to `STANDING`, and `L1+R1` enters
 `DAMPING`. Policy entry remains an internal `STANDING` phase with no separate
-starting mode: Teleopit validates a candidate chunk, holds its first body
-reference through one motion-tracker Kp ramp, then creates one fresh host
-session. A valid chunk from that session is required before entering `POLICY`;
-Replay therefore restarts from its configured start frame and ACT recomputes
-from the post-ramp observation. The 50 Hz output limiter starts from the held
-reference, not the tracker's measured joint pose. Temporal reference jumps are
-accepted so recorded pause/resume transitions can be replayed, then rate-limited
-on output. OpenNeck yaw/pitch values are clipped to the configured degree ranges
-before scheduling, so a neck-only overshoot does not reject the action chunk.
-Entry failure returns to `STANDING`.
+starting mode: Teleopit creates one host session and waits for its first valid
+chunk, then enters `POLICY` directly. Entry does not align a candidate reference,
+run a Kp ramp, pause/resume the host, or create a second session. The 50 Hz output
+limiter starts from the measured robot reference captured at session start.
+Temporal reference jumps are accepted so recorded pause/resume transitions can
+be replayed, then rate-limited on output. OpenNeck yaw/pitch values are clipped
+to the configured degree ranges before scheduling, so a neck-only overshoot does
+not reject the action chunk. Entry failure returns to `STANDING`.
 Invalid/stale live chunks and watchdog expiry cannot block the local control
 loop and instead pause `POLICY` while holding the last reference. The default
 three-second cached-reference grace period covers transient host inference and
