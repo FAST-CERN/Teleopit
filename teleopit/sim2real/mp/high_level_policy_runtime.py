@@ -60,6 +60,57 @@ logger = logging.getLogger(__name__)
 operator_logger = logging.getLogger(OPERATOR_LOGGER_NAME)
 
 
+class _CameraFrameDiagnostics:
+    """Rate-limited acquisition diagnostics for the policy camera worker."""
+
+    def __init__(self, *, source: str, log_interval_s: float = 5.0) -> None:
+        self._source = str(source)
+        self._log_interval_s = float(log_interval_s)
+        self._failure_count = 0
+        self._failure_started_s: float | None = None
+        self._last_warning_s: float | None = None
+        self._last_frame_seq: int | None = None
+
+    def note_failure(self, reason: str, *, now_s: float) -> None:
+        now = float(now_s)
+        if self._failure_count == 0:
+            self._failure_started_s = now
+        self._failure_count += 1
+        started_s = self._failure_started_s if self._failure_started_s is not None else now
+        if (
+            self._last_warning_s is not None
+            and now - self._last_warning_s < self._log_interval_s
+        ):
+            return
+        operator_logger.warning(
+            "High-level policy %s frame acquisition stalled: "
+            "consecutive_failures=%d outage_s=%.3f last_frame_seq=%s reason=%s",
+            self._source,
+            self._failure_count,
+            max(0.0, now - started_s),
+            "none" if self._last_frame_seq is None else self._last_frame_seq,
+            reason,
+        )
+        self._last_warning_s = now
+
+    def note_frame(self, sequence: int, *, now_s: float) -> None:
+        now = float(now_s)
+        if self._failure_count:
+            started_s = self._failure_started_s if self._failure_started_s is not None else now
+            operator_logger.warning(
+                "High-level policy %s frame acquisition recovered: "
+                "outage_s=%.3f failed_attempts=%d frame_seq=%d",
+                self._source,
+                max(0.0, now - started_s),
+                self._failure_count,
+                int(sequence),
+            )
+        self._last_frame_seq = int(sequence)
+        self._failure_count = 0
+        self._failure_started_s = None
+        self._last_warning_s = None
+
+
 class HighLevelPolicySim2RealRuntime:
     def __init__(self, cfg: Any, *, console: PlainConsole | None = None) -> None:
         self.cfg = _plain_cfg(cfg)
@@ -239,6 +290,7 @@ def _run_high_level_policy_camera_worker(
             slots=int(cfg_get(runtime_cfg, "video_slots", 3)),
         )
         pipeline: Any | None = None
+        frame_diagnostics = _CameraFrameDiagnostics(source="RealSense")
         try:
             if camera_cfg.source == "realsense":
                 try:
@@ -276,10 +328,18 @@ def _run_high_level_policy_camera_worker(
                 else:
                     try:
                         frames = pipeline.wait_for_frames(timeout_ms=1000)
-                    except RuntimeError:
+                    except RuntimeError as exc:
+                        frame_diagnostics.note_failure(
+                            str(exc) or type(exc).__name__,
+                            now_s=time.monotonic(),
+                        )
                         continue
                     color = frames.get_color_frame()
                     if not color:
+                        frame_diagnostics.note_failure(
+                            "frameset contains no color frame",
+                            now_s=time.monotonic(),
+                        )
                         continue
                     frame = np.ascontiguousarray(
                         np.asanyarray(color.get_data()),
@@ -288,6 +348,8 @@ def _run_high_level_policy_camera_worker(
                 timestamp_s = time.monotonic()
                 descriptor = writer.write(frame, timestamp_s=timestamp_s)
                 publisher.publish(VIDEO_TOPIC, descriptor)
+                if pipeline is not None:
+                    frame_diagnostics.note_frame(descriptor.seq, now_s=timestamp_s)
                 if pipeline is None:
                     elapsed_s = time.monotonic() - started_s
                     if elapsed_s < period_s:

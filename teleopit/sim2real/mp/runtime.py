@@ -150,6 +150,74 @@ class RobotMode(Enum):
     DAMPING = "damping"
 
 
+class _PolicyObservationCameraDiagnostics:
+    """Report why camera-backed policy observations stop being published."""
+
+    def __init__(self, *, max_age_s: float, log_interval_s: float = 5.0) -> None:
+        self._max_age_s = float(max_age_s)
+        self._log_interval_s = float(log_interval_s)
+        self.reset()
+
+    def reset(self) -> None:
+        self._blocked_started_s: float | None = None
+        self._last_warning_s: float | None = None
+        self._warning_emitted = False
+        self._last_reason: str | None = None
+
+    def note_blocked(
+        self,
+        reason: str,
+        *,
+        now_s: float,
+        frame_seq: int | None,
+        frame_age_s: float | None,
+    ) -> None:
+        now = float(now_s)
+        if self._blocked_started_s is None:
+            self._blocked_started_s = now
+        self._last_reason = str(reason)
+        blocked_for_s = max(0.0, now - self._blocked_started_s)
+        if frame_seq is None and blocked_for_s < self._max_age_s:
+            return
+        if (
+            self._last_warning_s is not None
+            and now - self._last_warning_s < self._log_interval_s
+        ):
+            return
+        operator_logger.warning(
+            "High-level policy observation blocked by camera: "
+            "reason=%s latest_frame_seq=%s frame_age_s=%s "
+            "freshness_limit_s=%.3f blocked_for_s=%.3f",
+            self._last_reason,
+            "none" if frame_seq is None else int(frame_seq),
+            "unknown" if frame_age_s is None else f"{float(frame_age_s):.3f}",
+            self._max_age_s,
+            blocked_for_s,
+        )
+        self._last_warning_s = now
+        self._warning_emitted = True
+
+    def note_published(
+        self,
+        *,
+        now_s: float,
+        frame_seq: int,
+        frame_age_s: float,
+    ) -> None:
+        now = float(now_s)
+        if self._warning_emitted:
+            started_s = self._blocked_started_s if self._blocked_started_s is not None else now
+            operator_logger.warning(
+                "High-level policy observation camera recovered: "
+                "previous_reason=%s frame_seq=%d frame_age_s=%.3f blocked_for_s=%.3f",
+                self._last_reason,
+                int(frame_seq),
+                float(frame_age_s),
+                max(0.0, now - started_s),
+            )
+        self.reset()
+
+
 class _LoopTimingReporter:
     def __init__(
         self,
@@ -1288,6 +1356,13 @@ class _RobotControlWorker:
         self._latest_policy_video: SharedFrameDescriptor | None = None
         self._latest_policy_status: HighLevelPolicyStatusPacket | None = None
         self._last_policy_status_seq = -1
+        self._policy_camera_diagnostics = (
+            _PolicyObservationCameraDiagnostics(
+                max_age_s=self._high_level_policy_cfg.max_observation_age_s
+            )
+            if self._high_level_policy_cfg is not None
+            else None
+        )
 
         self._latest_reference: ReferencePacket | None = None
         mp_cfg = _mp_cfg(cfg)
@@ -1719,6 +1794,9 @@ class _RobotControlWorker:
             if self._latest_policy_video is None
             else int(self._latest_policy_video.seq)
         )
+        diagnostics = getattr(self, "_policy_camera_diagnostics", None)
+        if diagnostics is not None:
+            diagnostics.reset()
         self._last_policy_session_publish_s = 0.0
         self._publish_high_level_policy_session("start", repeat=False)
 
@@ -1773,12 +1851,38 @@ class _RobotControlWorker:
         transform = self._policy_frame_transform
         session_id = self._policy_session_id
         policy_cfg = self._high_level_policy_cfg
-        if publisher is None or frame is None or transform is None or session_id is None or policy_cfg is None:
-            return
-        if int(frame.seq) <= self._last_policy_video_seq:
+        if publisher is None or transform is None or session_id is None or policy_cfg is None:
             return
         now_s = time.monotonic()
-        if abs(now_s - float(frame.timestamp_s)) > policy_cfg.max_observation_age_s:
+        diagnostics = getattr(self, "_policy_camera_diagnostics", None)
+        if frame is None:
+            if diagnostics is not None:
+                diagnostics.note_blocked(
+                    "no_frame_received",
+                    now_s=now_s,
+                    frame_seq=None,
+                    frame_age_s=None,
+                )
+            return
+        frame_seq = int(frame.seq)
+        frame_age_s = abs(now_s - float(frame.timestamp_s))
+        if int(frame.seq) <= self._last_policy_video_seq:
+            if diagnostics is not None and frame_age_s > policy_cfg.max_observation_age_s:
+                diagnostics.note_blocked(
+                    "no_new_frame",
+                    now_s=now_s,
+                    frame_seq=frame_seq,
+                    frame_age_s=frame_age_s,
+                )
+            return
+        if frame_age_s > policy_cfg.max_observation_age_s:
+            if diagnostics is not None:
+                diagnostics.note_blocked(
+                    "stale_frame",
+                    now_s=now_s,
+                    frame_seq=frame_seq,
+                    frame_age_s=frame_age_s,
+                )
             return
         state = transform.localize_state(build_observation_state(robot_state))
         sequence_id = self._policy_observation_seq
@@ -1794,7 +1898,13 @@ class _RobotControlWorker:
             ),
         )
         self._policy_observation_seq += 1
-        self._last_policy_video_seq = int(frame.seq)
+        self._last_policy_video_seq = frame_seq
+        if diagnostics is not None:
+            diagnostics.note_published(
+                now_s=now_s,
+                frame_seq=frame_seq,
+                frame_age_s=frame_age_s,
+            )
 
     def _transition_to_high_level_policy(self) -> None:
         state = self.robot.get_state()
@@ -1855,6 +1965,9 @@ class _RobotControlWorker:
         self._policy_resume_source_timestamp_ns = None
         self._policy_hold_qpos = None
         self._latest_policy_status = None
+        diagnostics = getattr(self, "_policy_camera_diagnostics", None)
+        if diagnostics is not None:
+            diagnostics.reset()
 
     def _handle_high_level_policy_fault(self, detail: str) -> None:
         if not bool(getattr(self, "high_level_policy_enabled", False)):

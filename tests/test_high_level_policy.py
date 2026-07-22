@@ -31,6 +31,7 @@ from teleopit.high_level_policy.scheduler import (
     closure_to_o6_pose,
 )
 from teleopit.sim2real.mp.high_level_policy_runtime import (
+    _CameraFrameDiagnostics,
     HighLevelPolicySim2RealRuntime,
     _apply_policy_neck_target,
     _policy_target_is_current,
@@ -46,6 +47,7 @@ from teleopit.sim2real.mp.messages import (
     ModeStatePacket,
 )
 from teleopit.sim2real.mp.runtime import (
+    _PolicyObservationCameraDiagnostics,
     RobotMode,
     Sim2RealRuntime,
     _RobotControlWorker,
@@ -497,6 +499,74 @@ def test_high_level_policy_test_camera_is_exact_protocol_shape() -> None:
     assert frame.shape == (480, 640, 3)
     assert frame.dtype == np.uint8
     assert np.all(frame[:, :, 2] == 7)
+
+
+def test_realsense_acquisition_diagnostics_are_rate_limited_and_report_recovery(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("WARNING")
+    diagnostics = _CameraFrameDiagnostics(source="RealSense", log_interval_s=5.0)
+    diagnostics.note_frame(40, now_s=9.0)
+
+    diagnostics.note_failure("frame timeout", now_s=10.0)
+    diagnostics.note_failure("frame timeout", now_s=12.0)
+    diagnostics.note_failure("frame timeout", now_s=15.1)
+    diagnostics.note_frame(41, now_s=16.0)
+
+    stalled = [message for message in caplog.messages if "acquisition stalled" in message]
+    recovered = [message for message in caplog.messages if "acquisition recovered" in message]
+    assert len(stalled) == 2
+    assert "consecutive_failures=1" in stalled[0]
+    assert "last_frame_seq=40" in stalled[0]
+    assert "consecutive_failures=3" in stalled[1]
+    assert recovered == [
+        "High-level policy RealSense frame acquisition recovered: "
+        "outage_s=6.000 failed_attempts=3 frame_seq=41"
+    ]
+
+
+def test_policy_observation_camera_diagnostics_wait_for_freshness_limit_and_recover(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("WARNING")
+    diagnostics = _PolicyObservationCameraDiagnostics(
+        max_age_s=0.15,
+        log_interval_s=5.0,
+    )
+
+    diagnostics.note_blocked(
+        "no_frame_received",
+        now_s=10.0,
+        frame_seq=None,
+        frame_age_s=None,
+    )
+    diagnostics.note_blocked(
+        "no_frame_received",
+        now_s=10.14,
+        frame_seq=None,
+        frame_age_s=None,
+    )
+    assert caplog.messages == []
+
+    diagnostics.note_blocked(
+        "no_frame_received",
+        now_s=10.16,
+        frame_seq=None,
+        frame_age_s=None,
+    )
+    diagnostics.note_blocked(
+        "no_frame_received",
+        now_s=11.0,
+        frame_seq=None,
+        frame_age_s=None,
+    )
+    diagnostics.note_published(now_s=11.1, frame_seq=8, frame_age_s=0.02)
+
+    assert len(caplog.messages) == 2
+    assert "reason=no_frame_received" in caplog.messages[0]
+    assert "freshness_limit_s=0.150" in caplog.messages[0]
+    assert "observation camera recovered" in caplog.messages[1]
+    assert "frame_seq=8" in caplog.messages[1]
 
 
 def test_openneck_policy_target_is_sent_directly_in_physical_degrees() -> None:
