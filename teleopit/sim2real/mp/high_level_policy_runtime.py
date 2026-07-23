@@ -261,6 +261,7 @@ def _run_high_level_policy_camera_worker(
                 pipeline.start(rs_config)
             period_s = 1.0 / float(camera_cfg.fps)
             test_frame_index = 0
+            camera_stalled = False
             while not stop_event.is_set():
                 command = command_sub.recv_latest()
                 if isinstance(command, CommandPacket) and command.command == "shutdown":
@@ -276,11 +277,22 @@ def _run_high_level_policy_camera_worker(
                 else:
                     try:
                         frames = pipeline.wait_for_frames(timeout_ms=1000)
-                    except RuntimeError:
+                    except RuntimeError as exc:
+                        if not camera_stalled:
+                            operator_logger.warning(
+                                "High-level policy RealSense stalled: %s", exc
+                            )
+                        camera_stalled = True
                         continue
                     color = frames.get_color_frame()
                     if not color:
+                        if not camera_stalled:
+                            operator_logger.warning(
+                                "High-level policy RealSense returned no color frame"
+                            )
+                        camera_stalled = True
                         continue
+                    camera_stalled = False
                     frame = np.ascontiguousarray(
                         np.asanyarray(color.get_data()),
                         dtype=np.uint8,
