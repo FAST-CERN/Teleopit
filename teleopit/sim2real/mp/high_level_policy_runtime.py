@@ -225,6 +225,17 @@ def _run_high_level_policy_client_worker(
     _worker_loop("high_level_policy", cfg, _main)
 
 
+def _stop_and_hardware_reset_realsense(pipeline: Any, device: Any) -> None:
+    try:
+        pipeline.stop()
+    except RuntimeError as exc:
+        logger.warning("Failed to stop stalled high-level policy RealSense pipeline: %s", exc)
+    try:
+        device.hardware_reset()
+    except RuntimeError as exc:
+        logger.warning("Failed to hardware-reset high-level policy RealSense: %s", exc)
+
+
 def _run_high_level_policy_camera_worker(
     cfg: dict[str, Any], endpoints: Sim2RealIpcEndpoints, stop_event: MpEvent
 ) -> None:
@@ -239,7 +250,11 @@ def _run_high_level_policy_camera_worker(
             slots=int(cfg_get(runtime_cfg, "video_slots", 3)),
         )
         rs: Any | None = None
+        rs_context: Any | None = None
         pipeline: Any | None = None
+        pipeline_profile: Any | None = None
+        device: Any | None = None
+        device_serial = camera_cfg.device
         try:
             if camera_cfg.source == "realsense":
                 try:
@@ -248,6 +263,7 @@ def _run_high_level_policy_camera_worker(
                     raise RuntimeError(
                         "RealSense high-level-policy camera requires pyrealsense2"
                     ) from exc
+                rs_context = rs.context()
             period_s = 1.0 / float(camera_cfg.fps)
             test_frame_index = 0
             camera_stalled = False
@@ -267,10 +283,10 @@ def _run_high_level_policy_camera_worker(
                     assert rs is not None
                     if pipeline is None:
                         try:
-                            pipeline = rs.pipeline()
+                            pipeline = rs.pipeline(rs_context)
                             rs_config = rs.config()
-                            if camera_cfg.device is not None:
-                                rs_config.enable_device(camera_cfg.device)
+                            if device_serial is not None:
+                                rs_config.enable_device(device_serial)
                             rs_config.enable_stream(
                                 rs.stream.color,
                                 camera_cfg.width,
@@ -278,9 +294,14 @@ def _run_high_level_policy_camera_worker(
                                 rs.format.rgb8,
                                 camera_cfg.fps,
                             )
-                            pipeline.start(rs_config)
+                            pipeline_profile = pipeline.start(rs_config)
+                            device = pipeline_profile.get_device()
+                            if device_serial is None:
+                                device_serial = device.get_info(rs.camera_info.serial_number)
                         except Exception as exc:
                             pipeline = None
+                            pipeline_profile = None
+                            device = None
                             if not camera_stalled:
                                 operator_logger.warning(
                                     "High-level policy RealSense unavailable; "
@@ -299,19 +320,17 @@ def _run_high_level_policy_camera_worker(
                         if not camera_stalled:
                             operator_logger.warning(
                                 "High-level policy RealSense stalled; "
-                                "reconnecting in 1.0s: %s",
+                                "hardware-resetting and reconnecting: %s",
                                 exc,
                             )
                         camera_stalled = True
-                        try:
-                            pipeline.stop()
-                        except RuntimeError as stop_exc:
-                            logger.warning(
-                                "Failed to stop stalled high-level policy "
-                                "RealSense pipeline: %s",
-                                stop_exc,
-                            )
+                        frames = None
+                        color = None
+                        assert device is not None
+                        _stop_and_hardware_reset_realsense(pipeline, device)
                         pipeline = None
+                        pipeline_profile = None
+                        device = None
                         stop_event.wait(1.0)
                         continue
                     if camera_stalled:
@@ -326,7 +345,9 @@ def _run_high_level_policy_camera_worker(
                 timestamp_s = time.monotonic()
                 descriptor = writer.write(frame, timestamp_s=timestamp_s)
                 publisher.publish(VIDEO_TOPIC, descriptor)
-                if camera_cfg.source != "realsense":
+                if camera_cfg.source == "realsense":
+                    frame = color = frames = None
+                else:
                     elapsed_s = time.monotonic() - started_s
                     if elapsed_s < period_s:
                         time.sleep(period_s - elapsed_s)

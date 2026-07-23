@@ -34,6 +34,7 @@ from teleopit.sim2real.mp.high_level_policy_runtime import (
     HighLevelPolicySim2RealRuntime,
     _apply_policy_neck_target,
     _policy_target_is_current,
+    _stop_and_hardware_reset_realsense,
     _test_pattern,
     _validate_high_level_policy_runtime_config,
 )
@@ -501,6 +502,16 @@ def test_high_level_policy_test_camera_is_exact_protocol_shape() -> None:
     assert frame.shape == (480, 640, 3)
     assert frame.dtype == np.uint8
     assert np.all(frame[:, :, 2] == 7)
+
+
+def test_realsense_recovery_stops_pipeline_before_hardware_reset() -> None:
+    calls: list[str] = []
+    pipeline = SimpleNamespace(stop=lambda: calls.append("stop"))
+    device = SimpleNamespace(hardware_reset=lambda: calls.append("hardware_reset"))
+
+    _stop_and_hardware_reset_realsense(pipeline, device)
+
+    assert calls == ["stop", "hardware_reset"]
 
 
 def test_openneck_policy_target_is_sent_directly_in_physical_degrees() -> None:
