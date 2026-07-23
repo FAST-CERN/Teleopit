@@ -15,7 +15,8 @@ ZeroMQ/msgpack 消息通信。
                               | 通过 TCP 传输 float32 state/action + JPEG
                               v
 G1 onboard 计算机（Teleopit）
-  RealSense + G1 state -> client -> 已验证的 30 Hz action chunk
+  RealSense + G1 state -> 单个阻塞请求 -> 已验证的 30 Hz action chunk
+  -> 完整执行 chunk -> 下一个请求
   -> 50 Hz 插值 -> motion tracker -> G1 关节角目标
                  -> LinkerHand O6 / OpenNeck
 ```
@@ -108,9 +109,13 @@ python scripts/run/run_high_level_policy_sim2real.py \
   real_robot.network_interface=eth0
 ```
 
-协议接受 1 到 50 帧的 action chunk。正式 ACT checkpoint 使用 50 帧 horizon，并配置
-`high_level_policy.replan_steps=3`。对于 15 帧 ReplayPolicy chunk，仍可使用
-`replan_steps=15`。请求步长不能超过主机报告的 horizon。
+协议接受 1 到 50 帧的 action chunk。learned-policy 主机会预测完整的模型 horizon，但只
+返回 checkpoint 的 `n_action_steps`；因此默认 ACT checkpoint 会预测 50 帧并返回 3 帧。
+ReplayPolicy 最多返回 `--chunk-size` 配置的帧数，最后一段可以更短。
+
+请求调度没有模式或 stride 配置。Teleopit 会发送一份 observation，在等待期间保持最后一条
+安全 reference，以 30 Hz 完整执行返回的 chunk，然后再采样下一份 observation。请求不会
+重叠，执行中的 chunk 也不会被替换。
 
 生产相机契约固定为 30 Hz 的 RGB `uint8[480,640,3]`。
 `camera.source=test-pattern` 只用于受控集成测试；部署时应使用
@@ -137,6 +142,9 @@ python scripts/run/run_high_level_policy_sim2real.py \
 创建或 reset 第二个 session。scheduler 的 50 Hz 输出 limiter 从 session 开始时捕获的
 机器人实测 reference 起步。失败或超时会让机器人保持普通 standing reference。
 
+在 `POLICY` 内，chunk 执行结束不是 watchdog 事件。隔离的 client 进程执行下一次阻塞
+请求时，Teleopit 会保持最后一条 body、hand 和 neck target，本地 50 Hz 控制循环继续运行。
+
 暂停会冻结 body reference，并保持最后一条 LinkerHand 和 OpenNeck 命令。恢复时会请求
 新的 action chunk，并在等待期间继续保持暂停姿态。按 `X` 会停止策略 session；运行时
 返回 `STANDING` 时会张开手并让辅助硬件回中。
@@ -162,17 +170,18 @@ Watchdog、主机/网络、相机或 policy client 故障也会进入同一个�
 
 reference 连续性不是接收条件。entry、chunk 内部和 chunk 之间的 root translation、root
 yaw 与 G1 关节 reference 跳变都会被接受，因为录制的 pause/resume 转换可能有意地不
-连续。单个 entry session 的第一份有效 chunk 会立即开始实时执行。格式错误、过期、
-非关节字段超出绝对范围（已裁剪的 OpenNeck 角度除外）或关节修正量过大会终止 entry。
+连续；50 Hz 输出 limiter 会衔接这些已接受的跳变。单个 entry session 的第一份有效
+chunk 会立即开始实时执行。格式错误、过期、非关节字段超出绝对范围（已裁剪的 OpenNeck
+角度除外）或关节修正量过大会终止 entry。
 
-通过验证的 30 Hz body reference 会在本地插值到 50 Hz 并执行 rate limit；网络延迟
-导致跳过 source frame 或新 chunk 替换旧计划时同样如此。配置的 root displacement/XY
-speed、yaw rate 和 joint rate 是输出限制，而不是 chunk 拒绝阈值。在短暂的推理或传输延迟
-期间，可以在配置的 grace period（默认三秒）内继续使用最后一条已验证 reference。如果不再有有效 action，
-网络交换失败，或必要的 camera/client worker 退出，Teleopit 会保持在 `POLICY`，进入
-普通的可恢复暂停状态，并保持最后一条 body、hand 和 neck 命令。故障恢复后按 `B`
-请求恢复；在收到新的有效 chunk 前，执行仍保持暂停。只有 `X` 会把模式切换到
-`STANDING`。
+每份 response 通过验证后，其中的 30 Hz body reference 会从接收时刻开始在本地插值到
+50 Hz 并执行 rate limit。source timestamp 用于标识 response 回显的 observation，不会
+用于跳入 chunk。配置的 root displacement/XY speed、yaw rate 和 joint rate 是输出限制，
+而不是 chunk 拒绝阈值。chunk 之间的正常推理会一直保持最后一条有效 reference，不使用
+grace timer。如果网络交换超时、response 无效，或必要的 camera/client worker 退出，
+Teleopit 会保持在 `POLICY`，进入普通的可恢复暂停状态，并保持最后一条 body、hand 和
+neck 命令。故障恢复后按 `B` 请求恢复；在收到新的有效 chunk 前，执行仍保持暂停。只有
+`X` 会把模式切换到 `STANDING`。
 
 默认安全范围位于 `high_level_policy_sim2real.yaml` 的
 `high_level_policy.safety` 下。只有在检查录制数据、G1 关节限位和已安装的 OpenNeck
@@ -181,15 +190,16 @@ speed、yaw rate 和 joint rate 是输出限制，而不是 chunk 拒绝阈值�
 ## 7. 故障排查
 
 **按 `Y` 后始终不进入 `POLICY`：** 检查主机 endpoint、防火墙、server 日志、
-`describe` schema、消息 envelope、task、checkpoint manifest、`replan_steps` 和 entry
-日志。Teleopit 会保持 `STANDING`，直到单个 entry session 返回第一份有效 chunk。
+`describe` schema、消息 envelope、task、checkpoint manifest 和 entry 日志。Teleopit
+会保持 `STANDING`，直到单个 entry session 返回第一份有效 chunk。
 
 **第一份 entry chunk 被拒绝或 entry 超时：** 请检查日志中的契约错误、关节顺序、绝对
 reference 约定、硬件范围以及 host/network 延迟。单纯的 reference 跳变不会导致 chunk
 被拒绝。
 
 **策略短暂运行后进入暂停：** 检查 timeout、推理延迟、stale result、worker 退出和
-安全拒绝日志。底层 50 Hz tracker 不会等待主机推理。恢复故障输入路径后按 `B` 继续。
+安全拒绝日志。底层 50 Hz tracker 不会等待主机推理，chunk 之间的正常推理只会保持当前
+reference。恢复故障输入路径后按 `B` 继续。
 
 **Pico 无法连接：** 该运行时有意不启动 Pico。请先停止它，再改用 Pico 专用的
 `run_sim2real.py --config-name pico4_sim2real` 工作流。

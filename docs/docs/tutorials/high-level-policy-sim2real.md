@@ -16,7 +16,8 @@ Host workstation (lerobot-teleopit)
                               | float32 state/action + JPEG over TCP
                               v
 G1 onboard computer (Teleopit)
-  RealSense + G1 state -> client -> validated 30 Hz action chunk
+  RealSense + G1 state -> one blocking request -> validated 30 Hz action chunk
+  -> execute complete chunk -> next request
   -> 50 Hz interpolation -> motion tracker -> G1 joint-angle targets
                            -> LinkerHand O6 / OpenNeck
 ```
@@ -115,10 +116,16 @@ python scripts/run/run_high_level_policy_sim2real.py \
   real_robot.network_interface=eth0
 ```
 
-The protocol accepts action chunks from 1 to 50 frames. The production ACT
-checkpoint uses a 50-frame horizon with `high_level_policy.replan_steps=3`.
-For a 15-frame ReplayPolicy chunk, `replan_steps=15` remains valid. The request
-stride must not exceed the horizon reported by the host.
+The protocol accepts action chunks from 1 to 50 frames. A learned-policy host
+predicts its full model horizon but returns only the checkpoint's
+`n_action_steps`; the default ACT checkpoint therefore predicts 50 frames and
+returns 3. ReplayPolicy returns up to its configured `--chunk-size`, including
+a shorter final tail.
+
+Request scheduling has no mode or stride setting. Teleopit sends one
+observation, waits while holding the final safe reference, executes the entire
+returned chunk at 30 Hz, and then samples the next observation. It never
+overlaps requests or replaces an executing chunk.
 
 The production camera contract is exactly RGB `uint8[480,640,3]` at 30 Hz.
 `camera.source=test-pattern` exists only for controlled integration testing;
@@ -147,6 +154,10 @@ reference, run a Kp ramp, pause/resume host requests, or create/reset a second
 session. The scheduler's 50 Hz output limiter starts from the measured robot
 reference captured when the session begins. A failure or timeout leaves the
 robot on the normal standing reference.
+
+Inside `POLICY`, finishing a chunk is not a watchdog event. Teleopit holds its
+final body, hand, and neck targets while the isolated client process performs
+the next blocking request. The local 50 Hz control loop continues running.
 
 Pause freezes the body reference and holds the last LinkerHand and OpenNeck
 commands. Resume requests a fresh action chunk while continuing to hold the
@@ -179,23 +190,23 @@ or trims a malformed host result. Checks include:
 Reference continuity is not an acceptance condition. Root translation, root
 yaw, and G1 joint-reference jumps are accepted at entry, inside a chunk, and
 across chunks because a recorded pause/resume transition can intentionally be
-discontinuous. The first valid chunk from the single entry session starts live
-execution immediately. A malformed or stale first chunk, an out-of-range
-non-joint field other than the projected OpenNeck angles, or an excessive joint
-correction aborts entry.
+discontinuous. The 50 Hz output limiter bridges accepted discontinuities. The
+first valid chunk from the single entry session starts live execution
+immediately. A malformed or stale first chunk, an out-of-range non-joint field
+other than the projected OpenNeck angles, or an excessive joint correction
+aborts entry.
 
 Validated 30 Hz body references are interpolated and rate-limited locally at
-50 Hz, including when latency skips source frames or a new chunk replaces the
-old plan. The configured root displacement/XY speed, yaw-rate, and joint-rate
-values are output limits, not chunk-rejection thresholds. The configured
-grace period (three seconds by default) reuses the final validated reference
-during transient inference or transport delays.
-If no valid action remains, a network
-exchange fails, or a required camera/client worker exits, Teleopit remains in
-`POLICY`, enters the normal resumable pause state, and holds the latest body,
-hand, and neck commands. After recovery, `B` requests resume; execution stays
-paused until a fresh validated chunk arrives. Only `X` changes the mode to
-`STANDING`.
+50 Hz from the time each response is accepted. Source timestamps identify the
+observation echoed by the response; they are not used to skip into the chunk.
+The configured root displacement/XY speed, yaw-rate, and joint-rate values are
+output limits, not chunk-rejection thresholds. Normal inference between chunks
+holds the final validated reference without a grace timer. If a network
+exchange times out, a response is invalid, or a required camera/client worker
+exits, Teleopit remains in `POLICY`, enters the normal resumable pause state,
+and holds the latest body, hand, and neck commands. After recovery, `B`
+requests resume; execution stays paused until a fresh validated chunk arrives.
+Only `X` changes the mode to `STANDING`.
 
 The default safety envelope lives under `high_level_policy.safety` in
 `high_level_policy_sim2real.yaml`. Adjust it only after checking the recorded
@@ -204,9 +215,9 @@ data, G1 joint limits, and the installed OpenNeck calibration.
 ## 7. Troubleshooting
 
 **`Y` never enters `POLICY`:** check the host endpoint, firewall, server log,
-`describe` schemas, message envelope, task, checkpoint manifest,
-`replan_steps`, and the entry logs. Teleopit stays in `STANDING` until the single
-entry session returns its first valid chunk.
+`describe` schemas, message envelope, task, checkpoint manifest, and the entry
+logs. Teleopit stays in `STANDING` until the single entry session returns its
+first valid chunk.
 
 **The first entry chunk is rejected or entry times out:** inspect the logged
 contract error, joint ordering, absolute-reference convention, hardware ranges,
@@ -214,8 +225,9 @@ and host/network latency. Reference discontinuity alone does not reject a chunk.
 
 **Policy runs briefly and becomes paused:** inspect timeout, inference
 latency, stale-result, worker-exit, and safety-rejection logs. The low-level
-50 Hz tracker does not block on host inference. Restore the failed input path,
-then press `B` to resume.
+50 Hz tracker does not block on host inference, and expected inference between
+chunks only holds the current reference. Restore the failed input path, then
+press `B` to resume.
 
 **Pico does not connect:** this runtime intentionally does not start Pico. Stop
 it and launch the Pico-specific `run_sim2real.py --config-name

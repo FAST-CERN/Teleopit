@@ -1,4 +1,4 @@
-"""Non-critical host-policy client worker for high-level-policy sim2real."""
+"""Blocking client worker for the chunk-synchronous host-policy loop."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def encode_policy_jpeg(frame: object, *, quality: int) -> bytes:
     return payload
 
 
-class HighLevelPolicyWorker:
+class SynchronousPolicyWorker:
     def __init__(
         self,
         cfg: dict[str, Any],
@@ -91,7 +91,6 @@ class HighLevelPolicyWorker:
         self._paused = False
         self._last_session_seq = -1
         self._last_observation_seq = -1
-        self._last_request_timestamp_ns: int | None = None
         self._next_connect_time_s = 0.0
         self._status_seq = 0
         self._policy_type: str | None = None
@@ -109,9 +108,14 @@ class HighLevelPolicyWorker:
                     self._handle_session(session)
                 if self._active_session is not None and not self._ready:
                     self._connect_if_due()
-                observation = self._observation_sub.recv_latest()
-                if isinstance(observation, HighLevelPolicyObservationPacket):
-                    self._handle_observation(observation)
+                if (
+                    self._active_session is not None
+                    and self._ready
+                    and not self._paused
+                ):
+                    observation = self._observation_sub.recv_latest()
+                    if isinstance(observation, HighLevelPolicyObservationPacket):
+                        self._handle_observation(observation)
                 time.sleep(0.001)
         finally:
             self.close()
@@ -138,7 +142,6 @@ class HighLevelPolicyWorker:
                 self._ready = False
                 self._paused = False
                 self._last_observation_seq = -1
-                self._last_request_timestamp_ns = None
                 self._next_connect_time_s = 0.0
                 self._new_session_required = False
                 self._policy_type = None
@@ -154,7 +157,6 @@ class HighLevelPolicyWorker:
         elif command == "resume":
             if self._paused:
                 self._paused = False
-                self._last_request_timestamp_ns = None
                 if self._ready:
                     self._publish_status("ready", "policy requests resumed")
                 else:
@@ -184,11 +186,6 @@ class HighLevelPolicyWorker:
                     timeout_s=self.policy_cfg.timeout_s,
                 )
             description = self._client.describe()
-            if self.policy_cfg.replan_steps > description.max_action_horizon:
-                raise ValueError(
-                    "high_level_policy.replan_steps exceeds host max_action_horizon: "
-                    f"{self.policy_cfg.replan_steps} > {description.max_action_horizon}"
-                )
             self._client.reset(session.session_id, session.task)
             self._policy_type = description.policy_type
             self._policy_id = description.policy_id
@@ -207,12 +204,6 @@ class HighLevelPolicyWorker:
             return
         now_s = time.monotonic()
         if now_s - float(packet.timestamp_s) > self.policy_cfg.max_observation_age_s:
-            return
-        minimum_interval_ns = int(round(self.policy_cfg.replan_steps / 30.0 * 1e9))
-        if (
-            self._last_request_timestamp_ns is not None
-            and packet.onboard_monotonic_timestamp_ns - self._last_request_timestamp_ns < minimum_interval_ns
-        ):
             return
         client = self._client
         if client is None:
@@ -247,7 +238,6 @@ class HighLevelPolicyWorker:
                 ),
             )
             self._last_observation_seq = int(packet.sequence_id)
-            self._last_request_timestamp_ns = int(packet.onboard_monotonic_timestamp_ns)
         except (PolicyProtocolError, PolicyTransportError, ValueError, RuntimeError) as exc:
             logger.warning("High-level policy request failed: %s", exc)
             self._ready = False
@@ -275,10 +265,10 @@ class HighLevelPolicyWorker:
         )
 
 
-def run_high_level_policy_worker(
+def run_synchronous_policy_worker(
     cfg: dict[str, Any],
     endpoints: Sim2RealIpcEndpoints,
     stop_event: Any,
 ) -> None:
-    worker = HighLevelPolicyWorker(cfg, endpoints, stop_event)
+    worker = SynchronousPolicyWorker(cfg, endpoints, stop_event)
     worker.run()

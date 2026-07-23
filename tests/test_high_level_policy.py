@@ -26,8 +26,8 @@ from teleopit.high_level_policy.protocol import (
     unpack_message,
 )
 from teleopit.high_level_policy.scheduler import (
-    HighLevelPolicyScheduler,
     PolicyFrameTransform,
+    SynchronousPolicyScheduler,
     closure_to_o6_pose,
 )
 from teleopit.sim2real.mp.high_level_policy_runtime import (
@@ -38,13 +38,14 @@ from teleopit.sim2real.mp.high_level_policy_runtime import (
     _test_pattern,
     _validate_high_level_policy_runtime_config,
 )
-from teleopit.sim2real.mp.high_level_policy_worker import HighLevelPolicyWorker
+from teleopit.sim2real.mp.high_level_policy_worker import SynchronousPolicyWorker
 from teleopit.sim2real.mp.messages import (
     HighLevelPolicyActionPacket,
     HighLevelPolicySessionPacket,
     HighLevelPolicyStatusPacket,
     HighLevelPolicyTargetPacket,
     ModeStatePacket,
+    SharedFrameDescriptor,
 )
 from teleopit.sim2real.mp.runtime import (
     RobotMode,
@@ -111,30 +112,30 @@ def _safe_chunk(actions: np.ndarray, *, source_s: float = 1.0, sequence: int = 0
     )
 
 
-def test_high_level_policy_default_hold_covers_inference_and_transport_jitter() -> None:
+def test_high_level_policy_config_has_no_async_chunk_options() -> None:
     config = parse_high_level_policy_config({"high_level_policy": {"task": "demo"}})
 
-    assert config.hold_s == pytest.approx(3.0)
+    assert not hasattr(config, "replan_steps")
+    assert not hasattr(config, "hold_s")
+    for removed_name in ("replan_steps", "hold_s"):
+        with pytest.raises(ValueError, match=rf"{removed_name} was removed"):
+            parse_high_level_policy_config(
+                {
+                    "high_level_policy": {
+                        "task": "demo",
+                        removed_name: 3,
+                    }
+                }
+            )
 
 
-def test_high_level_policy_replan_steps_uses_protocol_horizon_limit() -> None:
-    config = parse_high_level_policy_config(
-        {
-            "high_level_policy": {
-                "task": "demo",
-                "replan_steps": MAX_ACTION_HORIZON,
-            }
-        }
-    )
-
-    assert config.replan_steps == MAX_ACTION_HORIZON
-
-    with pytest.raises(ValueError, match=rf"\[1, {MAX_ACTION_HORIZON}\]"):
+def test_high_level_policy_config_still_validates_request_timeout() -> None:
+    with pytest.raises(ValueError, match="timeout_s"):
         parse_high_level_policy_config(
             {
                 "high_level_policy": {
                     "task": "demo",
-                    "replan_steps": MAX_ACTION_HORIZON + 1,
+                    "timeout_s": 0.0,
                 }
             }
         )
@@ -183,57 +184,56 @@ def test_policy_frame_transform_localizes_state_and_delocalizes_action() -> None
     np.testing.assert_allclose(transform.localize_body_action(world), body, atol=1e-6)
 
 
-def test_scheduler_uses_source_timestamp_and_interpolates_at_30hz() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1)
+def test_scheduler_starts_on_receipt_and_interpolates_at_30hz() -> None:
+    scheduler = SynchronousPolicyScheduler()
     scheduler.reset("session-1")
     scheduler.accept(_chunk(source_s=10.0), now_s=10.01)
 
-    halfway = scheduler.sample(10.0 + 0.5 / 30.0)
+    halfway = scheduler.sample(10.01 + 0.5 / 30.0)
     assert halfway is not None
     assert halfway[0] == pytest.approx(0.5)
     assert halfway[48] == pytest.approx(5.0)
 
 
 def test_scheduler_accepts_protocol_max_action_horizon() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1)
+    scheduler = SynchronousPolicyScheduler()
     scheduler.reset("session-1")
     scheduler.accept(_chunk(source_s=10.0, frames=MAX_ACTION_HORIZON), now_s=10.01)
 
     assert scheduler.has_chunk
 
 
-def test_scheduler_pause_freezes_and_resume_shifts_plan_time() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1)
+def test_scheduler_completes_chunk_before_accepting_the_next_one() -> None:
+    scheduler = SynchronousPolicyScheduler()
     scheduler.reset("session-1")
     scheduler.accept(_chunk(source_s=20.0), now_s=20.0)
-    scheduler.pause(20.02)
 
-    paused = scheduler.sample(25.0)
-    assert paused is not None
-    scheduler.resume(25.0)
-    resumed = scheduler.sample(25.0)
-    assert resumed is not None
-    np.testing.assert_allclose(resumed, paused)
+    with pytest.raises(ValueError, match="cannot replace an active synchronous"):
+        scheduler.accept(_chunk(source_s=20.01, sequence=1), now_s=20.01)
+
+    assert scheduler.sample(20.0 + 3.0 / 30.0) is None
+    scheduler.accept(_chunk(source_s=25.0, sequence=1), now_s=25.0)
+    assert scheduler.has_chunk
 
 
-def test_scheduler_rejects_wrong_session_and_expired_chunk() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.0)
+def test_scheduler_rejects_wrong_session_but_not_inference_latency() -> None:
+    scheduler = SynchronousPolicyScheduler()
     scheduler.reset("other")
     with pytest.raises(ValueError, match="session mismatch"):
         scheduler.accept(_chunk(source_s=1.0), now_s=1.0)
 
     scheduler.reset("session-1")
-    with pytest.raises(ValueError, match="already expired"):
-        scheduler.accept(_chunk(source_s=1.0), now_s=2.0)
-
-    with pytest.raises(ValueError, match="in the future"):
-        scheduler.accept(_chunk(source_s=3.0), now_s=2.0)
+    scheduler.accept(_chunk(source_s=1.0), now_s=20.0)
+    first = scheduler.sample(20.0)
+    assert first is not None
+    assert first[0] == pytest.approx(0.0)
 
 
 def test_scheduler_rejects_nonincreasing_source_timestamp() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1)
+    scheduler = SynchronousPolicyScheduler()
     scheduler.reset("session-1")
     scheduler.accept(_chunk(source_s=1.0), now_s=1.0)
+    scheduler.discard_chunk()
 
     with pytest.raises(ValueError, match="source timestamp must increase"):
         scheduler.accept(_chunk(source_s=1.0, sequence=1), now_s=1.01)
@@ -245,7 +245,7 @@ def test_linkerhand_closure_uses_hand_calibration() -> None:
 
 
 def test_scheduler_validates_complete_chunk_against_onboard_safety_limits() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler = SynchronousPolicyScheduler(safety=_safety_config())
     initial = _safe_actions(1)[0]
     scheduler.reset("session-1", initial_action=initial)
     scheduler.accept(_safe_chunk(_safe_actions()), now_s=1.01)
@@ -254,7 +254,7 @@ def test_scheduler_validates_complete_chunk_against_onboard_safety_limits() -> N
 
 
 def test_scheduler_accepts_internal_reference_discontinuities() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler = SynchronousPolicyScheduler(safety=_safety_config())
     initial = _safe_actions(1)[0]
     initial[7] = 0.8
     actions = _safe_actions()
@@ -272,7 +272,7 @@ def test_scheduler_accepts_internal_reference_discontinuities() -> None:
 
 
 def test_scheduler_clips_joint_positions_to_onboard_limits() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler = SynchronousPolicyScheduler(safety=_safety_config())
     scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
     actions = _safe_actions(1)
     actions[0, 7] = -3.08
@@ -281,7 +281,7 @@ def test_scheduler_clips_joint_positions_to_onboard_limits() -> None:
     scheduler.accept(_safe_chunk(actions), now_s=1.01)
     scheduled = None
     for _ in range(20):
-        scheduled = scheduler.sample(1.0)
+        scheduled = scheduler.sample(1.01)
 
     assert scheduled is not None
     assert scheduled[7] == pytest.approx(-3.0)
@@ -289,15 +289,15 @@ def test_scheduler_clips_joint_positions_to_onboard_limits() -> None:
 
 
 def test_scheduler_clips_openneck_angles_to_onboard_limits() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler = SynchronousPolicyScheduler(safety=_safety_config())
     scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
     actions = _safe_actions()
     actions[:, 48] = [-46.0, 0.0, 46.0]
     actions[:, 49] = [41.0, 0.0, -41.0]
 
     scheduler.accept(_safe_chunk(actions), now_s=1.01)
-    first_action = scheduler.sample(1.0)
-    final_action = scheduler.sample(1.0 + 2.0 / 30.0)
+    first_action = scheduler.sample(1.01)
+    final_action = scheduler.sample(1.01 + 2.0 / 30.0)
 
     assert first_action is not None
     assert first_action[48] == pytest.approx(-45.0)
@@ -308,7 +308,7 @@ def test_scheduler_clips_openneck_angles_to_onboard_limits() -> None:
 
 
 def test_scheduler_rejects_joint_projection_above_limit() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler = SynchronousPolicyScheduler(safety=_safety_config())
     scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
     actions = _safe_actions(1)
     actions[0, 7] = -3.11
@@ -319,7 +319,7 @@ def test_scheduler_rejects_joint_projection_above_limit() -> None:
 
 
 def test_scheduler_rejects_entire_unsafe_non_joint_chunk() -> None:
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler = SynchronousPolicyScheduler(safety=_safety_config())
     scheduler.reset("session-1", initial_action=_safe_actions(1)[0])
     actions = _safe_actions()
     actions[1, 2] = 0.4
@@ -330,8 +330,7 @@ def test_scheduler_rejects_entire_unsafe_non_joint_chunk() -> None:
 
 
 def test_scheduler_accepts_discontinuous_plan_and_rate_limits_output_at_50hz() -> None:
-    scheduler = HighLevelPolicyScheduler(
-        hold_s=0.1,
+    scheduler = SynchronousPolicyScheduler(
         safety=_safety_config(),
         output_hz=50.0,
     )
@@ -342,7 +341,7 @@ def test_scheduler_accepts_discontinuous_plan_and_rate_limits_output_at_50hz() -
     actions[1, 7] = 0.5
     yaw = 0.2
     actions[1, 3:7] = [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)]
-    scheduler.accept(_safe_chunk(actions), now_s=1.01)
+    scheduler.accept(_safe_chunk(actions), now_s=1.0)
 
     output = scheduler.sample(1.0 + 1.0 / 30.0)
 
@@ -648,7 +647,6 @@ def test_policy_transition_after_first_chunk_does_not_start_kp_ramp() -> None:
     worker._policy_paused = True
     worker._policy_resume_pending = False
     worker._policy_resume_deadline_s = None
-    worker._policy_resume_source_timestamp_ns = None
     worker._standing_return_ramp_duration = 0.5
     worker._standing_return_kp_ramp_floor_ratio = 0.5
     worker._safety = SimpleNamespace(
@@ -689,7 +687,9 @@ def test_policy_entry_rejects_action_received_after_deadline() -> None:
     worker._policy_session_id = "session-1"
     worker._policy_paused = False
     worker._policy_resume_pending = False
-    worker._policy_resume_source_timestamp_ns = None
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 1
+    worker._policy_request_deadline_s = now_s + 1.0
     worker._policy_entry_pending = True
     worker._policy_entry_deadline_s = now_s - 0.01
     accepted: list[object] = []
@@ -732,7 +732,9 @@ def test_policy_entry_first_chunk_uses_measured_reference_boundary() -> None:
     worker._policy_session_id = "session-1"
     worker._policy_paused = False
     worker._policy_resume_pending = False
-    worker._policy_resume_source_timestamp_ns = None
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 1
+    worker._policy_request_deadline_s = now_s + 1.0
     worker._policy_entry_pending = True
     worker._policy_entry_deadline_s = now_s + 1.0
     worker._policy_frame_transform = PolicyFrameTransform.from_robot_pose(
@@ -746,7 +748,7 @@ def test_policy_entry_first_chunk_uses_measured_reference_boundary() -> None:
     state = SimpleNamespace()
     worker.robot = SimpleNamespace(get_state=lambda: state)
     worker._build_robot_state_qpos = lambda _state: current_qpos.copy()
-    scheduler = HighLevelPolicyScheduler(hold_s=0.1, safety=_safety_config())
+    scheduler = SynchronousPolicyScheduler(safety=_safety_config())
     boundary_action = worker._build_high_level_policy_boundary_action(state)
     scheduler.reset("session-1", initial_action=boundary_action)
     worker._high_level_policy_scheduler = scheduler
@@ -759,7 +761,7 @@ def test_policy_entry_first_chunk_uses_measured_reference_boundary() -> None:
 
     worker._drain_high_level_policy_ipc()
 
-    scheduled = scheduler.sample(now_s)
+    scheduled = scheduler.sample(time.monotonic())
     assert boundary_action[7] == pytest.approx(0.8)
     assert current_qpos[7] == pytest.approx(0.8)
     assert transitions == ["policy"]
@@ -791,7 +793,9 @@ def test_policy_entry_stale_result_aborts_current_session() -> None:
     worker._policy_session_id = "session-1"
     worker._policy_paused = False
     worker._policy_resume_pending = False
-    worker._policy_resume_source_timestamp_ns = None
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 1
+    worker._policy_request_deadline_s = now_s + 1.0
     worker._policy_entry_pending = True
     worker._policy_entry_deadline_s = now_s + 1.0
     worker._high_level_policy_scheduler = SimpleNamespace()
@@ -843,7 +847,8 @@ def test_high_level_policy_body_action_uses_existing_tracker_without_second_alig
     worker._policy_paused = False
     worker._policy_resume_pending = False
     worker.robot = SimpleNamespace(get_state=lambda: SimpleNamespace())
-    worker._publish_high_level_policy_observation = lambda _state: None
+    published_observations: list[object] = []
+    worker._publish_high_level_policy_observation = published_observations.append
     worker._policy_control_pub = None
     worker._policy_hold_qpos = None
     calls: list[tuple[np.ndarray, dict[str, object]]] = []
@@ -862,6 +867,100 @@ def test_high_level_policy_body_action_uses_existing_tracker_without_second_alig
         "align_reference": False,
         "compose_arms": False,
     }
+    assert published_observations == []
+
+
+def test_synchronous_policy_publishes_only_one_outstanding_observation() -> None:
+    worker = object.__new__(_RobotControlWorker)
+    now_s = time.monotonic()
+    worker.mode = RobotMode.POLICY
+    worker._policy_entry_pending = False
+    worker._policy_paused = False
+    worker._policy_resume_pending = False
+    worker._policy_request_pending = False
+    worker._policy_request_sequence_id = None
+    worker._policy_request_deadline_s = None
+    worker._policy_session_id = "session-1"
+    worker._latest_policy_status = HighLevelPolicyStatusPacket(
+        session_id="session-1",
+        status="ready",
+        detail="host policy session reset",
+        timestamp_s=now_s,
+        seq=1,
+    )
+    worker._policy_observation_seq = 7
+    worker._last_policy_video_seq = 9
+    worker._latest_policy_video = SharedFrameDescriptor(
+        shm_name="frame",
+        slot=0,
+        seq=10,
+        timestamp_s=now_s,
+        shape=(480, 640, 3),
+        dtype="uint8",
+        slots=3,
+    )
+    worker._policy_frame_transform = PolicyFrameTransform.from_robot_pose(
+        [0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+    )
+    worker._high_level_policy_cfg = SimpleNamespace(
+        task="demo",
+        timeout_s=1.0,
+        max_observation_age_s=0.15,
+        max_result_age_s=0.1,
+    )
+    published: list[tuple[str, object]] = []
+    worker._policy_control_pub = SimpleNamespace(
+        publish=lambda topic, packet: published.append((topic, packet))
+    )
+    robot_state = SimpleNamespace(
+        qpos=np.zeros(29, dtype=np.float32),
+        qvel=np.zeros(29, dtype=np.float32),
+        quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        ang_vel=np.zeros(3, dtype=np.float32),
+    )
+
+    assert worker._publish_high_level_policy_observation(robot_state)
+    assert not worker._publish_high_level_policy_observation(robot_state)
+    assert len(published) == 1
+    assert worker._policy_request_pending
+    assert worker._policy_request_sequence_id == 7
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        None,
+        HighLevelPolicyStatusPacket(
+            session_id="session-1",
+            status="connecting",
+            detail="connecting to host policy",
+            timestamp_s=1.0,
+            seq=1,
+        ),
+        HighLevelPolicyStatusPacket(
+            session_id="other-session",
+            status="ready",
+            detail="host policy session reset",
+            timestamp_s=1.0,
+            seq=2,
+        ),
+    ],
+)
+def test_synchronous_policy_waits_for_current_session_ready_status(
+    status: HighLevelPolicyStatusPacket | None,
+) -> None:
+    worker = object.__new__(_RobotControlWorker)
+    worker.mode = RobotMode.STANDING
+    worker._policy_entry_pending = True
+    worker._policy_paused = False
+    worker._policy_resume_pending = False
+    worker._policy_request_pending = False
+    worker._policy_session_id = "session-1"
+    worker._latest_policy_status = status
+
+    assert not worker._publish_high_level_policy_observation(SimpleNamespace())
+    assert not worker._policy_request_pending
 
 
 def test_policy_and_pico_remote_b_both_toggle_pause() -> None:
@@ -887,13 +986,12 @@ def test_policy_and_pico_remote_b_both_toggle_pause() -> None:
 
 
 def test_policy_worker_pause_resume_retransmission_is_idempotent() -> None:
-    worker = object.__new__(HighLevelPolicyWorker)
+    worker = object.__new__(SynchronousPolicyWorker)
     worker._last_session_seq = -1
     worker._active_session = None
     worker._ready = False
     worker._paused = False
     worker._last_observation_seq = -1
-    worker._last_request_timestamp_ns = None
     worker._next_connect_time_s = 0.0
     worker._new_session_required = False
     statuses: list[str] = []
@@ -919,13 +1017,12 @@ def test_policy_worker_pause_resume_retransmission_is_idempotent() -> None:
 
 
 def test_policy_worker_resume_reconnects_faulted_current_session() -> None:
-    worker = object.__new__(HighLevelPolicyWorker)
+    worker = object.__new__(SynchronousPolicyWorker)
     worker._last_session_seq = -1
     worker._active_session = None
     worker._ready = False
     worker._paused = False
     worker._last_observation_seq = -1
-    worker._last_request_timestamp_ns = None
     worker._next_connect_time_s = 0.0
     worker._new_session_required = False
     statuses: list[str] = []
@@ -957,10 +1054,12 @@ def test_policy_fault_uses_normal_pause_without_entering_standing() -> None:
     worker._policy_paused = False
     worker._policy_resume_pending = False
     worker._policy_resume_deadline_s = None
-    worker._policy_resume_source_timestamp_ns = None
-    paused: list[float] = []
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 2
+    worker._policy_request_deadline_s = time.monotonic() + 1.0
+    discarded: list[str] = []
     worker._high_level_policy_scheduler = SimpleNamespace(
-        pause=lambda now_s: paused.append(float(now_s))
+        discard_chunk=lambda: discarded.append("discard")
     )
     hold_qpos = np.arange(36, dtype=np.float64)
     worker._resolve_mocap_hold_qpos = lambda: hold_qpos.copy()
@@ -973,29 +1072,31 @@ def test_policy_fault_uses_normal_pause_without_entering_standing() -> None:
     assert worker.mode == RobotMode.POLICY
     assert worker._policy_paused
     assert not worker._policy_resume_pending
-    assert len(paused) == 1
+    assert discarded == ["discard"]
+    assert not worker._policy_request_pending
     assert published == ["pause"]
     np.testing.assert_array_equal(worker._policy_hold_qpos, hold_qpos)
 
 
-def test_policy_watchdog_pauses_and_holds_last_reference() -> None:
+def test_synchronous_policy_wait_holds_last_reference_without_pausing() -> None:
     worker = object.__new__(_RobotControlWorker)
     worker.high_level_policy_enabled = True
     worker.mode = RobotMode.POLICY
     worker._policy_paused = False
     worker._policy_resume_pending = False
     worker._policy_resume_deadline_s = None
-    worker._policy_resume_source_timestamp_ns = None
-    paused: list[float] = []
     worker._high_level_policy_scheduler = SimpleNamespace(
         sample=lambda _now_s: None,
-        pause=lambda now_s: paused.append(float(now_s)),
     )
     worker._policy_frame_transform = SimpleNamespace()
     worker._policy_session_id = "session-1"
     worker.robot = SimpleNamespace(get_state=lambda: SimpleNamespace())
     worker._publish_high_level_policy_observation = lambda _state: None
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 1
+    worker._policy_request_deadline_s = time.monotonic() + 1.0
     hold_qpos = np.arange(36, dtype=np.float64)
+    worker._policy_hold_qpos = hold_qpos.copy()
     worker._last_commanded_motion_qpos = hold_qpos.copy()
     worker._last_retarget_qpos = None
     worker._publish_high_level_policy_session = lambda _command: None
@@ -1005,9 +1106,8 @@ def test_policy_watchdog_pauses_and_holds_last_reference() -> None:
     worker._high_level_policy_step()
 
     assert worker.mode == RobotMode.POLICY
-    assert worker._policy_paused
+    assert not worker._policy_paused
     assert not worker._policy_resume_pending
-    assert len(paused) == 1
     assert len(held) == 1
     np.testing.assert_array_equal(held[0], hold_qpos)
 
@@ -1045,12 +1145,14 @@ def test_policy_pause_resume_waits_for_fresh_chunk_then_resumes() -> None:
     worker._policy_paused = True
     worker._policy_resume_pending = False
     worker._policy_resume_deadline_s = None
-    worker._policy_resume_source_timestamp_ns = None
-    resumed: list[float] = []
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 0
+    worker._policy_request_deadline_s = time.monotonic() + 1.0
+    discarded: list[str] = []
     accepted: list[object] = []
     worker._high_level_policy_scheduler = SimpleNamespace(
         accept=lambda *args, **kwargs: accepted.append((args, kwargs)),
-        resume=lambda now_s: resumed.append(float(now_s)),
+        discard_chunk=lambda: discarded.append("discard"),
     )
     worker._high_level_policy_cfg = SimpleNamespace(
         entry_timeout_s=1.0,
@@ -1064,9 +1166,13 @@ def test_policy_pause_resume_waits_for_fresh_chunk_then_resumes() -> None:
     assert worker._policy_paused
     assert worker._policy_resume_pending
     assert session_commands == ["resume"]
+    assert discarded == ["discard"]
+    assert not worker._policy_request_pending
 
-    source_timestamp_ns = worker._policy_resume_source_timestamp_ns
-    assert source_timestamp_ns is not None
+    source_timestamp_ns = int(round(time.monotonic() * 1e9))
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 1
+    worker._policy_request_deadline_s = time.monotonic() + 1.0
     worker._policy_video_sub = SimpleNamespace(recv_latest=lambda: None)
     worker._policy_status_sub = SimpleNamespace(recv_latest=lambda: None)
     worker._policy_action_sub = SimpleNamespace(
@@ -1087,9 +1193,9 @@ def test_policy_pause_resume_waits_for_fresh_chunk_then_resumes() -> None:
     worker._drain_high_level_policy_ipc()
 
     assert len(accepted) == 1
-    assert len(resumed) == 1
     assert not worker._policy_paused
     assert not worker._policy_resume_pending
+    assert not worker._policy_request_pending
 
 
 def test_policy_resume_rejects_action_received_after_deadline() -> None:
@@ -1116,11 +1222,12 @@ def test_policy_resume_rejects_action_received_after_deadline() -> None:
     worker._policy_paused = True
     worker._policy_resume_pending = True
     worker._policy_resume_deadline_s = now_s - 0.01
-    worker._policy_resume_source_timestamp_ns = int(round((now_s - 0.1) * 1e9))
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 1
+    worker._policy_request_deadline_s = now_s + 1.0
     accepted: list[object] = []
     worker._high_level_policy_scheduler = SimpleNamespace(
         accept=lambda *args, **kwargs: accepted.append((args, kwargs)),
-        resume=lambda _now_s: pytest.fail("expired resume must not resume scheduler"),
     )
     worker._high_level_policy_cfg = SimpleNamespace(max_result_age_s=1.0)
     faults: list[str] = []
@@ -1154,6 +1261,9 @@ def test_paused_robot_worker_discards_inflight_policy_result() -> None:
     worker._policy_session_id = "session-1"
     worker._policy_paused = True
     worker._policy_resume_pending = False
+    worker._policy_request_pending = True
+    worker._policy_request_sequence_id = 1
+    worker._policy_request_deadline_s = 2.0
     accepted: list[object] = []
     worker._high_level_policy_scheduler = SimpleNamespace(
         accept=lambda *args, **kwargs: accepted.append((args, kwargs))
@@ -1163,3 +1273,4 @@ def test_paused_robot_worker_discards_inflight_policy_result() -> None:
     worker._drain_high_level_policy_ipc()
 
     assert accepted == []
+    assert not worker._policy_request_pending

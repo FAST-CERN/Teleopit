@@ -23,12 +23,10 @@ high_level_policy:
   task: demo
   timeout_s: 1.0
   reconnect_backoff_s: 1.0
-  replan_steps: 3  # Current ACT checkpoint; use 15 for ReplayPolicy.
   jpeg_quality: 90
   max_observation_age_s: 0.15
   max_result_age_s: 0.1
   entry_timeout_s: 5.0
-  hold_s: 3.0
   safety:
     root_height_min_m: 0.55
     root_height_max_m: 1.05

@@ -1,4 +1,4 @@
-"""Synchronous ZeroMQ client used only from the onboard background worker."""
+"""Synchronous ZeroMQ client used only from the isolated onboard worker."""
 
 from __future__ import annotations
 

@@ -122,14 +122,12 @@ protocol tests. The only shared data file is `hand_calibration.json`.
 | `standing_return_ramp_duration` | Kp-ramp duration when returning from active control to `STANDING` | `2.0` |
 | `high_level_policy.endpoint` | Host policy ZeroMQ TCP endpoint | `tcp://127.0.0.1:5555` |
 | `high_level_policy.task` | Non-empty task prompt sent on reset and every observation | `demo` |
-| `high_level_policy.timeout_s` | Per-request network deadline | `1.0` |
+| `high_level_policy.timeout_s` | Per-request network deadline; expiry pauses `POLICY` | `1.0` |
 | `high_level_policy.reconnect_backoff_s` | Retry delay while establishing a new session | `1.0` |
-| `high_level_policy.replan_steps` | Minimum 30 Hz source-frame interval between requests; must not exceed host horizon | `3` |
 | `high_level_policy.jpeg_quality` | JPEG quality for the 640x480 RGB frame | `90` |
 | `high_level_policy.max_observation_age_s` | Maximum camera/observation age before a request is skipped | `0.15` |
 | `high_level_policy.max_result_age_s` | Maximum local IPC age before a received result is rejected | `0.1` |
 | `high_level_policy.entry_timeout_s` | Maximum time to establish the entry session and receive its first valid chunk, and maximum fresh-chunk wait on resume | `5.0` |
-| `high_level_policy.hold_s` | Final validated-reference grace period before the watchdog pauses `POLICY`; covers transient host inference and transport delays | `3.0` |
 | `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | Accepted absolute root-height range | `0.55` / `1.05` |
 | `high_level_policy.safety.max_root_xy_speed_m_s` | Root XY speed limit applied to the 50 Hz scheduler output | `2.5` |
 | `high_level_policy.safety.max_root_displacement_m` | Source-frame-equivalent 3D root step used by the 50 Hz output limiter | `0.1` |
@@ -138,6 +136,11 @@ protocol tests. The only shared data file is `hand_calibration.json`.
 | `high_level_policy.safety.max_joint_projection_rad` | Maximum correction allowed when clipping a G1 joint reference to its position limit | `0.1` |
 | `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | OpenNeck yaw clipping range | `-45` / `45` |
 | `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | OpenNeck pitch clipping range | `-40` / `40` |
+
+The request schedule is not configurable. Teleopit always issues one request,
+holds the final safe reference during inference, executes the complete returned
+chunk at 30 Hz, and then issues the next request. Removed `replan_steps` and
+`hold_s` keys are configuration errors.
 
 G1 reference joint positions are clipped to
 `real_robot.joint_pos_lower/upper` when the required correction does not exceed

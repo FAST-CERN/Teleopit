@@ -6,7 +6,6 @@ from typing import Any
 
 import numpy as np
 
-from teleopit.high_level_policy.protocol import MAX_ACTION_HORIZON
 from teleopit.runtime.common import cfg_get
 
 
@@ -16,12 +15,10 @@ class HighLevelPolicyConfig:
     task: str
     timeout_s: float
     reconnect_backoff_s: float
-    replan_steps: int
     jpeg_quality: int
     max_observation_age_s: float
     max_result_age_s: float
     entry_timeout_s: float
-    hold_s: float
 
 
 @dataclass(frozen=True)
@@ -52,6 +49,12 @@ class HighLevelPolicySafetyConfig:
 
 def parse_high_level_policy_config(cfg: Any) -> HighLevelPolicyConfig:
     policy_cfg = cfg_get(cfg, "high_level_policy", {}) or {}
+    for removed_name in ("replan_steps", "hold_s"):
+        if cfg_get(policy_cfg, removed_name, None) is not None:
+            raise ValueError(
+                f"high_level_policy.{removed_name} was removed; "
+                "policy inference is always chunk-synchronous"
+            )
     endpoint = str(cfg_get(policy_cfg, "endpoint", "tcp://127.0.0.1:5555")).strip()
     if not endpoint.startswith("tcp://"):
         raise ValueError("high_level_policy.endpoint must be a tcp:// endpoint")
@@ -64,12 +67,6 @@ def parse_high_level_policy_config(cfg: Any) -> HighLevelPolicyConfig:
     reconnect_backoff_s = _positive_float(
         cfg_get(policy_cfg, "reconnect_backoff_s", 1.0), "reconnect_backoff_s"
     )
-    replan_steps = int(cfg_get(policy_cfg, "replan_steps", 3))
-    if not 1 <= replan_steps <= MAX_ACTION_HORIZON:
-        raise ValueError(
-            "high_level_policy.replan_steps must be in "
-            f"[1, {MAX_ACTION_HORIZON}]"
-        )
     jpeg_quality = int(cfg_get(policy_cfg, "jpeg_quality", 90))
     if not 1 <= jpeg_quality <= 100:
         raise ValueError("high_level_policy.jpeg_quality must be in [1, 100]")
@@ -82,20 +79,15 @@ def parse_high_level_policy_config(cfg: Any) -> HighLevelPolicyConfig:
     entry_timeout_s = _positive_float(
         cfg_get(policy_cfg, "entry_timeout_s", 5.0), "entry_timeout_s"
     )
-    hold_s = float(cfg_get(policy_cfg, "hold_s", 3.0))
-    if not math.isfinite(hold_s) or hold_s < 0.0:
-        raise ValueError("high_level_policy.hold_s must be finite and >= 0")
     return HighLevelPolicyConfig(
         endpoint=endpoint,
         task=task,
         timeout_s=timeout_s,
         reconnect_backoff_s=reconnect_backoff_s,
-        replan_steps=replan_steps,
         jpeg_quality=jpeg_quality,
         max_observation_age_s=max_observation_age_s,
         max_result_age_s=max_result_age_s,
         entry_timeout_s=entry_timeout_s,
-        hold_s=hold_s,
     )
 
 
