@@ -1,4 +1,4 @@
-"""Pico mocap/video signal diagnostic entry point."""
+"""Pico Bridge mocap/video diagnostic entry point."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from teleopit.inputs.pico_video import PicoVideoRuntime, bridge_video_source, pa
 from teleopit.runtime.common import cfg_get
 
 
-logger = logging.getLogger("teleopit.tools.check_pico_signal")
+logger = logging.getLogger("teleopit.tools.test_pico_bridge")
 
 
 def _fmt_vec(values: tuple[float, ...] | None) -> str:
@@ -94,7 +94,7 @@ def _log_summary(
 ) -> None:
     if total <= 0:
         logger.info(
-            "Pico signal summary | window=%.1fs samples=0 provider_fps=%.1f "
+            "Pico Bridge summary | window=%.1fs samples=0 provider_fps=%.1f "
             "last_seq=%s video_frames=%d",
             window_s,
             provider_fps,
@@ -110,7 +110,7 @@ def _log_summary(
     min_pos = last_stats.get("min_pos")
     max_pos = last_stats.get("max_pos")
     logger.info(
-        "Pico signal summary | window=%.1fs samples=%d valid=%d invalid=%d reasons=%s "
+        "Pico Bridge summary | window=%.1fs samples=%d valid=%d invalid=%d reasons=%s "
         "provider_fps=%.1f last_seq=%s last_age_ms=%s video_frames=%d "
         "max_abs_pos=%s pelvis=%s extent=%s min=%s max=%s quat_norm=[%s,%s]",
         window_s,
@@ -201,7 +201,7 @@ def main(cfg: DictConfig) -> None:
     summary_interval_s = float(cfg_get(diag_cfg, "summary_interval_s", 1.0))
     duration_s = float(cfg_get(diag_cfg, "duration_s", 0.0))
 
-    logger.info("Starting Pico signal diagnostic")
+    logger.info("Starting Pico Bridge diagnostic")
     logger.info(
         "Pico bridge | host=%s port=%s discovery=%s advertise_ip=%s",
         cfg_get(input_cfg, "bridge_host", "0.0.0.0"),
@@ -286,7 +286,7 @@ def main(cfg: DictConfig) -> None:
                 video_start_done = None
             stop_event.wait(timeout=sleep_s)
     except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt -- stopping Pico signal diagnostic")
+        logger.info("KeyboardInterrupt -- stopping Pico Bridge diagnostic")
     finally:
         video_runtime.stop()
         provider.close()
