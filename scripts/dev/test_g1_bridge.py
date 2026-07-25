@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diagnostic: compare C++ bridge state vs Python SDK state."""
+"""Compare G1 C++ bridge state with Unitree Python SDK state."""
 import sys
 import time
 import copy

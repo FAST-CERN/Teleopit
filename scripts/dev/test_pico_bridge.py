@@ -1,26 +1,47 @@
+#!/usr/bin/env python3
 """Pico Bridge mocap/video diagnostic entry point."""
 
 from __future__ import annotations
 
+import argparse
 from collections import Counter
 import logging
 import os
+from pathlib import Path
 import signal
+import sys
 import time
 import threading
 from typing import Any
 
-import hydra
 import numpy as np
-from omegaconf import DictConfig
 
-from teleopit.inputs.human_frame_validation import HumanFrameValidationResult, validate_human_frame
-from teleopit.inputs.pico4_provider import Pico4InputProvider
-from teleopit.inputs.pico_video import PicoVideoRuntime, bridge_video_source, parse_pico_video_config
-from teleopit.runtime.common import cfg_get
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
+from teleopit.inputs.human_frame_validation import (  # noqa: E402
+    HumanFrameValidationResult,
+    validate_human_frame,
+)
+from teleopit.inputs.pico4_provider import Pico4InputProvider  # noqa: E402
+from teleopit.inputs.pico_video import (  # noqa: E402
+    PicoVideoConfig,
+    PicoVideoRuntime,
+    bridge_video_source,
+)
 
 
 logger = logging.getLogger("teleopit.tools.test_pico_bridge")
+
+DEFAULT_BRIDGE_HOST = "0.0.0.0"
+DEFAULT_BRIDGE_PORT = 63901
+DEFAULT_VIDEO_SOURCE = "realsense"
+DEFAULT_VIDEO_WIDTH = 1280
+DEFAULT_VIDEO_HEIGHT = 720
+DEFAULT_VIDEO_FPS = 30
+DEFAULT_POLL_HZ = 120.0
+DEFAULT_SUMMARY_INTERVAL_S = 1.0
 
 
 def _fmt_vec(values: tuple[float, ...] | None) -> str:
@@ -145,24 +166,72 @@ def _fmt_float(value: Any) -> str:
     return f"{float(value):.4f}"
 
 
-def _build_provider(cfg: DictConfig, video_enabled: bool) -> Pico4InputProvider:
-    input_cfg = cfg_get(cfg, "input", {}) or {}
-    video_cfg = parse_pico_video_config(input_cfg)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Test Pico Bridge body tracking and RealSense video streaming",
+    )
+    parser.add_argument("--bridge-host", default=DEFAULT_BRIDGE_HOST)
+    parser.add_argument("--bridge-port", type=int, default=DEFAULT_BRIDGE_PORT)
+    parser.add_argument(
+        "--bridge-discovery",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--bridge-advertise-ip", default=None)
+    parser.add_argument(
+        "--video",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Stream video to Pico; enabled by default. Use --no-video to disable it.",
+    )
+    parser.add_argument(
+        "--video-source",
+        choices=["realsense", "test-pattern"],
+        default=DEFAULT_VIDEO_SOURCE,
+    )
+    parser.add_argument("--video-width", type=int, default=DEFAULT_VIDEO_WIDTH)
+    parser.add_argument("--video-height", type=int, default=DEFAULT_VIDEO_HEIGHT)
+    parser.add_argument("--video-fps", type=int, default=DEFAULT_VIDEO_FPS)
+    parser.add_argument("--video-device", default=None)
+    parser.add_argument(
+        "--duration-s",
+        type=float,
+        default=0.0,
+        help="Diagnostic duration; 0 means until Ctrl-C.",
+    )
+    args = parser.parse_args()
+
+    if not 1 <= args.bridge_port <= 65535:
+        parser.error("--bridge-port must be in [1, 65535]")
+    if args.video and (args.video_width <= 0 or args.video_height <= 0 or args.video_fps <= 0):
+        parser.error("--video-width, --video-height, and --video-fps must be > 0")
+    if args.duration_s < 0.0:
+        parser.error("--duration-s must be >= 0")
+    return args
+
+
+def _make_video_config(args: argparse.Namespace) -> PicoVideoConfig:
+    return PicoVideoConfig(
+        enabled=bool(args.video),
+        source=str(args.video_source) if args.video else None,
+        width=int(args.video_width),
+        height=int(args.video_height),
+        fps=int(args.video_fps),
+        device=None if args.video_device in (None, "", "null") else str(args.video_device),
+    )
+
+
+def _build_provider(args: argparse.Namespace, video_cfg: PicoVideoConfig) -> Pico4InputProvider:
     return Pico4InputProvider(
-        human_format=str(cfg_get(input_cfg, "human_format", "pico_bridge")),
-        timeout=float(cfg_get(input_cfg, "pico4_timeout", 60.0)),
-        buffer_size=int(cfg_get(input_cfg, "pico4_buffer_size", 60)),
-        timestamp_gap_reset_s=float(cfg_get(input_cfg, "pico4_timestamp_gap_reset_s", 0.15)),
-        pause_button=cfg_get(input_cfg, "pause_button", "A"),
-        pause_debounce_s=float(cfg_get(input_cfg, "pause_debounce_s", 0.25)),
-        bridge_host=str(cfg_get(input_cfg, "bridge_host", "0.0.0.0")),
-        bridge_port=int(cfg_get(input_cfg, "bridge_port", 63901)),
-        bridge_discovery=bool(cfg_get(input_cfg, "bridge_discovery", True)),
-        bridge_advertise_ip=cfg_get(input_cfg, "bridge_advertise_ip", None),
+        human_format="pico_bridge",
+        pause_button=None,
+        arms_button=None,
+        bridge_host=str(args.bridge_host),
+        bridge_port=int(args.bridge_port),
+        bridge_discovery=bool(args.bridge_discovery),
+        bridge_advertise_ip=args.bridge_advertise_ip,
         bridge_video=bridge_video_source(video_cfg),
-        bridge_video_enabled=video_enabled,
-        bridge_start_timeout=float(cfg_get(input_cfg, "bridge_start_timeout", 10.0)),
-        bridge_history_size=int(cfg_get(input_cfg, "bridge_history_size", 120)),
+        bridge_video_enabled=video_cfg.enabled,
     )
 
 
@@ -191,37 +260,32 @@ def _start_video_runtime_async(video_runtime: PicoVideoRuntime) -> threading.Eve
     return done
 
 
-@hydra.main(version_base=None, config_path="../../teleopit/configs", config_name="pico4_sim2real")
-def main(cfg: DictConfig) -> None:
+def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
-    input_cfg = cfg_get(cfg, "input", {}) or {}
-    video_cfg = parse_pico_video_config(input_cfg)
-    diag_cfg = cfg_get(cfg, "diagnostic", {}) or {}
-    poll_hz = float(cfg_get(diag_cfg, "poll_hz", cfg_get(cfg_get(cfg, "runtime", {}) or {}, "pico_input_hz", 120.0)))
-    summary_interval_s = float(cfg_get(diag_cfg, "summary_interval_s", 1.0))
-    duration_s = float(cfg_get(diag_cfg, "duration_s", 0.0))
+    args = parse_args()
+    video_cfg = _make_video_config(args)
 
     logger.info("Starting Pico Bridge diagnostic")
     logger.info(
         "Pico bridge | host=%s port=%s discovery=%s advertise_ip=%s",
-        cfg_get(input_cfg, "bridge_host", "0.0.0.0"),
-        cfg_get(input_cfg, "bridge_port", 63901),
-        cfg_get(input_cfg, "bridge_discovery", True),
-        cfg_get(input_cfg, "bridge_advertise_ip", None),
+        args.bridge_host,
+        args.bridge_port,
+        args.bridge_discovery,
+        args.bridge_advertise_ip,
     )
     logger.info(
         "Signal check | validation=finite_values poll_hz=%.1f summary_interval_s=%.1f "
         "duration_s=%s video_enabled=%s video_source=%s",
-        poll_hz,
-        summary_interval_s,
-        f"{duration_s:.1f}" if duration_s > 0.0 else "until Ctrl-C",
+        DEFAULT_POLL_HZ,
+        DEFAULT_SUMMARY_INTERVAL_S,
+        f"{args.duration_s:.1f}" if args.duration_s > 0.0 else "until Ctrl-C",
         video_cfg.enabled,
         video_cfg.source,
     )
 
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)
-    provider = _build_provider(cfg, video_cfg.enabled)
+    provider = _build_provider(args, video_cfg)
     video_runtime = PicoVideoRuntime(provider=provider, config=video_cfg)
     total = 0
     valid = 0
@@ -231,7 +295,7 @@ def main(cfg: DictConfig) -> None:
     last_stats: dict[str, Any] = {}
     window_start_s = time.monotonic()
     start_s = window_start_s
-    sleep_s = 1.0 / max(poll_hz, 1.0)
+    sleep_s = 1.0 / DEFAULT_POLL_HZ
     video_start_done: threading.Event | None = None
 
     try:
@@ -240,7 +304,7 @@ def main(cfg: DictConfig) -> None:
             video_start_done = _start_video_runtime_async(video_runtime)
         while not stop_event.is_set():
             now = time.monotonic()
-            if duration_s > 0.0 and now - start_s >= duration_s:
+            if args.duration_s > 0.0 and now - start_s >= args.duration_s:
                 break
 
             video_runtime.tick()
@@ -264,7 +328,7 @@ def main(cfg: DictConfig) -> None:
                             _log_invalid(seq, last_age_ms, result)
 
             now = time.monotonic()
-            if now - window_start_s >= summary_interval_s:
+            if now - window_start_s >= DEFAULT_SUMMARY_INTERVAL_S:
                 _log_summary(
                     window_s=now - window_start_s,
                     total=total,
