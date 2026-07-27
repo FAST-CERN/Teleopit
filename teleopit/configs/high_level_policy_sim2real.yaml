@@ -9,6 +9,7 @@ input:
 
 # Smooth an explicit return from POLICY to STANDING.
 standing_return_ramp_duration: 2.0
+standing_return_kp_ramp_floor_ratio: 0.1
 
 camera:
   source: realsense  # realsense | test-pattern
