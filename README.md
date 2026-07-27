@@ -142,10 +142,11 @@ dedicated onboard runtime. The host policy remains in the independent
 reference chunks over ZeroMQ, validates and interpolates them onboard, and
 rate-limits plan switches at 50 Hz before passing the 36D body reference
 through the existing motion tracker. The host never sends G1 motor commands.
-Inference is chunk-synchronous: Teleopit sends one observation, holds the final
-safe reference while that request completes, executes the complete returned
-chunk at 30 Hz, and only then sends the next observation. Requests and action
-chunks never overlap.
+Inference is asynchronous and receding-horizon: Teleopit submits the latest
+eligible observation every configured `replan_steps` at the 30 Hz action rate
+while the current plan keeps executing. The isolated client keeps at most one
+ZeroMQ request in flight. Each newer response is aligned with its echoed
+onboard monotonic observation timestamp and replaces the active plan.
 
 Pico and high-level-policy deployment use separate scripts. The policy runtime
 does not start PicoBridge, GMR, or the Pico reference worker:
@@ -169,12 +170,14 @@ Temporal reference jumps are accepted so recorded pause/resume transitions can
 be replayed, then rate-limited on output. OpenNeck yaw/pitch values are clipped
 to the configured degree ranges before scheduling, so a neck-only overshoot does
 not reject the action chunk. Entry failure returns to `STANDING`.
-The blocking network exchange runs in an isolated process, so expected
-inference time holds the last reference without stopping the local 50 Hz
-control loop. Invalid/stale chunks, a request timeout, host/network failure, or
-loss of a required camera/client worker enters the same ordinary pause state as
-remote `B`; after recovery, press `B` to resume on a fresh valid chunk. Only
-`X` returns active `POLICY` to `STANDING`.
+The blocking network exchange runs in an isolated process, so the current plan
+continues without stopping the local 50 Hz control loop. If inference outlasts
+the plan horizon, its final reference remains valid for the configured
+`hold_s` grace period. A request timeout, host/network failure, action-watchdog
+expiry, or loss of a required camera/client worker enters the same ordinary
+pause state as remote `B`; invalid/stale chunks are rejected. After recovery,
+press `B` to resume on a fresh valid chunk. Only `X` returns active `POLICY` to
+`STANDING`.
 
 The current client/server code and protocol tests define the network message
 structure. During active development, Teleopit and `lerobot-teleopit` must be

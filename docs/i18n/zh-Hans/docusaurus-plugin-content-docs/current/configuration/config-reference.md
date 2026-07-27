@@ -142,10 +142,12 @@ client/server 消息结构与协议测试。唯一共享的数据文件是 `hand
 | `high_level_policy.task` | reset 和每个 observation 都会发送的非空任务 prompt | `demo` |
 | `high_level_policy.timeout_s` | 单次网络请求 deadline；超时会暂停 `POLICY` | `1.0` |
 | `high_level_policy.reconnect_backoff_s` | 建立新 session 时的重试间隔 | `1.0` |
+| `high_level_policy.replan_steps` | 两次请求之间的最小 30 Hz source-frame 间隔；不得超过主机报告的 horizon | `3` |
 | `high_level_policy.jpeg_quality` | 640x480 RGB 帧的 JPEG 质量 | `90` |
 | `high_level_policy.max_observation_age_s` | 跳过请求前允许的最大 camera/observation age | `0.15` |
 | `high_level_policy.max_result_age_s` | 拒绝已接收结果前允许的最大本地 IPC age | `0.1` |
 | `high_level_policy.entry_timeout_s` | 建立 entry session 并收到其第一份有效 chunk 的最长时间，以及恢复时等待新鲜 chunk 的最长时间 | `5.0` |
+| `high_level_policy.hold_s` | active plan horizon 结束后、action watchdog 暂停 `POLICY` 前保持最终 reference 的 grace period | `3.0` |
 | `high_level_policy.safety.root_height_min_m` / `root_height_max_m` | 可接受的绝对 root 高度范围 | `0.55` / `1.05` |
 | `high_level_policy.safety.max_root_xy_speed_m_s` | 应用于 50 Hz scheduler 输出的 root XY 速度限制 | `2.5` |
 | `high_level_policy.safety.max_root_displacement_m` | 50 Hz 输出 rate limiter 使用的 source-frame 等效 3D root 步长 | `0.1` |
@@ -155,9 +157,10 @@ client/server 消息结构与协议测试。唯一共享的数据文件是 `hand
 | `high_level_policy.safety.neck_yaw_min_deg` / `neck_yaw_max_deg` | OpenNeck yaw 裁剪范围 | `-45` / `45` |
 | `high_level_policy.safety.neck_pitch_min_deg` / `neck_pitch_max_deg` | OpenNeck pitch 裁剪范围 | `-40` / `40` |
 
-请求调度不可配置。Teleopit 始终只发出一个请求，在推理期间保持最后一条安全
-reference，随后以 30 Hz 完整执行返回的 chunk，执行结束后再发出下一个请求。已删除的
-`replan_steps` 和 `hold_s` 配置键会直接报错。
+请求循环采用异步 receding-horizon。隔离的 client 最多只有一个 ZeroMQ 请求在途，
+按照配置的 source-frame stride 选择最新的合格 observation，并在主机推理期间继续执行
+当前 action plan。较新的 response 会依据其中回显的 onboard 单调 observation 时间戳
+替换该计划。
 
 当所需修正量不超过 `high_level_policy.safety.max_joint_projection_rad` 时，G1 reference
 joint position 会裁剪到 `real_robot.joint_pos_lower/upper`；更大的修正量会导致 chunk 被拒绝。

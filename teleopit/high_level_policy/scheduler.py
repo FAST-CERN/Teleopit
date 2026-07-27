@@ -1,4 +1,4 @@
-"""Session-local frame conversion and synchronous 30 Hz chunk execution."""
+"""Session-local frame conversion and latency-aware 30 Hz action scheduling."""
 
 from __future__ import annotations
 
@@ -106,22 +106,27 @@ class PolicyFrameTransform:
         return body
 
 
-class SynchronousPolicyScheduler:
+class HighLevelPolicyScheduler:
     def __init__(
         self,
         *,
+        hold_s: float = 3.0,
         safety: HighLevelPolicySafetyConfig | None = None,
         output_hz: float = 50.0,
     ) -> None:
+        if not np.isfinite(hold_s) or hold_s < 0.0:
+            raise ValueError("high_level_policy.hold_s must be finite and >= 0")
         if not np.isfinite(output_hz) or output_hz <= 0.0:
             raise ValueError("High-level policy scheduler output_hz must be finite and > 0")
+        self.hold_s = float(hold_s)
         self.safety = safety
         self.output_hz = float(output_hz)
         self._session_id: str | None = None
         self._chunk: PolicyActionChunk | None = None
-        self._chunk_started_s: float | None = None
         self._last_source_sequence_id = -1
         self._last_source_timestamp_ns = -1
+        self._paused_at_s: float | None = None
+        self._timestamp_shift_s = 0.0
         self._last_output_action: np.ndarray | None = None
 
     @property
@@ -132,14 +137,19 @@ class SynchronousPolicyScheduler:
     def has_chunk(self) -> bool:
         return self._chunk is not None
 
+    @property
+    def paused(self) -> bool:
+        return self._paused_at_s is not None
+
     def reset(self, session_id: str, *, initial_action: object | None = None) -> None:
         if not isinstance(session_id, str) or not session_id:
             raise ValueError("High-level policy session_id must be non-empty")
         self._session_id = session_id
         self._chunk = None
-        self._chunk_started_s = None
         self._last_source_sequence_id = -1
         self._last_source_timestamp_ns = -1
+        self._paused_at_s = None
+        self._timestamp_shift_s = 0.0
         initial_output = (
             None
             if initial_action is None
@@ -152,18 +162,23 @@ class SynchronousPolicyScheduler:
     def clear(self) -> None:
         self._session_id = None
         self._chunk = None
-        self._chunk_started_s = None
         self._last_source_sequence_id = -1
         self._last_source_timestamp_ns = -1
+        self._paused_at_s = None
+        self._timestamp_shift_s = 0.0
         self._last_output_action = None
 
     def accept(self, chunk: PolicyActionChunk, *, now_s: float) -> None:
+        self._accept(chunk, now_s=now_s)
+
+    def _accept(
+        self,
+        chunk: PolicyActionChunk,
+        *,
+        now_s: float,
+    ) -> None:
         if not np.isfinite(now_s):
             raise ValueError("High-level policy scheduler now_s must be finite")
-        if self._chunk is not None:
-            raise ValueError(
-                "High-level policy cannot replace an active synchronous action chunk"
-            )
         if self._session_id is None or chunk.session_id != self._session_id:
             raise ValueError(
                 f"High-level policy action session mismatch: active={self._session_id!r}, "
@@ -198,7 +213,19 @@ class SynchronousPolicyScheduler:
             raise ValueError("High-level policy policy_id must be non-empty")
         if not np.isfinite(chunk.server_inference_ms) or chunk.server_inference_ms < 0.0:
             raise ValueError("High-level policy server_inference_ms must be finite and >= 0")
+        source_s = chunk.source_onboard_monotonic_timestamp_ns * 1e-9
+        if source_s > float(now_s) + 0.001:
+            raise ValueError(
+                "High-level policy source timestamp is in the future: "
+                f"source={source_s:.9f}s now={float(now_s):.9f}s"
+            )
         actions = self._validate_actions(chunk.actions)
+        valid_until_s = source_s + len(actions) / float(chunk.action_fps) + self.hold_s
+        if float(now_s) > valid_until_s:
+            raise ValueError(
+                "High-level policy action chunk is already expired: "
+                f"age={float(now_s) - source_s:.3f}s horizon={len(actions) / chunk.action_fps:.3f}s"
+            )
         self._chunk = PolicyActionChunk(
             session_id=chunk.session_id,
             source_sequence_id=chunk.source_sequence_id,
@@ -208,17 +235,23 @@ class SynchronousPolicyScheduler:
             policy_id=chunk.policy_id,
             server_inference_ms=chunk.server_inference_ms,
         )
-        self._chunk_started_s = float(now_s)
         self._last_source_sequence_id = chunk.source_sequence_id
         self._last_source_timestamp_ns = chunk.source_onboard_monotonic_timestamp_ns
+        self._timestamp_shift_s = 0.0
+        if self._paused_at_s is not None:
+            self._paused_at_s = float(now_s)
 
-    def discard_chunk(self) -> None:
-        self._chunk = None
-        self._chunk_started_s = None
+    def pause(self, now_s: float) -> None:
+        if self._paused_at_s is None:
+            self._paused_at_s = float(now_s)
+
+    def resume(self, now_s: float) -> None:
+        if self._paused_at_s is None:
+            return
+        self._timestamp_shift_s += max(0.0, float(now_s) - self._paused_at_s)
+        self._paused_at_s = None
 
     def sample(self, now_s: float) -> np.ndarray | None:
-        if not np.isfinite(now_s):
-            raise ValueError("High-level policy scheduler now_s must be finite")
         desired = self._sample_unlimited(now_s)
         if desired is None:
             return None
@@ -231,20 +264,18 @@ class SynchronousPolicyScheduler:
 
     def _sample_unlimited(self, now_s: float) -> np.ndarray | None:
         chunk = self._chunk
-        started_s = self._chunk_started_s
-        if chunk is None or started_s is None:
+        if chunk is None:
             return None
-        elapsed_s = float(now_s) - started_s
-        if elapsed_s < 0.0:
-            raise ValueError("High-level policy scheduler time moved backwards")
-        if elapsed_s >= len(chunk.actions) / float(chunk.action_fps):
-            self.discard_chunk()
-            return None
-        frame_f = elapsed_s * float(chunk.action_fps)
+        effective_now_s = self._paused_at_s if self._paused_at_s is not None else float(now_s)
+        source_s = chunk.source_onboard_monotonic_timestamp_ns * 1e-9 + self._timestamp_shift_s
+        frame_f = (effective_now_s - source_s) * float(chunk.action_fps)
         if frame_f <= 0.0:
             return chunk.actions[0].copy()
         last_index = len(chunk.actions) - 1
         if frame_f >= float(last_index):
+            valid_until_s = source_s + len(chunk.actions) / float(chunk.action_fps) + self.hold_s
+            if effective_now_s > valid_until_s:
+                return None
             return chunk.actions[last_index].copy()
         index0 = int(math.floor(frame_f))
         index1 = min(index0 + 1, last_index)

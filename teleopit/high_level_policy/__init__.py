@@ -7,15 +7,15 @@ from teleopit.high_level_policy.client import (
 )
 from teleopit.high_level_policy.hand_calibration import HandCalibration
 from teleopit.high_level_policy.scheduler import (
+    HighLevelPolicyScheduler,
     PolicyFrameTransform,
-    SynchronousPolicyScheduler,
 )
 
 __all__ = [
     "HandCalibration",
     "HighLevelPolicyClient",
+    "HighLevelPolicyScheduler",
     "PolicyActionChunk",
     "PolicyDescription",
     "PolicyFrameTransform",
-    "SynchronousPolicyScheduler",
 ]

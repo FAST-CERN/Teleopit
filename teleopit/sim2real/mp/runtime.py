@@ -21,10 +21,7 @@ from teleopit.high_level_policy.config import (
     parse_high_level_policy_config,
     parse_high_level_policy_safety_config,
 )
-from teleopit.high_level_policy.scheduler import (
-    PolicyFrameTransform,
-    SynchronousPolicyScheduler,
-)
+from teleopit.high_level_policy.scheduler import HighLevelPolicyScheduler, PolicyFrameTransform
 from teleopit.controllers.observation import VelCmdObservationBuilder, align_motion_qpos_yaw
 from teleopit.controllers.rl_policy import RLPolicyController
 from teleopit.inputs.bvh_provider import BVHInputProvider
@@ -1265,7 +1262,8 @@ class _RobotControlWorker:
             else None
         )
         self._high_level_policy_scheduler = (
-            SynchronousPolicyScheduler(
+            HighLevelPolicyScheduler(
+                hold_s=self._high_level_policy_cfg.hold_s,
                 safety=self._high_level_policy_safety_cfg,
                 output_hz=self.policy_hz,
             )
@@ -1279,9 +1277,7 @@ class _RobotControlWorker:
         self._policy_paused = False
         self._policy_resume_pending = False
         self._policy_resume_deadline_s: float | None = None
-        self._policy_request_pending = False
-        self._policy_request_sequence_id: int | None = None
-        self._policy_request_deadline_s: float | None = None
+        self._policy_resume_source_timestamp_ns: int | None = None
         self._policy_hold_qpos: Float64Array | None = None
         self._policy_session_seq = 0
         self._policy_observation_seq = 0
@@ -1537,25 +1533,9 @@ class _RobotControlWorker:
                 packet.session_id,
             )
             return
-        packet_sequence_id = int(packet.source_sequence_id)
-        expected_sequence_id = self._policy_request_sequence_id
-        # A blocking request may finish after the operator pauses. Its result
-        # must not become the first chunk of a later resume cycle.
+        # A request may already be in flight when the operator pauses. Drain
+        # its result without replacing the reference frozen at the B press.
         if self._policy_paused and not self._policy_resume_pending:
-            if packet_sequence_id == expected_sequence_id:
-                self._clear_policy_request()
-            return
-        if (
-            not self._policy_request_pending
-            or expected_sequence_id is None
-            or packet_sequence_id != expected_sequence_id
-        ):
-            logger.warning(
-                "Discarded unsolicited synchronous policy result: "
-                "expected_sequence=%r received_sequence=%d",
-                expected_sequence_id,
-                packet_sequence_id,
-            )
             return
         scheduler = self._high_level_policy_scheduler
         policy_cfg = self._high_level_policy_cfg
@@ -1588,16 +1568,20 @@ class _RobotControlWorker:
                 result_age_s,
                 policy_cfg.max_result_age_s,
             )
-            self._clear_policy_request()
             if self.mode == RobotMode.STANDING and self._policy_entry_pending:
                 operator_logger.warning(
                     "High-level policy entry failed; received a stale action result"
                 )
                 self._enter_standing()
-            else:
-                self._handle_high_level_policy_fault(
-                    "received a stale synchronous action result"
-                )
+            return
+        minimum_source_timestamp_ns = self._policy_resume_source_timestamp_ns
+        if (
+            self._policy_resume_pending
+            and minimum_source_timestamp_ns is not None
+            and int(packet.source_onboard_monotonic_timestamp_ns)
+            < minimum_source_timestamp_ns
+        ):
+            logger.warning("Discarded pre-resume high-level policy action chunk")
             return
         if self.mode == RobotMode.STANDING and not self._policy_entry_pending:
             return
@@ -1617,29 +1601,24 @@ class _RobotControlWorker:
                 scheduler.accept(chunk, now_s=now_s)
             except ValueError as exc:
                 logger.warning("Rejected high-level policy entry chunk: %s", exc)
-                self._clear_policy_request()
                 operator_logger.warning(
                     "High-level policy entry failed; remaining in STANDING"
                 )
                 self._enter_standing()
                 return
-            self._clear_policy_request()
             self._transition_to_high_level_policy()
             return
         try:
             scheduler.accept(chunk, now_s=now_s)
         except ValueError as exc:
             logger.warning("Rejected high-level policy action chunk: %s", exc)
-            self._clear_policy_request()
-            self._handle_high_level_policy_fault(
-                f"rejected synchronous action chunk: {exc}"
-            )
             return
-        self._clear_policy_request()
         if self._policy_resume_pending:
+            scheduler.resume(now_s)
             self._policy_paused = False
             self._policy_resume_pending = False
             self._policy_resume_deadline_s = None
+            self._policy_resume_source_timestamp_ns = None
             operator_logger.info("fresh action chunk -> resume POLICY")
 
     def _handle_high_level_policy_transitions(self) -> None:
@@ -1712,7 +1691,6 @@ class _RobotControlWorker:
             getattr(state, "quat"),
         )
         self._policy_session_id = uuid.uuid4().hex
-        self._latest_policy_status = None
         scheduler.reset(
             self._policy_session_id,
             initial_action=self._build_high_level_policy_boundary_action(state),
@@ -1722,7 +1700,7 @@ class _RobotControlWorker:
         self._policy_paused = False
         self._policy_resume_pending = False
         self._policy_resume_deadline_s = None
-        self._clear_policy_request()
+        self._policy_resume_source_timestamp_ns = None
         self._policy_hold_qpos = self._build_robot_state_qpos(state)
         self._policy_observation_seq = 0
         self._last_policy_video_seq = (
@@ -1755,35 +1733,23 @@ class _RobotControlWorker:
         )
         self._last_policy_session_publish_s = now_s
 
-    def _high_level_policy_worker_ready(self) -> bool:
-        status = self._latest_policy_status
-        return bool(
-            status is not None
-            and status.session_id == self._policy_session_id
-            and status.status == "ready"
-        )
-
-    def _publish_high_level_policy_observation(self, robot_state: object) -> bool:
+    def _publish_high_level_policy_observation(self, robot_state: object) -> None:
         if not (self._policy_entry_pending or self.mode == RobotMode.POLICY):
-            return False
+            return
         if self._policy_paused and not self._policy_resume_pending:
-            return False
-        if self._policy_request_pending:
-            return False
-        if not self._high_level_policy_worker_ready():
-            return False
+            return
         publisher = self._policy_control_pub
         frame = self._latest_policy_video
         transform = self._policy_frame_transform
         session_id = self._policy_session_id
         policy_cfg = self._high_level_policy_cfg
         if publisher is None or frame is None or transform is None or session_id is None or policy_cfg is None:
-            return False
+            return
         if int(frame.seq) <= self._last_policy_video_seq:
-            return False
+            return
         now_s = time.monotonic()
         if abs(now_s - float(frame.timestamp_s)) > policy_cfg.max_observation_age_s:
-            return False
+            return
         state = transform.localize_state(build_observation_state(robot_state))
         sequence_id = self._policy_observation_seq
         publisher.publish(
@@ -1799,17 +1765,6 @@ class _RobotControlWorker:
         )
         self._policy_observation_seq += 1
         self._last_policy_video_seq = int(frame.seq)
-        self._policy_request_pending = True
-        self._policy_request_sequence_id = sequence_id
-        self._policy_request_deadline_s = (
-            now_s + policy_cfg.timeout_s + policy_cfg.max_result_age_s + 0.1
-        )
-        return True
-
-    def _clear_policy_request(self) -> None:
-        self._policy_request_pending = False
-        self._policy_request_sequence_id = None
-        self._policy_request_deadline_s = None
 
     def _transition_to_high_level_policy(self) -> None:
         state = self.robot.get_state()
@@ -1823,6 +1778,7 @@ class _RobotControlWorker:
         self._policy_paused = False
         self._policy_resume_pending = False
         self._policy_resume_deadline_s = None
+        self._policy_resume_source_timestamp_ns = None
         self.mode = RobotMode.POLICY
         operator_logger.info("mode -> POLICY")
 
@@ -1837,18 +1793,17 @@ class _RobotControlWorker:
             policy_cfg = self._high_level_policy_cfg
             if policy_cfg is None:
                 return
-            scheduler.discard_chunk()
-            self._clear_policy_request()
             self._policy_resume_pending = True
             self._policy_resume_deadline_s = now_s + policy_cfg.entry_timeout_s
+            self._policy_resume_source_timestamp_ns = int(round(now_s * 1e9))
             self._publish_high_level_policy_session("resume")
             operator_logger.info("B -> resume POLICY; waiting for a fresh action chunk")
         else:
-            scheduler.discard_chunk()
-            self._clear_policy_request()
+            scheduler.pause(now_s)
             self._policy_paused = True
             self._policy_resume_pending = False
             self._policy_resume_deadline_s = None
+            self._policy_resume_source_timestamp_ns = None
             self._policy_hold_qpos = self._resolve_mocap_hold_qpos()
             self._publish_high_level_policy_session("pause")
             operator_logger.info("B -> pause POLICY")
@@ -1866,7 +1821,7 @@ class _RobotControlWorker:
         self._policy_paused = False
         self._policy_resume_pending = False
         self._policy_resume_deadline_s = None
-        self._clear_policy_request()
+        self._policy_resume_source_timestamp_ns = None
         self._policy_hold_qpos = None
         self._latest_policy_status = None
 
@@ -1878,11 +1833,11 @@ class _RobotControlWorker:
                 return
             scheduler = self._high_level_policy_scheduler
             if scheduler is not None:
-                scheduler.discard_chunk()
-            self._clear_policy_request()
+                scheduler.pause(time.monotonic())
             self._policy_paused = True
             self._policy_resume_pending = False
             self._policy_resume_deadline_s = None
+            self._policy_resume_source_timestamp_ns = None
             self._policy_hold_qpos = self._resolve_mocap_hold_qpos()
             self._publish_high_level_policy_session("pause")
             operator_logger.warning(
@@ -1955,15 +1910,9 @@ class _RobotControlWorker:
         if self._policy_resume_pending:
             robot_state = self.robot.get_state()
             self._publish_high_level_policy_observation(robot_state)
-            now_s = time.monotonic()
             deadline_s = self._policy_resume_deadline_s
-            request_deadline_s = self._policy_request_deadline_s
-            if deadline_s is not None and now_s > deadline_s:
+            if deadline_s is not None and time.monotonic() > deadline_s:
                 self._handle_high_level_policy_fault("resume timed out waiting for a fresh action chunk")
-            elif request_deadline_s is not None and now_s > request_deadline_s:
-                self._handle_high_level_policy_fault(
-                    "synchronous policy inference timed out"
-                )
             hold_qpos = self._policy_hold_qpos
             if hold_qpos is None:
                 hold_qpos = self._resolve_mocap_hold_qpos()
@@ -1989,15 +1938,10 @@ class _RobotControlWorker:
             return
 
         robot_state = self.robot.get_state()
-        now_s = time.monotonic()
-        scheduled = scheduler.sample(now_s)
+        self._publish_high_level_policy_observation(robot_state)
+        scheduled = scheduler.sample(time.monotonic())
         if scheduled is None:
-            self._publish_high_level_policy_observation(robot_state)
-            request_deadline_s = self._policy_request_deadline_s
-            if request_deadline_s is not None and now_s > request_deadline_s:
-                self._handle_high_level_policy_fault(
-                    "synchronous policy inference timed out"
-                )
+            self._handle_high_level_policy_fault("action watchdog expired")
             hold_qpos = self._policy_hold_qpos
             if hold_qpos is None:
                 hold_qpos = self._resolve_mocap_hold_qpos()

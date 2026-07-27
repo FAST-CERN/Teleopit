@@ -28,7 +28,7 @@ from teleopit.sim2real.hands.linkerhand_o6 import (
     LinkerHandO6Device,
     parse_linkerhand_o6_config,
 )
-from teleopit.sim2real.mp.high_level_policy_worker import SynchronousPolicyWorker
+from teleopit.sim2real.mp.high_level_policy_worker import HighLevelPolicyWorker
 from teleopit.sim2real.mp.ipc import (
     COMMAND_TOPIC,
     HIGH_LEVEL_POLICY_TARGET_TOPIC,
@@ -220,7 +220,7 @@ def _run_high_level_policy_client_worker(
     cfg: dict[str, Any], endpoints: Sim2RealIpcEndpoints, stop_event: MpEvent
 ) -> None:
     def _main() -> None:
-        SynchronousPolicyWorker(cfg, endpoints, stop_event).run()
+        HighLevelPolicyWorker(cfg, endpoints, stop_event).run()
 
     _worker_loop("high_level_policy", cfg, _main)
 

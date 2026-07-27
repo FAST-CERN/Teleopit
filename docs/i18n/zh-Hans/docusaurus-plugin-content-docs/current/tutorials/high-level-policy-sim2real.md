@@ -15,8 +15,8 @@ ZeroMQ/msgpack 消息通信。
                               | 通过 TCP 传输 float32 state/action + JPEG
                               v
 G1 onboard 计算机（Teleopit）
-  RealSense + G1 state -> 单个阻塞请求 -> 已验证的 30 Hz action chunk
-  -> 完整执行 chunk -> 下一个请求
+  RealSense + G1 state -> 异步 client -> 已验证的 30 Hz action plan
+  -> 按时间戳对齐的 receding-horizon 替换
   -> 50 Hz 插值 -> motion tracker -> G1 关节角目标
                  -> LinkerHand O6 / OpenNeck
 ```
@@ -109,13 +109,15 @@ python scripts/run/run_high_level_policy_sim2real.py \
   real_robot.network_interface=eth0
 ```
 
-协议接受 1 到 50 帧的 action chunk。learned-policy 主机会预测完整的模型 horizon，但只
-返回 checkpoint 的 `n_action_steps`；因此默认 ACT checkpoint 会预测 50 帧并返回 3 帧。
-ReplayPolicy 最多返回 `--chunk-size` 配置的帧数，最后一段可以更短。
+协议接受 1 到 50 帧的 action chunk。当前 ACT 主机会返回完整的 checkpoint horizon
+（生产 checkpoint 为 50 帧）；ReplayPolicy 最多返回 `--chunk-size` 配置的帧数，
+最后一段可以更短。
 
-请求调度没有模式或 stride 配置。Teleopit 会发送一份 observation，在等待期间保持最后一条
-安全 reference，以 30 Hz 完整执行返回的 chunk，然后再采样下一份 observation。请求不会
-重叠，执行中的 chunk 也不会被替换。
+Teleopit 每隔 `high_level_policy.replan_steps` 个 30 Hz source frame 提交最新的合格
+observation，默认间隔为三帧。该 stride 不得超过主机 `describe` 响应中的
+`max_action_horizon`。隔离的 client 同一时间只允许一个 REQ/REP exchange，但该请求
+在途时 active plan 会继续执行。ACT 主机使用回显的 onboard 单调时间戳聚合相互重叠的
+prediction；Teleopit 使用同一时间戳，在正确的 source-frame 位置替换 active plan。
 
 生产相机契约固定为 30 Hz 的 RGB `uint8[480,640,3]`。
 `camera.source=test-pattern` 只用于受控集成测试；部署时应使用
@@ -142,8 +144,10 @@ ReplayPolicy 最多返回 `--chunk-size` 配置的帧数，最后一段可以更
 创建或 reset 第二个 session。scheduler 的 50 Hz 输出 limiter 从 session 开始时捕获的
 机器人实测 reference 起步。失败或超时会让机器人保持普通 standing reference。
 
-在 `POLICY` 内，chunk 执行结束不是 watchdog 事件。隔离的 client 进程执行下一次阻塞
-请求时，Teleopit 会保持最后一条 body、hand 和 neck target，本地 50 Hz 控制循环继续运行。
+在 `POLICY` 内，较新的 response 通常会在 active plan 的 horizon 结束前替换它。如果
+推理耗时更长，Teleopit 会在配置的 `hold_s` grace period 内保持该计划最后一条 body、
+hand 和 neck target，同时本地 50 Hz 控制循环继续运行。超过该 grace period 会触发
+action watchdog，并进入普通的可恢复暂停。
 
 暂停会冻结 body reference，并保持最后一条 LinkerHand 和 OpenNeck 命令。恢复时会请求
 新的 action chunk，并在等待期间继续保持暂停姿态。按 `X` 会停止策略 session；运行时
@@ -174,14 +178,15 @@ yaw 与 G1 关节 reference 跳变都会被接受，因为录制的 pause/resume
 chunk 会立即开始实时执行。格式错误、过期、非关节字段超出绝对范围（已裁剪的 OpenNeck
 角度除外）或关节修正量过大会终止 entry。
 
-每份 response 通过验证后，其中的 30 Hz body reference 会从接收时刻开始在本地插值到
-50 Hz 并执行 rate limit。source timestamp 用于标识 response 回显的 observation，不会
-用于跳入 chunk。配置的 root displacement/XY speed、yaw rate 和 joint rate 是输出限制，
-而不是 chunk 拒绝阈值。chunk 之间的正常推理会一直保持最后一条有效 reference，不使用
-grace timer。如果网络交换超时、response 无效，或必要的 camera/client worker 退出，
-Teleopit 会保持在 `POLICY`，进入普通的可恢复暂停状态，并保持最后一条 body、hand 和
-neck 命令。故障恢复后按 `B` 请求恢复；在收到新的有效 chunk 前，执行仍保持暂停。只有
-`X` 会把模式切换到 `STANDING`。
+通过验证的 30 Hz body reference 会在本地插值到 50 Hz 并执行 rate limit。回显的
+source timestamp 用于选择每份 response 中的当前位置，因此主机延迟可以跳过已经过去的
+source frame，较新的 chunk 也可以替换执行中的计划。配置的 root displacement/XY
+speed、yaw rate 和 joint rate 是输出限制，而不是 chunk 拒绝阈值。plan horizon 结束后，
+最后一条有效 reference 会继续保留 `hold_s`。如果网络交换超时、watchdog 到期，或必要的
+camera/client worker 退出，Teleopit 会保持在 `POLICY`，进入普通的可恢复暂停状态，并保持
+最后一条 body、hand 和 neck 命令。无效或过期 response 会被拒绝，不会替换当前仍然有效的
+plan。故障恢复后按 `B` 请求恢复；在收到新的有效 chunk 前，执行仍保持暂停。只有 `X`
+会把模式切换到 `STANDING`。
 
 默认安全范围位于 `high_level_policy_sim2real.yaml` 的
 `high_level_policy.safety` 下。只有在检查录制数据、G1 关节限位和已安装的 OpenNeck
@@ -190,16 +195,16 @@ neck 命令。故障恢复后按 `B` 请求恢复；在收到新的有效 chunk 
 ## 7. 故障排查
 
 **按 `Y` 后始终不进入 `POLICY`：** 检查主机 endpoint、防火墙、server 日志、
-`describe` schema、消息 envelope、task、checkpoint manifest 和 entry 日志。Teleopit
-会保持 `STANDING`，直到单个 entry session 返回第一份有效 chunk。
+`describe` schema、消息 envelope、task、checkpoint manifest、`replan_steps` 和 entry
+日志。Teleopit 会保持 `STANDING`，直到单个 entry session 返回第一份有效 chunk。
 
 **第一份 entry chunk 被拒绝或 entry 超时：** 请检查日志中的契约错误、关节顺序、绝对
 reference 约定、硬件范围以及 host/network 延迟。单纯的 reference 跳变不会导致 chunk
 被拒绝。
 
 **策略短暂运行后进入暂停：** 检查 timeout、推理延迟、stale result、worker 退出和
-安全拒绝日志。底层 50 Hz tracker 不会等待主机推理，chunk 之间的正常推理只会保持当前
-reference。恢复故障输入路径后按 `B` 继续。
+安全拒绝日志。底层 50 Hz tracker 不会等待主机推理；当前 plan 会继续执行，随后使用配置的
+最终 reference grace period。恢复故障输入路径后按 `B` 继续。
 
 **Pico 无法连接：** 该运行时有意不启动 Pico。请先停止它，再改用 Pico 专用的
 `run_sim2real.py --config-name pico4_sim2real` 工作流。
