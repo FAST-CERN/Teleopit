@@ -1,40 +1,52 @@
 ---
-sidebar_position: 5
+sidebar_position: 4
 ---
 
-# Training
+# Train a Motion Controller
 
-Train a whole-body tracking policy and export it as ONNX for inference.
+This guide starts with downloaded motion data and ends with an ONNX controller
+that Teleopit can run in simulation or on a G1.
 
-:::info
-For data preparation, see [Dataset Reference](../reference/dataset). For common training issues, see [Training Troubleshooting](../reference/training-troubleshooting).
-:::
+The normal training path assumes an NVIDIA GPU. Motion data is loaded into
+memory at startup, so larger combined datasets also need enough system and GPU
+memory.
 
-## Setup
+## Before You Start
 
-```bash
-conda create -n teleopit python=3.10
-conda activate teleopit
-pip install -e '.[train]'
-```
+Follow [Installation](../getting-started/installation) with:
 
-Verify:
+- the `train` profile, and
+- the `robots data` asset bundle.
+
+Verify the training package:
+
 ```bash
 python -c "import train_mimic.tasks; print('training OK')"
 ```
 
-Download the distributed minimal datasets and generate the combined precomputed
-training dataset:
+## 1. Prepare the Downloaded Dataset
+
+Downloaded datasets are compact distribution files. Training uses a second
+directory with joint velocities and body kinematics precomputed:
 
 ```bash
-python scripts/setup/download_assets.py --only robots data
 python train_mimic/scripts/data/precompute_dataset.py \
-    data/datasets --outdir data/datasets_precomputed --jobs 8
+    data/datasets \
+    --outdir data/datasets_precomputed \
+    --jobs 8
 ```
 
-## Training
+Use `data/datasets_precomputed` for every training, playback and benchmark
+command below. Pointing training at the original `data/datasets` directory is
+an error, not a supported shortcut.
 
-### Smoke Test
+For custom BVH, PKL, NPZ or Pico-recorded data, see
+[Dataset Reference](../reference/dataset).
+
+## 2. Run a Short Smoke Test
+
+Before starting a long job, verify that the dataset, simulator and logger work
+together:
 
 ```bash
 python train_mimic/scripts/train.py \
@@ -43,7 +55,10 @@ python train_mimic/scripts/train.py \
     --motion_file data/datasets_precomputed
 ```
 
-### Full Training
+The test is successful when environments step, losses are reported and a run
+directory appears under `logs/rsl_rl/g1_general_tracking/`.
+
+## 3. Start a Full Run
 
 ```bash
 python train_mimic/scripts/train.py \
@@ -52,7 +67,65 @@ python train_mimic/scripts/train.py \
     --motion_file data/datasets_precomputed
 ```
 
-### Multi-GPU
+Reduce `--num_envs` if GPU memory is insufficient. The default logger is
+TensorBoard; choose `--logger wandb` or `--logger swanlab` when required.
+
+`--max_iterations` means additional iterations. For example, resuming
+`model_12000.pt` with `--max_iterations 18000` continues to iteration 30000.
+
+## 4. Watch the Checkpoint in Simulation
+
+```bash
+python train_mimic/scripts/play.py \
+    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
+    --motion_file data/datasets_precomputed
+```
+
+Playback starts clips from their beginning and removes training noise. Use it
+to catch an obviously unstable policy before exporting.
+
+## 5. Run the Benchmark
+
+```bash
+python train_mimic/scripts/benchmark.py \
+    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
+    --motion_file data/datasets_precomputed \
+    --num_envs 32
+```
+
+The benchmark evaluates one deterministic 10-second rollout for every eligible
+clip. It reports:
+
+- mean per-joint position error (`MPJPE`),
+- root position, rotation and velocity error, and
+- rollout success rate.
+
+Results are written as a text summary, JSON, per-clip CSV and per-rollout CSV.
+
+## 6. Export ONNX
+
+```bash
+python train_mimic/scripts/save_onnx.py \
+    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
+    --output track.onnx \
+    --history_length 10
+```
+
+The result must be a dual-input TemporalCNN with `obs` and `obs_history`.
+Teleopit validates the 167D observation signature at startup and rejects an
+incompatible export.
+
+Test the export in the normal runtime:
+
+```bash
+python scripts/run/run_sim.py \
+    controller.policy_path=track.onnx \
+    input.bvh_file=data/sample_bvh/aiming1_subject1.bvh
+```
+
+## Scale to Multiple GPUs
+
+For one machine:
 
 ```bash
 python train_mimic/scripts/train.py \
@@ -62,9 +135,9 @@ python train_mimic/scripts/train.py \
     --motion_file data/datasets_precomputed
 ```
 
-### Multi-Node Multi-GPU
+`--num_envs` is per GPU.
 
-Use `torchrun` directly when training across multiple machines:
+For multiple machines, launch the same script with `torchrun`:
 
 ```bash
 torchrun \
@@ -79,58 +152,18 @@ torchrun \
     --motion_file data/datasets_precomputed
 ```
 
-**Notes:**
-- `--num_envs` is per-GPU in multi-GPU mode
-- `--num_envs` is also per-process in multi-node mode, so total environments scale with `world_size`
-- Default logger is TensorBoard. Use `--logger wandb` or `--logger swanlab` to select W&B or SwanLab; the project name defaults to `experiment_name`
-- `--motion_file` accepts a precomputed training dataset root directory or a single precomputed `.h5` shard; shard discovery is recursive
-- If you only have the minimal distributed shards, first run `python train_mimic/scripts/data/precompute_dataset.py <minimal_dataset> --outdir <precomputed_dataset>` and pass the precomputed output to training.
-- Training loads all discovered precomputed motion windows into memory at startup.
-- `--max_iterations` means additional iterations; resuming from `model_12000.pt` with `--max_iterations 18000` trains to `model_30000.pt`
+Here `--num_envs` is per process, so the total scales with the world size.
 
-## Export ONNX
+## Common Problems
 
-```bash
-python train_mimic/scripts/save_onnx.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --output track.onnx \
-    --history_length 10
-```
+| Symptom | What to check |
+|---------|---------------|
+| Loader says the dataset is minimal | Run `precompute_dataset.py` and use its output directory |
+| Out of GPU memory | Lower `--num_envs` |
+| Out of system memory during startup | Train on fewer precomputed shards or add RAM |
+| Exported ONNX fails the 167D check | Export with `save_onnx.py` and `--history_length 10` from the current task |
+| Benchmark skips clips | The skipped clips are shorter than the configured benchmark duration |
 
-The exported model is a dual-input ONNX (`obs` + `obs_history`). The inference side expects a 167D dual-input ONNX policy matching the current `velcmd_history` observation.
-
-## Evaluation
-
-### Playback
-
-```bash
-python train_mimic/scripts/play.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets_precomputed
-```
-
-### Benchmark
-
-```bash
-python train_mimic/scripts/benchmark.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets_precomputed \
-    --num_envs 32
-```
-
-The benchmark uses an OmniXtreme-style protocol: 10-second clips, one deterministic rollout per eligible clip, and `MPJPE(m)`, `root_pos_error(m)`, `root_rot_error(rad)`, `root_vel_error(m/s)`, and `success_rate(%)` outputs. Root errors use the same anchor position, rotation, and linear velocity definitions as the tracking command metrics. It uses play-mode observations without training noise and pins exact clip ids/start times without clip-end resampling. `--motion_file` must point to a precomputed training dataset; all clips long enough for the configured clip length are evaluated.
-
-## Training Architecture
-
-```text
-train_mimic/scripts
-    -> train_mimic/app.py
-    -> single task registry / env builder / runner cfg
-    -> mjlab + rsl_rl
-```
-
-Key files:
-- `train_mimic/app.py` - Shared entry point for train/play/benchmark
-- `train_mimic/tasks/tracking/config/env.py` - General-Tracking-G1 env builder
-- `train_mimic/tasks/tracking/config/rl.py` - TemporalCNN PPO config
-- `train_mimic/tasks/tracking/mdp/commands.py` - Supports `uniform`, `start`, and `rewind` sampling modes. Training defaults to `rewind`; playback uses `start`; benchmark pins exact clip ids and start times.
+For task internals and model dimensions, see
+[Architecture](../reference/architecture). For failure-specific guidance, see
+[Training Troubleshooting](../reference/training-troubleshooting).

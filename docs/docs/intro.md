@@ -3,45 +3,41 @@ sidebar_position: 1
 slug: /
 ---
 
-# Introduction
+# Teleopit
 
 > **Looking for Chinese docs?** [中文文档点此进入](https://BotRunner64.github.io/Teleopit/zh-Hans/)
 
-**Teleopit** is a lightweight, extensible whole-body teleoperation framework for humanoid robots. It provides real-time motion retargeting from human operators to Unitree G1 robots, supporting both MuJoCo simulation and real hardware deployment.
+Teleopit is a **full-embodiment teleoperation system for the Unitree G1**.
+With a Pico 4 or Pico 4 Ultra, an operator can drive the robot's whole-body
+motion in real time. Optional LinkerHand hands reproduce hand gestures, and an
+optional OpenNeck gimbal turns head motion into active camera control.
 
-## Key Features
+The same motion controller runs in MuJoCo first, so you can check tracking and
+controls before connecting a physical robot.
 
-- **Offline sim2sim**: Play back BVH motion capture files through RL policy in MuJoCo
-- **VR teleoperation**: Real-time whole-body control via Pico 4 / Pico 4 Ultra full body tracking
-- **Sim2real deployment**: Deploy to Unitree G1 hardware with the same pipeline
-- **Training pipeline**: End-to-end RL training with General-Tracking-G1 task
-- **Extensible design**: Protocol-based components (InputProvider, Retargeter, Controller, Robot)
+## Start Here
 
-## Pipeline Overview
+If this is your first time using Teleopit:
 
-```text
-InputProvider (BVH / Pico4 VR)
-    -> Retargeter (GMR)
-    -> ObservationBuilder (167D)
-    -> Controller (dual-input TemporalCNN ONNX)
-    -> Robot (MuJoCo sim or Unitree G1)
-```
+1. [Install Teleopit](getting-started/installation) for the job you want to do
+   and complete the check at the end of that page.
+2. Continue with one of the four guides below.
 
-## Technical Specs
+| I want to... | Follow this guide |
+|--------------|-------------------|
+| Check a motion controller in MuJoCo | [Run a Motion Controller in Simulation](tutorials/offline-sim2sim) |
+| Try Pico VR control without a real robot | [VR Teleoperation in Simulation](tutorials/pico-sim2sim) |
+| Control a physical G1 with Pico VR | [VR Teleoperation on Unitree G1](tutorials/pico-sim2real) |
+| Train and export my own controller | [Train a Motion Controller](tutorials/training) |
 
-| Spec | Value |
-|------|-------|
-| Policy frequency | 50 Hz |
-| PD control frequency | 200 Hz |
-| Observation dimension | 167D |
-| Action dimension | 29D (G1 joints) |
-| ONNX model | Dual-input TemporalCNN |
-| Retargeting | GMR (General Motion Retargeting) |
-| Simulator | MuJoCo |
-| Hardware | Unitree G1 (29 DOF) |
+:::warning Before using a real robot
+Make the Pico workflow work in simulation first. Keep the Unitree remote in
+hand during hardware operation; `L1+R1` is the emergency path to `DAMPING`.
+:::
 
-## What's Next
+## Looking for Implementation Details?
 
-- [Installation](getting-started/installation) - Set up your environment
-- [Quick Start](getting-started/quick-start) - Run your first sim2sim
-- [Tutorials](tutorials/offline-sim2sim) - Step-by-step guides for each use case
+The user guides intentionally keep internals out of the main flow. See
+[Architecture](reference/architecture) for the runtime pipeline and technical
+specifications, [Asset Reference](reference/assets) for every downloaded file,
+or [Configuration](configuration/overview) for Hydra options.

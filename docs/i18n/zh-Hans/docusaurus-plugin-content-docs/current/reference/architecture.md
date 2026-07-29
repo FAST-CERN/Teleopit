@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # 架构
 
-面向开发者的系统内部结构和技术约束。
+本页集中说明运行流程、支持边界和精确维度。这些实现细节不会放在任务主线教程中。
 
 ## Pipeline
 
@@ -17,6 +17,24 @@ InputProvider（BVH 文件 / Pico4）
 ```
 
 离线/在线推理由 `teleopit/runtime/` 和 `teleopit/pipeline.py` 装配。硬件状态机通过 `teleopit/sim2real/mp/` 中的进程隔离运行时执行。训练由 `train_mimic/` 提供。
+
+## Pico 全身具身控制路径
+
+同一帧 Pico 数据可以同时进入三条相互独立的控制路径：
+
+```text
+Pico 全身追踪
+  -> GMR 动作重定向 -> 运控策略 -> G1 全身关节
+
+Pico 手势追踪或手柄输入
+  -> Teleopit 手部适配 -> somehand 或开合映射 -> LinkerHand L6/O6
+
+Pico 头显旋转 + 同帧 Spine3 旋转
+  -> 相对 yaw/pitch 映射 -> OpenNeck
+```
+
+全身控制是必需路径，手部和 OpenNeck 是可选的独立进程。它们发生故障时不能停止 G1
+身体控制。三条路径复用同一个进程内 PicoBridge。
 
 由主机提供服务的模仿策略使用第二条相互独立的部署路径：
 
@@ -71,13 +89,20 @@ train_mimic/scripts/data
 
 | 项目 | 规格 |
 |---|---|
+| 支持机器人 | Unitree G1，29 个驱动关节 |
+| 仿真器 | MuJoCo |
+| 动作重定向 | GMR（General Motion Retargeting） |
+| 运控 / PD 频率 | 50 Hz / 200 Hz |
 | 训练任务 | `General-Tracking-G1` |
 | 推理观测 | `velcmd_history`（167D） |
 | ONNX 签名 | 双输入 `obs`（167D）+ `obs_history` |
+| 运控输出 | 相对 `default_dof_pos` 的 29D 关节 offset |
 | Actor/Critic | TemporalCNN（2048、1024、512、256、128） |
 | 训练采样 | 默认 `rewind`；也支持 `uniform`；播放使用 `start`；benchmark 固定精确 clip 并禁用 clip 末尾重采样 |
 | 训练 `window_steps` | `[0]` |
 | 数据格式 | 可递归发现的最小 HDF5 shard（`shard_*.h5`） |
+| 可选灵巧手 | LinkerHand L6 或 O6，支持手柄开合或 Pico 手势 |
+| 可选主动视觉 | 使用物理角度控制 OpenNeck yaw/pitch |
 | 主机策略 observation | JPEG RGB + `observation.state(68)` |
 | 主机策略 action | 30 Hz 的 `float32[T,50]` canonical reference |
 | 主机策略 body 控制 | 36D root/joint reference 通过现有 50 Hz motion tracker |

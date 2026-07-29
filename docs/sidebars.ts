@@ -8,8 +8,6 @@ const sidebars: SidebarsConfig = {
       label: 'Getting Started',
       items: [
         'getting-started/installation',
-        'getting-started/download-assets',
-        'getting-started/quick-start',
       ],
     },
     {
@@ -18,10 +16,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'tutorials/offline-sim2sim',
         'tutorials/pico-sim2sim',
-        'tutorials/standalone-standing',
         'tutorials/pico-sim2real',
-        'tutorials/bvh-sim2real',
-        'tutorials/high-level-policy-sim2real',
         'tutorials/training',
       ],
     },

@@ -4,7 +4,8 @@ sidebar_position: 1
 
 # Architecture
 
-System internals and technical constraints for developers.
+This page collects the runtime pipeline, supported boundaries and exact
+dimensions that are intentionally omitted from the task-based user guides.
 
 ## Pipeline
 
@@ -17,6 +18,25 @@ InputProvider (BVH file / Pico4)
 ```
 
 Offline/online inference is assembled by `teleopit/runtime/` and `teleopit/pipeline.py`. The hardware state machine runs through the process-isolated runtime in `teleopit/sim2real/mp/`. Training is provided by `train_mimic/`.
+
+## Full-Embodiment Pico Path
+
+One Pico frame can feed three independent control paths:
+
+```text
+Pico full-body tracking
+  -> GMR retargeting -> tracking policy -> G1 whole-body joints
+
+Pico hand tracking or controller input
+  -> Teleopit hand adapter -> somehand or gripper mapping -> LinkerHand L6/O6
+
+Pico HMD rotation + same-frame Spine3 rotation
+  -> relative yaw/pitch mapping -> OpenNeck
+```
+
+Whole-body control is the required path. Hands and OpenNeck are optional
+process-isolated workers; their failure must not stop G1 body control. All
+three paths reuse the same in-process PicoBridge receiver.
 
 Host-served imitation policies use a second, independent deployment path:
 
@@ -74,13 +94,20 @@ train_mimic/scripts/data
 
 | Spec | Value |
 |------|-------|
+| Supported robot | Unitree G1, 29 actuated joints |
+| Simulator | MuJoCo |
+| Motion retargeting | GMR (General Motion Retargeting) |
+| Policy / PD rates | 50 Hz / 200 Hz |
 | Training task | `General-Tracking-G1` |
 | Inference observation | `velcmd_history` (167D) |
 | ONNX signature | Dual-input `obs` (167D) + `obs_history` |
+| Policy action | 29D joint offsets from `default_dof_pos` |
 | Actor/Critic | TemporalCNN (2048, 1024, 512, 256, 128) |
 | Training sampling | Default `rewind`; also supports `uniform`; playback uses `start`; benchmark pins exact clips and disables clip-end resampling |
 | Training `window_steps` | `[0]` |
 | Data format | Minimal recursive HDF5 shards (`shard_*.h5`) |
+| Optional hands | LinkerHand L6 or O6, gripper or Pico hand-pose input |
+| Optional active vision | OpenNeck yaw/pitch in physical degrees |
 | Host-policy observation | JPEG RGB + `observation.state(68)` |
 | Host-policy action | `float32[T,50]` canonical reference at 30 Hz |
 | Host-policy body control | 36D root/joint reference through the existing 50 Hz motion tracker |

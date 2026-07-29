@@ -2,9 +2,11 @@
 sidebar_position: 2
 ---
 
-# 资源管理
+# 资源参考
 
-数据集、checkpoint、机器人模型和演示媒体不进 Git 历史，统一走外部下载。Unitree G1 的 canonical 模型下载到 `assets/robots/unitree_g1/g1_29dof.xml`。
+Teleopit 的 Git 仓库只保存代码，不保存大型机器人 mesh、运控模型和动作数据。
+[安装说明](../getting-started/installation)给出了每种用户场景最短的下载命令；本页提供
+完整文件清单和维护者说明。
 
 ## 不入库的内容
 
@@ -12,6 +14,19 @@ sidebar_position: 2
 - `teleopit/retargeting/gmr/assets/` — GMR 重定向资源、IK 配置和非 canonical 机器人描述
 - `data/`、checkpoint、缓存等生成产物
 - 演示媒体（`assets/demo.gif`、`assets/demo.mp4`）
+
+## 资源清单
+
+| 资源组 | 下载后的路径 | 用途 |
+|--------|--------------|------|
+| `ckpt` | `track.onnx`、`track.pt` | 可直接运行的推理模型和对应 PyTorch checkpoint |
+| `robots` | `assets/robots/unitree_g1/g1_29dof.xml` 与 mesh | 训练、MuJoCo 推理、GMR 和数据集 FK |
+| `gmr` | `teleopit/retargeting/gmr/assets/` | 动作重定向模型和 IK 配置 |
+| `bvh` | `data/sample_bvh/*.bvh` | 安装检查和仿真教程使用的示例动作 |
+| `data` | `data/datasets/<dataset>/shard_*.h5` | 用于分发的精简动作数据；训练前需要预计算 |
+
+`assets/robots/unitree_g1/g1_29dof.xml` 是项目唯一标准的 G1 入口。GMR 资源目录中的
+XML 不能替代它。
 
 ## 远程仓库
 
@@ -29,7 +44,7 @@ sidebar_position: 2
 | `12e21/Teleopit-models` | model | checkpoint、GMR retargeting 资源、示例 BVH |
 | `12e21/Teleopit-datasets` | dataset | 训练/验证数据集 |
 
-### 资源组与仓库的对应关系
+### 资源组与仓库对应关系
 
 | 组 | 仓库 | 远端路径 |
 |----|------|---------|
@@ -39,7 +54,7 @@ sidebar_position: 2
 | `bvh` | Teleopit-models | `archives/sample_bvh.tar.gz` |
 | `data` | Teleopit-datasets | `data/datasets/*/*.h5`（`lafan1`、`pico_record`、`seed`、`twist2`） |
 
-## 下载
+## 下载行为
 
 使用项目自带的下载脚本（默认从 ModelScope 下载）：
 

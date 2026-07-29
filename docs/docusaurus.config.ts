@@ -4,7 +4,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Teleopit',
-  tagline: 'Lightweight, extensible whole-body teleoperation framework for humanoid robots',
+  tagline: 'Full-embodiment teleoperation for humanoid robots',
   favicon: 'img/favicon.ico',
 
   url: 'https://BotRunner64.github.io',

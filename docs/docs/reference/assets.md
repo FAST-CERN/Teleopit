@@ -2,9 +2,12 @@
 sidebar_position: 2
 ---
 
-# Asset Management
+# Asset Reference
 
-Datasets, checkpoints, robot models, and demo media are not tracked in Git. They are distributed via ModelScope and HuggingFace. The canonical Unitree G1 model is downloaded to `assets/robots/unitree_g1/g1_29dof.xml`.
+Teleopit's Git repository contains code, not large robot meshes, policies or
+motion data. [Installation](../getting-started/installation) shows the shortest
+download command for each user workflow; this page is the complete inventory
+and maintainer reference.
 
 ## What's Not in Git
 
@@ -12,6 +15,19 @@ Datasets, checkpoints, robot models, and demo media are not tracked in Git. They
 - `teleopit/retargeting/gmr/assets/` - GMR retargeting assets, IK configs, and non-canonical robot descriptions
 - `data/`, checkpoints, caches
 - Demo media (`assets/demo.gif`, `assets/demo.mp4`)
+
+## Asset Inventory
+
+| Group | Local result | Used for |
+|-------|--------------|----------|
+| `ckpt` | `track.onnx`, `track.pt` | Ready-to-run inference and the matching PyTorch checkpoint |
+| `robots` | `assets/robots/unitree_g1/g1_29dof.xml` and meshes | Training, MuJoCo inference, GMR and dataset FK |
+| `gmr` | `teleopit/retargeting/gmr/assets/` | Retargeting models and IK configuration |
+| `bvh` | `data/sample_bvh/*.bvh` | Sample motions used by the installation check and simulation tutorial |
+| `data` | `data/datasets/<dataset>/shard_*.h5` | Minimal distributed motion datasets; precompute before training |
+
+The file `assets/robots/unitree_g1/g1_29dof.xml` is the canonical G1 entry
+point. XML files inside the GMR asset directory are not replacements for it.
 
 ## Repositories
 
@@ -29,7 +45,7 @@ Datasets, checkpoints, robot models, and demo media are not tracked in Git. They
 | `12e21/Teleopit-models` | model | Checkpoints, GMR retargeting assets, sample BVH |
 | `12e21/Teleopit-datasets` | dataset | Training/validation datasets |
 
-### Asset Group Mapping
+### Asset Group and Repository Mapping
 
 | Group | Repository | Remote Path |
 |-------|-----------|-------------|
@@ -39,7 +55,7 @@ Datasets, checkpoints, robot models, and demo media are not tracked in Git. They
 | `bvh` | Teleopit-models | `archives/sample_bvh.tar.gz` |
 | `data` | Teleopit-datasets | `data/datasets/*/*.h5` (`lafan1`, `pico_record`, `seed`, `twist2`) |
 
-## Download
+## Download Behavior
 
 Use the project download script (defaults to ModelScope):
 
