@@ -36,4 +36,5 @@ Pico 头显后，可以实时控制机器人的全身动作。机载部署还可
 
 主线教程只保留完成任务所需的内容。运行流程和技术规格见
 [系统架构](reference/architecture)，下载文件与资源分组见
-[资源参考](reference/assets)，Hydra 参数见[配置说明](configuration/overview)。
+[资产](reference/resources/assets)，Hydra 参数见
+[配置说明](reference/configuration/overview)。

@@ -1,16 +1,12 @@
 ---
-sidebar_position: 3
+sidebar_position: 2
 ---
 
-# 数据集参考
+# 动作数据集
 
-Teleopit 使用两类相互独立的数据：
-
-- **动作数据集**为运控训练提供参考动作；
-- **真机 episode 录制**保存同步的机器人状态、参考动作和相机视频，供后续检查或外部
-  策略使用。
-
-两类数据的 schema 不同，不能相互替换。
+动作数据集为运控训练提供参考动作。用于分发的 minimal 格式与预计算训练格式彼此
+独立，训练只能读取后者。同步的机器人状态、参考动作和相机录制见
+[遥操数据集](teleoperation-datasets)。
 
 ## 下载预构建数据集（推荐）
 
@@ -174,54 +170,3 @@ python train_mimic/scripts/data/check_motion_npz_fk.py \
 ```
 
 推荐判据：`pos_max < 1e-3 m`、`quat_mean < 0.05 rad`、`quat_p95 < 0.10 rad`。
-
-## 真机 Episode 录制
-
-录制程序写出的是一个可编辑数据集，而不是单个包含所有内容的 HDF5：
-
-```text
-data/recordings/sim2real_hdf5/
-├── schema.json
-├── episodes.jsonl
-├── data/
-│   └── episode_000000.h5
-└── videos/
-    └── d435i_rgb/
-        └── episode_000000.mp4
-```
-
-`schema.json` 定义数据集 FPS、`robot_type`、`hand_type`、`neck_type`，以及每个字段的
-shape、dtype、名称和分组。硬件类型必须与当前运行配置一致。
-
-`episodes.jsonl` 是可编辑的 episode 清单。每一行把一条 episode 映射到对应 HDF5
-和 MP4，并保存任务描述。任务文本不会写入 HDF5 attribute。
-
-每个 HDF5 只包含按帧对齐的数组：
-
-| 字段 | Shape | 含义 |
-|------|-------|------|
-| `frame_index` | scalar | 相机/动作帧序号 |
-| `timestamp` | scalar | 单调时钟时间戳，单位为秒 |
-| `observation.state` | `(68,)` | G1 关节状态、基座方向/角速度和投影重力 |
-| `observation.mode` | scalar | `STANDING`、`MOCAP`、`ARMS` 或动捕暂停状态码 |
-| `action` | `(36,)` | motion tracker 使用的根部姿态和 29 关节参考 |
-| `action.hand` | `(12,)`，可选 | 启用手部控制时的左右 LinkerHand 目标 |
-| `action.neck` | `(2,)`，可选 | 经过机械限位后的 OpenNeck yaw/pitch 角度 |
-
-相机 RGB 只保存在 MP4 中，HDF5 不再重复保存 raw image。只有启用对应硬件时，才会
-出现可选 action 字段。
-
-录制器会先提交 HDF5/视频文件，再向清单追加记录。进程中断后，未提交的 episode 会在
-下次录制进程启动时删除，也不会占用 episode 序号。已有 `schema.json` 与当前配置
-不兼容时，只会停止非关键的录制进程。
-
-使用下面的命令查看数据：
-
-```bash
-python scripts/view/view_recording.py \
-    --recording data/recordings/sim2real_hdf5
-```
-
-播放前，查看器会检查清单路径、HDF5 shape/dtype/有限值和 MP4 对齐。录制数据不包含
-实测根部 XYZ，因此 Viewer 中的实测机器人会锚定到参考根部位置；这个格式无法评估
-全局根部平移。

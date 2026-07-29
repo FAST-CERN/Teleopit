@@ -88,7 +88,7 @@ python scripts/setup/download_assets.py \
 ```
 
 推理资源包会把 `track.onnx`、G1 模型文件、GMR 文件和示例 BVH 放到代码默认查找
-的位置。完整文件清单和资源分组见[资源参考](../reference/assets)。
+的位置。完整文件清单和资源分组见[资产](../reference/resources/assets)。
 
 ## 5. 连接真实 G1 前的额外安装
 
@@ -100,7 +100,7 @@ bash scripts/setup/setup_g1_bridge.sh
 ```
 
 无论使用 Pico 还是真机 BVH 回放，都需要这个 bridge。如果编译失败或收不到机器人
-状态，请查看 [G1 Bridge SDK](../reference/g1-bridge-sdk)。
+状态，请查看[配套项目](../reference/companion-projects#g1-bridge-sdk)。
 
 ## 6. 可选硬件
 

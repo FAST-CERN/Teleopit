@@ -127,4 +127,5 @@ num_steps=300
 realtime=true
 ```
 
-For every available field, see [Configuration](../configuration/overview).
+For every available field, see
+[Configuration](../reference/configuration/overview).

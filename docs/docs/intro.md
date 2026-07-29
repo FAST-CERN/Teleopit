@@ -40,5 +40,6 @@ hand during hardware operation; `L1+R1` is the emergency path to `DAMPING`.
 
 The user guides intentionally keep internals out of the main flow. See
 [Architecture](reference/architecture) for the runtime pipeline and technical
-specifications, [Asset Reference](reference/assets) for every downloaded file,
-or [Configuration](configuration/overview) for Hydra options.
+specifications, [Assets](reference/resources/assets) for every
+downloaded file, or
+[Configuration](reference/configuration/overview) for Hydra options.

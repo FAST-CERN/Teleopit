@@ -22,25 +22,30 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Configuration',
-      items: [
-        'configuration/overview',
-        'configuration/config-reference',
-        'configuration/faq',
-      ],
-    },
-    {
-      type: 'category',
       label: 'Reference',
       items: [
+        {
+          type: 'category',
+          label: 'Configuration',
+          items: [
+            'reference/configuration/overview',
+            'reference/configuration/fields',
+          ],
+        },
         'reference/architecture',
-        'reference/assets',
-        'reference/dataset',
-        'reference/g1-bridge-sdk',
-        'reference/training-troubleshooting',
+        {
+          type: 'category',
+          label: 'Resources',
+          items: [
+            'reference/resources/assets',
+            'reference/resources/motion-datasets',
+            'reference/resources/teleoperation-datasets',
+          ],
+        },
+        'reference/companion-projects',
+        'contributing',
       ],
     },
-    'contributing',
   ],
 };
 

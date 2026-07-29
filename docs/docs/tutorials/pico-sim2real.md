@@ -221,7 +221,8 @@ python scripts/view/view_recording.py \
 ```
 
 The viewer synchronizes camera video, measured and reference G1 poses, and
-optional hand and neck signals. See [Dataset Reference](../reference/dataset)
+optional hand and neck signals. See
+[Teleoperation Datasets](../reference/resources/teleoperation-datasets)
 for the stored fields.
 
 ## Common Problems

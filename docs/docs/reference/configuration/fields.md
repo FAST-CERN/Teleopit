@@ -2,9 +2,9 @@
 sidebar_position: 2
 ---
 
-# Config Reference
+# Configuration Fields
 
-Complete reference for all configurable fields.
+Complete reference for Teleopit's Hydra configuration fields.
 
 ## Top-Level Fields
 

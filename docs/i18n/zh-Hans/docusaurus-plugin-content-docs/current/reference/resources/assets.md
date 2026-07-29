@@ -1,11 +1,11 @@
 ---
-sidebar_position: 2
+sidebar_position: 1
 ---
 
-# 资源参考
+# 资产
 
 Teleopit 的 Git 仓库只保存代码，不保存大型机器人 mesh、运控模型和动作数据。
-[安装说明](../getting-started/installation)给出了每种用户场景最短的下载命令；本页提供
+[安装说明](../../getting-started/installation)给出了每种用户场景最短的下载命令；本页提供
 完整文件清单和维护者说明。
 
 ## 不入库的内容

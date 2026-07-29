@@ -123,4 +123,4 @@ num_steps=300
 realtime=true
 ```
 
-完整字段见[配置说明](../configuration/overview)。
+完整字段见[配置说明](../reference/configuration/overview)。

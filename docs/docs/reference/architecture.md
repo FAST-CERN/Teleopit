@@ -1,135 +1,158 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 ---
 
 # Architecture
 
-This page collects the runtime pipeline, supported boundaries and exact
-dimensions that are intentionally omitted from the task-based user guides.
+This page defines Teleopit's runtime pipelines, repository layout, supported
+technical surface, and public entry points.
 
 ## Pipeline
 
-```text
-InputProvider (BVH file / Pico4)
-    -> Retargeter (GMR)
-    -> ObservationBuilder (167D)
-    -> Controller (dual-input TemporalCNN ONNX)
-    -> Robot (MuJoCo sim or Unitree G1)
-```
+![Teleopit runtime pipelines](/img/diagrams/architecture-pipeline.svg)
 
-Offline/online inference is assembled by `teleopit/runtime/` and `teleopit/pipeline.py`. The hardware state machine runs through the process-isolated runtime in `teleopit/sim2real/mp/`. Training is provided by `train_mimic/`.
+The main tracking path converts BVH or live PICO body motion into a time-aligned
+G1 reference. `VelCmdObservationBuilder` combines that reference with robot
+state, and the dual-input TemporalCNN ONNX controller produces 29 joint offsets.
+The same observation and controller path drives MuJoCo and the real G1.
 
-## Full-Embodiment Pico Path
+Pico hand and active-vision paths are optional process-isolated workers. They
+reuse the same in-process `PicoBridge` receiver and never add fields to the 167D
+tracking-policy observation. A hand or neck failure must not stop G1 body
+control. These optional hardware paths are supported by onboard deployment;
+external-host Pico deployment supports whole-body control only.
 
-One Pico frame can feed three independent control paths:
+Host-policy deployment is independent from the Pico runtime. A separate host
+environment receives JPEG RGB and `observation.state(68)`, then returns
+canonical `float32[T,50]` action chunks over strict ZeroMQ/msgpack messages.
+The onboard validator and scheduler convert the body portion into a 36D
+reference for the existing motion tracker; host output never bypasses that
+tracker or becomes a direct motor command.
 
-```text
-Pico full-body tracking
-  -> GMR retargeting -> tracking policy -> G1 whole-body joints
-
-Pico hand tracking or controller input
-  -> Teleopit hand adapter -> somehand or gripper mapping -> LinkerHand L6/O6
-
-Pico HMD rotation + same-frame Spine3 rotation
-  -> relative yaw/pitch mapping -> OpenNeck
-```
-
-Whole-body control is the required path. Hands and OpenNeck are optional
-process-isolated workers for onboard deployment; their failure must not stop G1
-body control. External-host Pico deployment supports the whole-body path only.
-All active paths reuse the same in-process PicoBridge receiver.
-
-Host-served imitation policies use a second, independent deployment path:
-
-```text
-lerobot-teleopit host environment
-  policy server -> strict ZeroMQ/msgpack messages
-                       |
-Teleopit onboard environment
-  RealSense/state -> non-critical client worker -> validated action scheduler
-  -> existing 50 Hz motion tracker -> G1 joint-angle targets
-  -> dedicated LinkerHand O6 and OpenNeck workers
-```
-
-The host and onboard environments share semantic data and one identical
-`hand_calibration.json`; they do not import each other's Python packages. The
+The Teleopit and host environments share semantic data and one identical
+`hand_calibration.json`, but do not import each other's Python packages. The
 current client/server code and protocol tests define the network structure, so
-both repositories must change together during active development. Pico
-teleoperation and host-policy deployment also have separate run scripts and
-process assemblies.
+both repositories must change together when that protocol changes.
 
-## Code Structure
+## Runtime Boundaries
+
+- Offline core components communicate through `InProcessBus` without copying
+  array payloads.
+- Sim2real robot control, reference generation, camera, recording, hand, neck,
+  and host-policy client work are process-isolated where blocking or hardware
+  failure could disturb the 50 Hz control loop.
+- Local sim2real workers use localhost ZeroMQ and shared-memory video rings.
+- The external host-policy boundary uses msgpack and non-pickle float32 arrays.
+- Shared component contracts are `typing.Protocol` definitions in
+  `teleopit/interfaces.py`.
+
+## Repository Layout
 
 ```text
-configs / scripts
-    -> runtime
-    -> interfaces + pipeline state machines
-    -> adapters (inputs / retargeting / controller / robot / recording)
+teleopit/                              — Core inference and deployment package
+├── interfaces.py                     — Robot, controller, input and retargeting protocols
+├── pipeline.py                       — Thin offline simulation facade
+├── runtime/                          — Config/path resolution, factories and CLI validation
+├── configs/                          — Hydra runtime configuration
+├── bus/                              — In-process zero-copy publish/subscribe
+├── inputs/                           — BVH, PICO and realtime input adapters
+├── retargeting/gmr/                  — Self-contained whole-body GMR implementation
+├── controllers/                      — Observation builder and ONNX policy controller
+├── robots/                           — MuJoCo robot adapter
+├── sim/                              — 200 Hz PD / 50 Hz policy simulation loop
+├── sim2real/
+│   ├── mp/                           — Process supervisor, IPC and robot-control state machine
+│   ├── hands/                        — Optional LinkerHand drivers and input mapping
+│   └── neck/                         — Optional OpenNeck mapping and worker
+├── high_level_policy/                — Host protocol, frame transforms and action scheduler
+└── recording/                        — Sim2real dataset schema and recording workers
 
-train_mimic/scripts
-    -> train_mimic/app.py
-    -> single task registry / env builder / runner cfg
-    -> mjlab / rsl_rl
+train_mimic/                          — Training package
+├── app.py                            — Shared train/play/benchmark assembly
+├── tasks/tracking/                   — General-Tracking-G1 task and TemporalCNN model
+├── data/                             — Dataset construction and motion loading
+└── scripts/                          — Training, playback, benchmark and ONNX export
 
-train_mimic/scripts/data
-    -> train_mimic/data/dataset_builder.py
-    -> dataset_lib / motion_fk / convert_pkl_to_npz
+scripts/                              — User-facing runtime and maintenance entry points
+├── run/                              — Simulation, sim2real and recording commands
+├── setup/                            — Asset download and hardware setup
+├── render/                           — Offline video rendering
+├── view/                             — Recording review
+└── dev/                              — Validation and calibration utilities
+
+third_party/                          — Optional hardware SDKs and somehand
+tests/                                — Unit, protocol and integration tests
 ```
-
-## Core Boundaries
-
-| Module | Role |
-|--------|------|
-| `teleopit/interfaces.py` | Stable protocols: InputProvider, Retargeter, Controller, Robot, ObservationBuilder |
-| `teleopit/runtime/` | Config parsing, path normalization, component assembly, CLI validation |
-| `teleopit/pipeline.py` | Lightweight facade for offline sim |
-| `teleopit/sim2real/mp/` | Process-isolated sim2real state machine, IPC, and robot-control loop |
-| `teleopit/high_level_policy/` | Host-policy protocol, session-local frame transform, validation, and 30-to-50 Hz scheduler |
-| `teleopit/controllers/observation.py` | ObservationBuilder |
-| `teleopit/controllers/rl_policy.py` | Accepts dual-input ONNX whose observation dimension matches the runtime builder |
-| `train_mimic/app.py` | Shared train/play/benchmark assembly |
-| `train_mimic/tasks/tracking/config/` | Single task registration (`General-Tracking-G1`) |
-| `train_mimic/data/dataset_builder.py` | Sole official dataset construction entry |
 
 ## Technical Specifications
 
-| Spec | Value |
-|------|-------|
-| Supported robot | Unitree G1, 29 actuated joints |
+| Specification | Supported value |
+|---------------|-----------------|
+| Robot | Unitree G1 with 29 actuated joints |
 | Simulator | MuJoCo |
-| Motion retargeting | GMR (General Motion Retargeting) |
+| Whole-body retargeting | GMR (General Motion Retargeting) |
 | Policy / PD rates | 50 Hz / 200 Hz |
 | Training task | `General-Tracking-G1` |
 | Inference observation | `velcmd_history` (167D) |
-| ONNX signature | Dual-input `obs` (167D) + `obs_history` |
+| ONNX signature | Dual input: `obs` (167D) + `obs_history` |
 | Policy action | 29D joint offsets from `default_dof_pos` |
-| Actor/Critic | TemporalCNN (2048, 1024, 512, 256, 128) |
-| Training sampling | Default `rewind`; also supports `uniform`; playback uses `start`; benchmark pins exact clips and disables clip-end resampling |
-| Training `window_steps` | `[0]` |
-| Data format | Minimal recursive HDF5 shards (`shard_*.h5`) |
-| Optional hands | LinkerHand L6 or O6, gripper or Pico hand-pose input |
+| Actor / critic | TemporalCNN (2048, 1024, 512, 256, 128) |
+| Training sampling | `rewind` by default; `uniform` supported; playback uses `start`; benchmark pins exact clips and disables clip-end resampling |
+| Training window | `window_steps=[0]` |
+| Distributed motion data | Minimal recursive HDF5 `shard_*.h5` files |
+| Optional hands | LinkerHand L6/O6 with gripper or PICO hand-pose input |
 | Optional active vision | OpenNeck yaw/pitch in physical degrees |
 | Host-policy observation | JPEG RGB + `observation.state(68)` |
-| Host-policy action | `float32[T,50]` canonical reference at 30 Hz |
+| Host-policy action | `float32[T,50]`, 30 Hz source horizon, `T` in `[1,50]` |
 | Host-policy body control | 36D root/joint reference through the existing 50 Hz motion tracker |
 
 ## Constraints
 
-- `controller.policy_path` must be explicitly provided and the file must exist
-- Offline BVH runs require explicit `input.bvh_file`
-- `viewers` is the sole viewer configuration entry
-- Observation/ONNX dimension mismatch causes immediate startup error
-- sim2real also requires a dual-input ONNX whose observation dimension matches the runtime builder
-- Host-policy message-envelope or schema mismatches are rejected while the robot remains in `STANDING`
-- Host action chunks are validated and interpolated onboard; the host cannot bypass the motion tracker or send motor commands
-- Policy entry remains internal to `STANDING` only while one host session waits for its first valid chunk; that chunk enters `POLICY` directly, with no candidate alignment, entry Kp ramp, or second session/reset, and the 50 Hz limiter starts from the measured robot reference captured at session start
-- Temporal root, yaw, and joint-reference discontinuities are accepted at chunk boundaries and inside chunks, then rate-limited at the 50 Hz scheduler output so recorded pause/resume transitions remain usable
+- `controller.policy_path` must be explicit and point to an existing file.
+- Offline BVH runs require an explicit, existing `input.bvh_file`.
+- `viewers` is the only viewer configuration key.
+- Observation definitions and ONNX signatures must match exactly; startup fails
+  instead of padding or trimming data.
+- `default_dof_pos` must come from the selected robot's default standing angles.
+- Sim2real requires the same dual-input observation contract used in simulation.
+- Host message-envelope or schema mismatches are rejected while the robot
+  remains in `STANDING`. Shape, finiteness, session, sequence, quaternion,
+  staleness, and safety violations reject the whole action chunk.
+- Host actions are validated, scheduled, and rate-limited onboard. The host
+  cannot bypass the motion tracker or send G1 motor commands.
+- Policy entry remains an internal `STANDING` flow while one host session waits
+  for its first valid chunk. That chunk enters `POLICY` directly, with no
+  candidate alignment, entry Kp ramp, or second session/reset. The 50 Hz limiter
+  starts from the measured robot reference captured at session start.
+- Temporal root, yaw, and joint-reference discontinuities are accepted at chunk
+  boundaries and inside chunks, then rate-limited at the 50 Hz scheduler output
+  so recorded pause/resume transitions remain usable.
+- PICO input, RealSense preview, recording, hand, and neck failures are
+  non-critical; the Unitree remote and robot-control loop remain available.
 
-## Public Surface
+## Public Entry Points
 
-**Stable run modes:** offline sim2sim, offline sim2real playback, Pico4 sim2sim,
-G1 sim2real, independent host-policy G1 sim2real
+Supported run modes are offline sim2sim, offline sim2real playback, PICO
+sim2sim, PICO G1 sim2real, and independent host-policy G1 sim2real.
 
-**Stable training entry points:** `train.py`, `play.py`, `benchmark.py`, `save_onnx.py`
+Runtime commands:
 
-**Stable data entry points:** `build_dataset.py`, `precompute_dataset.py`
+- `scripts/run/run_sim.py` — offline BVH and live PICO sim2sim
+- `scripts/run/run_sim2real.py` — BVH or PICO G1 sim2real
+- `scripts/run/run_high_level_policy_sim2real.py` — independent host-policy G1 deployment
+- `scripts/run/record_pico_motion.py` — record retargeted motion clips from PICO
+- `scripts/render/render_sim.py` — render mocap, retargeting, and sim2sim videos
+- `scripts/view/view_recording.py` — review synchronized sim2real recordings
+
+Training and data commands:
+
+- `train_mimic/scripts/train.py`, `play.py`, `benchmark.py`, `save_onnx.py`
+- `train_mimic/scripts/data/build_dataset.py`
+- `train_mimic/scripts/data/precompute_dataset.py`
+
+Public Python surfaces:
+
+- Protocols in `teleopit/interfaces.py`
+- `TeleopPipeline`
+- `VelCmdObservationBuilder`
+- `RLPolicyController`

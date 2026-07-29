@@ -41,7 +41,7 @@ command below. Pointing training at the original `data/datasets` directory is
 an error, not a supported shortcut.
 
 For custom BVH, PKL, NPZ or Pico-recorded data, see
-[Dataset Reference](../reference/dataset).
+[Motion Datasets](../reference/resources/motion-datasets).
 
 ## 2. Choose the Robot Model
 
@@ -191,5 +191,4 @@ Here `--num_envs` is per process, so the total scales with the world size.
 | Training is unexpectedly slow | Check that PyTorch detects CUDA and that the training device is a CUDA GPU |
 
 For task internals and model dimensions, see
-[Architecture](../reference/architecture). For failure-specific guidance, see
-[Training Troubleshooting](../reference/training-troubleshooting).
+[Architecture](../reference/architecture).

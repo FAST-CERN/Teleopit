@@ -2,9 +2,9 @@
 sidebar_position: 2
 ---
 
-# 配置参考
+# 配置字段
 
-本页列出 Teleopit 所有可配置字段及其含义。
+本页列出 Teleopit 的全部 Hydra 配置字段。
 
 ## 顶层字段
 

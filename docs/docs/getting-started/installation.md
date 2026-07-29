@@ -91,8 +91,8 @@ python scripts/setup/download_assets.py \
 
 The inference bundle creates `track.onnx`, the G1 model files, GMR files and a
 sample BVH under their expected project paths. See
-[Asset Reference](../reference/assets) for the complete inventory and asset
-group mapping.
+[Assets](../reference/resources/assets) for the complete inventory
+and asset group mapping.
 
 ## 5. Additional Setup for a Physical G1
 
@@ -104,8 +104,8 @@ bash scripts/setup/setup_g1_bridge.sh
 ```
 
 The bridge is required for both Pico and BVH control on a real G1. See
-[G1 Bridge SDK](../reference/g1-bridge-sdk) if the build or robot connection
-fails.
+[Companion Projects](../reference/companion-projects#g1-bridge-sdk) if the
+build or robot connection fails.
 
 ## 6. Optional Hardware
 

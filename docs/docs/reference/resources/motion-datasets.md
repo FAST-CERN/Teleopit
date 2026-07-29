@@ -1,16 +1,13 @@
 ---
-sidebar_position: 3
+sidebar_position: 2
 ---
 
-# Dataset Reference
+# Motion Datasets
 
-Teleopit uses two separate dataset families:
-
-- **motion datasets** provide reference motion for controller training, and
-- **sim2real episode recordings** store synchronized robot state, references
-  and camera video for later review or external policy work.
-
-They have different schemas and are not interchangeable.
+Motion datasets provide reference motion for controller training. The
+distributable format and the precomputed training format are separate; training
+accepts only the latter. For synchronized robot, reference and camera
+recordings, see [Teleoperation Datasets](teleoperation-datasets).
 
 ## Download Pre-Built Dataset (Recommended)
 
@@ -179,60 +176,3 @@ python train_mimic/scripts/data/check_motion_npz_fk.py \
 ```
 
 Recommended thresholds: `pos_max < 1e-3 m`, `quat_mean < 0.05 rad`, `quat_p95 < 0.10 rad`.
-
-## Sim2Real Episode Recordings
-
-The recording runtime writes an editable dataset rather than one self-contained
-HDF5 file:
-
-```text
-data/recordings/sim2real_hdf5/
-├── schema.json
-├── episodes.jsonl
-├── data/
-│   └── episode_000000.h5
-└── videos/
-    └── d435i_rgb/
-        └── episode_000000.mp4
-```
-
-`schema.json` defines the dataset FPS, `robot_type`, `hand_type`, `neck_type`
-and every feature's shape, dtype, names and groups. The hardware types must
-match the active runtime configuration.
-
-`episodes.jsonl` is the editable episode manifest. Each line maps one episode
-to its HDF5 and MP4 files and stores the task prompt. Task text is not copied
-into HDF5 attributes.
-
-Each HDF5 file contains only frame-aligned arrays:
-
-| Field | Shape | Meaning |
-|-------|-------|---------|
-| `frame_index` | scalar | Camera/action frame index |
-| `timestamp` | scalar | Monotonic timestamp in seconds |
-| `observation.state` | `(68,)` | G1 joint state, base orientation/angular velocity and projected gravity |
-| `observation.mode` | scalar | `STANDING`, `MOCAP`, `ARMS` or paused mocap code |
-| `action` | `(36,)` | Root pose plus 29-joint reference consumed by the motion tracker |
-| `action.hand` | `(12,)`, optional | Left/right LinkerHand target when hand control is enabled |
-| `action.neck` | `(2,)`, optional | Mechanically clamped OpenNeck yaw/pitch target in degrees |
-
-Camera RGB is stored only in the MP4 sidecar; HDF5 does not contain a duplicate
-raw image dataset. Optional action fields appear exactly when the matching
-hardware is enabled.
-
-The recorder commits the HDF5/video files before appending the manifest entry.
-An interrupted, uncommitted episode is removed on the next recording-worker
-startup and does not consume an episode index. An existing incompatible
-`schema.json` stops only the non-critical recording worker.
-
-Review the dataset with:
-
-```bash
-python scripts/view/view_recording.py \
-    --recording data/recordings/sim2real_hdf5
-```
-
-The reviewer validates manifest paths, HDF5 shapes/dtypes/finite values and MP4
-alignment before playback. Measured root XYZ is not recorded, so its observed
-robot view is anchored to the reference root position; global root translation
-cannot be evaluated from this format.

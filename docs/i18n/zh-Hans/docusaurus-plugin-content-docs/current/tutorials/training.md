@@ -39,7 +39,7 @@ python train_mimic/scripts/data/precompute_dataset.py \
 `data/datasets` 直接传给训练会报错，这不是支持的快捷方式。
 
 自定义 BVH、PKL、NPZ 或 Pico 录制数据的处理方法见
-[数据集参考](../reference/dataset)。
+[动作数据集](../reference/resources/motion-datasets)。
 
 ## 2. 选择机器人模型
 
@@ -181,5 +181,4 @@ torchrun \
 | 启动加载时内存不足 | 减少参与训练的 precomputed shard，或增加内存 |
 | 训练速度异常缓慢 | 检查 PyTorch 是否识别 CUDA，并确认训练设备实际使用 CUDA GPU |
 
-任务内部结构和模型维度见[系统架构](../reference/architecture)，具体训练故障见
-[训练问题排查](../reference/training-troubleshooting)。
+任务内部结构和模型维度见[系统架构](../reference/architecture)。

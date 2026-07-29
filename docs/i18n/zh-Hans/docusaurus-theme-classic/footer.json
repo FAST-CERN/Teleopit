@@ -15,9 +15,9 @@
     "message": "教程",
     "description": "The label of footer link with label=Tutorials"
   },
-  "link.item.label.Configuration": {
-    "message": "配置",
-    "description": "The label of footer link with label=Configuration"
+  "link.item.label.Reference": {
+    "message": "参考资料",
+    "description": "The label of footer link with label=Reference"
   },
   "link.item.label.GitHub": {
     "message": "GitHub",

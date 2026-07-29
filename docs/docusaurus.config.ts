@@ -72,7 +72,7 @@ const config: Config = {
           items: [
             {label: 'Getting Started', to: '/getting-started/installation'},
             {label: 'Tutorials', to: '/tutorials/offline-sim2sim'},
-            {label: 'Configuration', to: '/configuration/overview'},
+            {label: 'Reference', to: '/reference/configuration/overview'},
           ],
         },
         {

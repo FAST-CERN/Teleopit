@@ -18,5 +18,9 @@
   "sidebar.docsSidebar.category.Reference": {
     "message": "参考资料",
     "description": "The label for category 'Reference' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Resources": {
+    "message": "资源",
+    "description": "The label for category 'Resources' in sidebar 'docsSidebar'"
   }
 }

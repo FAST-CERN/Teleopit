@@ -205,8 +205,8 @@ python scripts/view/view_recording.py \
     --recording data/recordings/sim2real_hdf5
 ```
 
-查看器会同步显示相机视频、G1 实测与参考姿态，以及可选的手部和头部信号。字段说明见
-[数据集参考](../reference/dataset)。
+查看器会同步显示相机视频、G1 实测与参考姿态，以及可选的手部和头部信号。字段说明
+见[遥操数据集](../reference/resources/teleoperation-datasets)。
 
 ## 常见问题
 

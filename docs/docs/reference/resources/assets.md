@@ -1,11 +1,11 @@
 ---
-sidebar_position: 2
+sidebar_position: 1
 ---
 
-# Asset Reference
+# Assets
 
 Teleopit's Git repository contains code, not large robot meshes, policies or
-motion data. [Installation](../getting-started/installation) shows the shortest
+motion data. [Installation](../../getting-started/installation) shows the shortest
 download command for each user workflow; this page is the complete inventory
 and maintainer reference.
 

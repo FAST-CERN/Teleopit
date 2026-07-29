@@ -76,4 +76,4 @@ Teleopit does not silently fix misconfigurations:
 
 When you encounter a configuration error, look for **which two components have inconsistent definitions**.
 
-For the complete field reference, see [Config Reference](config-reference).
+For the complete field reference, see [Configuration Fields](fields).
