@@ -89,8 +89,8 @@ python scripts/setup/download_assets.py \
     --only robots gmr ckpt bvh
 ```
 
-The inference bundle creates `track.onnx`, the canonical G1 model, GMR files and
-a sample BVH under their expected project paths. See
+The inference bundle creates `track.onnx`, the G1 model files, GMR files and a
+sample BVH under their expected project paths. See
 [Asset Reference](../reference/assets) for the complete inventory and asset
 group mapping.
 

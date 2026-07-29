@@ -41,7 +41,30 @@ python train_mimic/scripts/data/precompute_dataset.py \
 自定义 BVH、PKL、NPZ 或 Pico 录制数据的处理方法见
 [数据集参考](../reference/dataset)。
 
-## 2. 先做短时间冒烟测试
+## 2. 选择机器人模型
+
+使用 `--robot_xml` 指定训练所用的 MuJoCo 模型。如果省略该参数，默认使用：
+
+```text
+assets/robots/unitree_g1/g1_29dof.xml
+```
+
+当前 `robots` 资源包提供了以下可以直接使用的示例：
+
+| 模型 XML | 配置 |
+|----------|------|
+| `assets/robots/unitree_g1/g1_29dof.xml` | 基础 G1 模型，也是默认值 |
+| `assets/robots/unitree_g1/g1_29dof_dex3.xml` | 带 Dex3 手部几何和惯性参数的 G1 |
+| `assets/robots/unitree_g1/g1_29dof_avp_o6.xml` | 带 AVP 主动视觉和 O6 手部模型的 G1 |
+
+这个表只是当前资源包随附的模型示例，不是写死的模型白名单。只要关节和刚体定义与所选
+训练任务配置及数据集兼容，也可以传入其他模型 XML。
+
+下面“开始完整训练”的主命令会显式选择基础模型，便于直接复制。训练其他模型时，
+替换 `--robot_xml` 后的路径即可。其他命令不再重复该参数；回放和 benchmark 会从
+所选任务配置中加载机器人。
+
+## 3. 先做短时间冒烟测试
 
 开始长时间训练前，先确认数据集、仿真器和日志工具能够一起工作：
 
@@ -55,10 +78,11 @@ python train_mimic/scripts/train.py \
 只要环境能够持续 step、终端输出 loss，并且
 `logs/rsl_rl/g1_general_tracking/` 下生成新的运行目录，这项检查就通过了。
 
-## 3. 开始完整训练
+## 4. 开始完整训练
 
 ```bash
 python train_mimic/scripts/train.py \
+    --robot_xml assets/robots/unitree_g1/g1_29dof.xml \
     --num_envs 4096 \
     --max_iterations 30000 \
     --motion_file data/datasets_precomputed
@@ -70,7 +94,7 @@ python train_mimic/scripts/train.py \
 `--max_iterations` 表示继续训练多少次。例如从 `model_12000.pt` 恢复并设置
 `--max_iterations 18000`，最终会训练到第 30000 次。
 
-## 4. 在仿真中查看 checkpoint
+## 5. 在仿真中查看 checkpoint
 
 ```bash
 python train_mimic/scripts/play.py \
@@ -80,7 +104,7 @@ python train_mimic/scripts/play.py \
 
 回放会从每段动作开头开始，并关闭训练噪声。导出前先用它排除明显不稳定的模型。
 
-## 5. 运行 Benchmark
+## 6. 运行 Benchmark
 
 ```bash
 python train_mimic/scripts/benchmark.py \
@@ -97,7 +121,7 @@ Benchmark 会对每个长度足够的 clip 执行一次确定性的 10 秒 rollo
 
 结果会保存为文本摘要、JSON、逐 clip CSV 和逐 rollout CSV。
 
-## 6. 导出 ONNX
+## 7. 导出 ONNX
 
 ```bash
 python train_mimic/scripts/save_onnx.py \

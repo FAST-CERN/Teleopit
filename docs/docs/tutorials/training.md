@@ -43,7 +43,33 @@ an error, not a supported shortcut.
 For custom BVH, PKL, NPZ or Pico-recorded data, see
 [Dataset Reference](../reference/dataset).
 
-## 2. Run a Short Smoke Test
+## 2. Choose the Robot Model
+
+Use `--robot_xml` to select the MuJoCo model used by training. If the argument
+is omitted, it defaults to:
+
+```text
+assets/robots/unitree_g1/g1_29dof.xml
+```
+
+The current `robots` asset bundle includes these ready-to-use examples:
+
+| Model XML | Setup |
+|-----------|-------|
+| `assets/robots/unitree_g1/g1_29dof.xml` | Base G1 model and the default |
+| `assets/robots/unitree_g1/g1_29dof_dex3.xml` | G1 with Dex3 hand geometry and inertial properties |
+| `assets/robots/unitree_g1/g1_29dof_avp_o6.xml` | G1 with AVP active vision and O6 hand models |
+
+This table describes the models shipped in the current asset bundle; it is not
+a hard-coded model allowlist. Another XML can be passed when its joint and body
+definitions are compatible with the selected task configuration and dataset.
+
+The full-training command below explicitly selects the base model as a copyable
+example. Replace that path with the model you want to train. The other commands
+do not repeat this option; playback and benchmark load the robot from the
+selected task configuration.
+
+## 3. Run a Short Smoke Test
 
 Before starting a long job, verify that the dataset, simulator and logger work
 together:
@@ -58,10 +84,11 @@ python train_mimic/scripts/train.py \
 The test is successful when environments step, losses are reported and a run
 directory appears under `logs/rsl_rl/g1_general_tracking/`.
 
-## 3. Start a Full Run
+## 4. Start a Full Run
 
 ```bash
 python train_mimic/scripts/train.py \
+    --robot_xml assets/robots/unitree_g1/g1_29dof.xml \
     --num_envs 4096 \
     --max_iterations 30000 \
     --motion_file data/datasets_precomputed
@@ -73,7 +100,7 @@ TensorBoard; choose `--logger wandb` or `--logger swanlab` when required.
 `--max_iterations` means additional iterations. For example, resuming
 `model_12000.pt` with `--max_iterations 18000` continues to iteration 30000.
 
-## 4. Watch the Checkpoint in Simulation
+## 5. Watch the Checkpoint in Simulation
 
 ```bash
 python train_mimic/scripts/play.py \
@@ -84,7 +111,7 @@ python train_mimic/scripts/play.py \
 Playback starts clips from their beginning and removes training noise. Use it
 to catch an obviously unstable policy before exporting.
 
-## 5. Run the Benchmark
+## 6. Run the Benchmark
 
 ```bash
 python train_mimic/scripts/benchmark.py \
@@ -102,7 +129,7 @@ clip. It reports:
 
 Results are written as a text summary, JSON, per-clip CSV and per-rollout CSV.
 
-## 6. Export ONNX
+## 7. Export ONNX
 
 ```bash
 python train_mimic/scripts/save_onnx.py \

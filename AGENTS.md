@@ -97,7 +97,7 @@ train_mimic/              # Training package
 ### Sim2Sim Pipeline
 - Policy runs at 50Hz, PD control at 200Hz (`decimation=4`, `sim_dt=0.005`)
 - Action flow: `compute_action()` returns raw action → `get_target_dof_pos()` applies clip `[-10, 10]`, scale, and `default_dof_pos`
-- Must use `assets/robots/unitree_g1/g1_29dof.xml` for training, sim2sim, dataset FK, and retargeting; it is the canonical G1 XML entry point
+- `assets/robots/unitree_g1/g1_29dof.xml` is the default G1 XML, not a model allowlist; training can select another task-compatible model with `--robot_xml`, and each workflow should keep its robot joint/body definitions consistent
 
 ### Multi-Viewer Support
 `SimulationLoop` supports multiple simultaneous viewer windows controlled by the `viewers` config:
@@ -277,9 +277,9 @@ python train_mimic/scripts/save_onnx.py --checkpoint logs/rsl_rl/g1_general_trac
 
 ### External Assets
 - Do not commit robot meshes, datasets, checkpoints, or demo media to Git; use `scripts/setup/download_assets.py`
-- `assets/robots/unitree_g1/g1_29dof.xml` and its meshes are the canonical G1 robot model assets; they are downloaded from the `robots` asset group and are not tracked in Git
+- G1 XML variants and their meshes are downloaded under `assets/robots/unitree_g1/` by the `robots` asset group and are not tracked in Git; `g1_29dof.xml` is the default
 - `teleopit/retargeting/gmr/assets/` is gitignored; downloaded at runtime
-- `train_mimic/assets/` is no longer tracked; FK tooling reuses `assets/robots/unitree_g1/g1_29dof.xml`
+- `train_mimic/assets/` is no longer tracked; FK tooling uses the robot assets under `assets/robots/`, with `assets/robots/unitree_g1/g1_29dof.xml` as the default G1 model
 - `third_party/linkerhand-python-sdk` and `third_party/somehand` support optional LinkerHand sim2real control
 - Run `python scripts/dev/check_large_tracked_files.py` before pushing
 
@@ -352,4 +352,4 @@ pytest tests/ -v
 ## Known Issues
 
 1. `lafan1-resolved` retargeting is still broken because it uses a different BVH skeleton layout.
-2. Legacy downloaded GMR XMLs under `teleopit/retargeting/gmr/assets/unitree_g1/` are not the project entry point; use `assets/robots/unitree_g1/g1_29dof.xml`.
+2. Legacy downloaded GMR XMLs under `teleopit/retargeting/gmr/assets/unitree_g1/` are separate retargeting assets, not replacements for the runtime robot bundle under `assets/robots/unitree_g1/`; `g1_29dof.xml` is the default runtime G1 model.

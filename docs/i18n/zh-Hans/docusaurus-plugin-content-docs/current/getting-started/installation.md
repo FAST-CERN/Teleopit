@@ -87,7 +87,7 @@ python scripts/setup/download_assets.py \
     --only robots gmr ckpt bvh
 ```
 
-推理资源包会把 `track.onnx`、标准 G1 模型、GMR 文件和示例 BVH 放到代码默认查找
+推理资源包会把 `track.onnx`、G1 模型文件、GMR 文件和示例 BVH 放到代码默认查找
 的位置。完整文件清单和资源分组见[资源参考](../reference/assets)。
 
 ## 5. 连接真实 G1 前的额外安装

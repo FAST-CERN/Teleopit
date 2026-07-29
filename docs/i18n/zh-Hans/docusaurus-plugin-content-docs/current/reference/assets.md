@@ -20,13 +20,21 @@ Teleopit 的 Git 仓库只保存代码，不保存大型机器人 mesh、运控�
 | 资源组 | 下载后的路径 | 用途 |
 |--------|--------------|------|
 | `ckpt` | `track.onnx`、`track.pt` | 可直接运行的推理模型和对应 PyTorch checkpoint |
-| `robots` | `assets/robots/unitree_g1/g1_29dof.xml` 与 mesh | 训练、MuJoCo 推理、GMR 和数据集 FK |
+| `robots` | `assets/robots/` 下的机器人 XML 变体与 mesh | 训练、MuJoCo 推理、GMR 和数据集 FK |
 | `gmr` | `teleopit/retargeting/gmr/assets/` | 动作重定向模型和 IK 配置 |
 | `bvh` | `data/sample_bvh/*.bvh` | 安装检查和仿真教程使用的示例动作 |
 | `data` | `data/datasets/<dataset>/shard_*.h5` | 用于分发的精简动作数据；训练前需要预计算 |
 
-`assets/robots/unitree_g1/g1_29dof.xml` 是项目唯一标准的 G1 入口。GMR 资源目录中的
-XML 不能替代它。
+当前 G1 机器人资源包包括：
+
+| 模型 XML | 配置 |
+|----------|------|
+| `assets/robots/unitree_g1/g1_29dof.xml` | 基础 G1 模型，也是默认值 |
+| `assets/robots/unitree_g1/g1_29dof_dex3.xml` | 带 Dex3 手部几何和惯性参数的 G1 |
+| `assets/robots/unitree_g1/g1_29dof_avp_o6.xml` | 带 AVP 主动视觉和 O6 手部模型的 G1 |
+
+默认值不是模型白名单。训练可以通过 `--robot_xml` 选择其他与任务兼容的 XML。GMR
+资源目录中的 XML 属于对应的重定向配置，与运行时机器人资源包是两套不同资源。
 
 ## 远程仓库
 

@@ -21,13 +21,23 @@ and maintainer reference.
 | Group | Local result | Used for |
 |-------|--------------|----------|
 | `ckpt` | `track.onnx`, `track.pt` | Ready-to-run inference and the matching PyTorch checkpoint |
-| `robots` | `assets/robots/unitree_g1/g1_29dof.xml` and meshes | Training, MuJoCo inference, GMR and dataset FK |
+| `robots` | Robot XML variants and meshes under `assets/robots/` | Training, MuJoCo inference, GMR and dataset FK |
 | `gmr` | `teleopit/retargeting/gmr/assets/` | Retargeting models and IK configuration |
 | `bvh` | `data/sample_bvh/*.bvh` | Sample motions used by the installation check and simulation tutorial |
 | `data` | `data/datasets/<dataset>/shard_*.h5` | Minimal distributed motion datasets; precompute before training |
 
-The file `assets/robots/unitree_g1/g1_29dof.xml` is the canonical G1 entry
-point. XML files inside the GMR asset directory are not replacements for it.
+The current G1 robot bundle includes:
+
+| Model XML | Setup |
+|-----------|-------|
+| `assets/robots/unitree_g1/g1_29dof.xml` | Base G1 model and the default |
+| `assets/robots/unitree_g1/g1_29dof_dex3.xml` | G1 with Dex3 hand geometry and inertial properties |
+| `assets/robots/unitree_g1/g1_29dof_avp_o6.xml` | G1 with AVP active vision and O6 hand models |
+
+The default is not a model allowlist. Training can select another
+task-compatible XML with `--robot_xml`. XML files in the GMR asset directory
+belong to their retargeting configurations and are separate from the runtime
+robot bundle.
 
 ## Repositories
 
