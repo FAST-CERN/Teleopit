@@ -128,13 +128,3 @@ realtime=true
 ```
 
 For every available field, see [Configuration](../configuration/overview).
-
-## Common Problems
-
-| Symptom | Check |
-|---------|-------|
-| Policy path error | Confirm that `track.onnx` exists or pass the path to your exported ONNX |
-| Missing XML, mesh or GMR config | Download `robots` and `gmr` assets |
-| Motion is rotated or distorted from the first view | Confirm `input.bvh_format` matches the file's skeleton |
-| Robot falls only in `sim2sim` | Confirm the ONNX was exported for the current 167D `velcmd_history` observation |
-| EGL/OpenGL error | Try the interactive viewer on a desktop, or configure EGL before headless rendering |

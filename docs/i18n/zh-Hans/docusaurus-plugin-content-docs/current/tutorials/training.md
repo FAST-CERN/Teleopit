@@ -153,10 +153,9 @@ torchrun \
 | 现象 | 检查内容 |
 |------|----------|
 | Loader 提示数据集是 minimal 格式 | 运行 `precompute_dataset.py`，并使用它的输出目录 |
-| 显存不足 | 降低 `--num_envs` |
+| 显存不足 | 降低 `--num_envs`，或使用更少的预计算数据 shard |
 | 启动加载时内存不足 | 减少参与训练的 precomputed shard，或增加内存 |
-| 导出的 ONNX 无法通过 167D 检查 | 使用当前版本的 `save_onnx.py` 和 `--history_length 10` 重新导出 |
-| Benchmark 跳过部分 clip | 被跳过的 clip 比配置的评测时长更短 |
+| 训练速度异常缓慢 | 检查 PyTorch 是否识别 CUDA，并确认训练设备实际使用 CUDA GPU |
 
 任务内部结构和模型维度见[系统架构](../reference/architecture)，具体训练故障见
 [训练问题排查](../reference/training-troubleshooting)。

@@ -159,10 +159,9 @@ Here `--num_envs` is per process, so the total scales with the world size.
 | Symptom | What to check |
 |---------|---------------|
 | Loader says the dataset is minimal | Run `precompute_dataset.py` and use its output directory |
-| Out of GPU memory | Lower `--num_envs` |
+| Out of GPU memory | Lower `--num_envs` or train with fewer precomputed data shards |
 | Out of system memory during startup | Train on fewer precomputed shards or add RAM |
-| Exported ONNX fails the 167D check | Export with `save_onnx.py` and `--history_length 10` from the current task |
-| Benchmark skips clips | The skipped clips are shorter than the configured benchmark duration |
+| Training is unexpectedly slow | Check that PyTorch detects CUDA and that the training device is a CUDA GPU |
 
 For task internals and model dimensions, see
 [Architecture](../reference/architecture). For failure-specific guidance, see

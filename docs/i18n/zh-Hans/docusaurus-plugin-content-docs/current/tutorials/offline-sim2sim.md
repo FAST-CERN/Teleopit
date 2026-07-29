@@ -124,13 +124,3 @@ realtime=true
 ```
 
 完整字段见[配置说明](../configuration/overview)。
-
-## 常见问题
-
-| 现象 | 检查内容 |
-|------|----------|
-| 运控模型路径报错 | 确认 `track.onnx` 存在，或传入自己导出的 ONNX 路径 |
-| 缺少 XML、mesh 或 GMR 配置 | 下载 `robots` 和 `gmr` 资源组 |
-| 从 `mocap` 视图开始动作就旋转或变形 | 确认 `input.bvh_format` 与文件骨架一致 |
-| 只有 `sim2sim` 中机器人会摔倒 | 确认 ONNX 使用当前 167D `velcmd_history` 观测导出 |
-| EGL/OpenGL 报错 | 在桌面环境使用交互 Viewer，或先配置 EGL 再进行无头渲染 |

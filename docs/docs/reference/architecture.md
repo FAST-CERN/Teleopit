@@ -35,8 +35,9 @@ Pico HMD rotation + same-frame Spine3 rotation
 ```
 
 Whole-body control is the required path. Hands and OpenNeck are optional
-process-isolated workers; their failure must not stop G1 body control. All
-three paths reuse the same in-process PicoBridge receiver.
+process-isolated workers for onboard deployment; their failure must not stop G1
+body control. External-host Pico deployment supports the whole-body path only.
+All active paths reuse the same in-process PicoBridge receiver.
 
 Host-served imitation policies use a second, independent deployment path:
 

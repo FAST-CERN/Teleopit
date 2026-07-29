@@ -8,11 +8,20 @@ Use Pico tracking to control a simulated G1 before connecting a physical robot.
 Do not skip this step: it lets you fix headset, network and body-tracking
 problems without putting hardware at risk.
 
+## Supported Headsets
+
+- Pico 4
+- Pico 4 Ultra
+- Pico 4 Ultra Enterprise
+- Pico 4 Pro
+
+All headsets must have full-body tracking enabled and run a Pico system version
+that supports the current body-tracking interface.
+
 ## Before You Start
 
 You need:
 
-- a Pico 4 or Pico 4 Ultra with full-body tracking,
 - the headset and the computer running Teleopit on the same network,
 - the `pico4` install profile and `robots gmr ckpt bvh` assets, and
 - a working result from
@@ -66,35 +75,29 @@ python scripts/run/run_sim.py \
 The robot intentionally starts in `STANDING`; live body tracking does not take
 control until you ask for it.
 
-## 4. Complete the First VR Session
+## 4. Use the Simulation State Machine
 
-1. Stand in a comfortable neutral pose and wait for stable tracking.
-2. Press `Y` on the keyboard to enter `MOCAP`.
-3. Move slowly at first and confirm that the simulated G1 follows.
-4. Press `A` to pause, then press `A` again to resume.
-5. Press `X` to return to `STANDING`.
+![Pico simulation control state machine](/img/diagrams/pico-sim-state-machine.svg)
 
-| Key | Action |
-|-----|--------|
-| `Y` | Start whole-body control (`MOCAP`) |
-| `A` | Pause or resume the current mocap session |
-| `B` | Switch between `MOCAP` and arm-only control (`ARMS`) |
-| `X` | Stop VR control and return to `STANDING` |
-| `Q` | Quit |
+Labels beginning with **Keyboard** refer to the computer keyboard. Labels
+beginning with **Pico controller** refer to the VR controllers. The Unitree G1
+remote is not used in simulation.
 
-The modes are simple:
+Stand in a comfortable neutral pose and wait for stable tracking before using
+**Keyboard** `Y` to enter `MOCAP`. Move slowly at first. Use **Keyboard** `X` to
+end the VR session and return to `STANDING`; **Keyboard** `Q` quits the
+simulation from any state.
 
-- `STANDING`: the robot waits in its standing controller.
-- `MOCAP`: the whole body follows the operator.
-- `ARMS`: the body, waist and legs stay in the standing pose while both arms
-  continue to follow the operator.
+`MOCAP` follows the whole body. `ARMS` keeps the body, waist and legs in the
+standing pose while both arms continue to follow. `PAUSED` holds the current
+reference and returns to the previous `MOCAP` or `ARMS` state when resumed.
 
 Each new `STANDING -> MOCAP` session recalibrates the live root pose. You may
 turn to a new heading while standing, then enter `MOCAP` again.
 
 :::tip Pausing is not the same as stopping VR control
-`A` freezes and resumes the current mocap pose. Use `X` when you want to end the
-session and return to `STANDING`.
+Keyboard or Pico controller `A` freezes and resumes the current mocap pose.
+Use Keyboard `X` when you want to end the session and return to `STANDING`.
 :::
 
 ## Choose the Viewer Layout
@@ -150,14 +153,9 @@ input.pico4_timeout=30
 
 ## Common Problems
 
-| Symptom | What to do |
-|---------|------------|
-| `ImportError: pico_bridge` | Install the `pico4` profile again |
-| Startup reports an old pico-bridge | Reinstall the profile so version 0.2.1 is used |
-| No body frames arrive | Open the headset app, enable full-body tracking and check that UDP port 63901 is reachable |
-| Discovery advertises the wrong address | Set `input.bridge_advertise_ip` to the computer address visible from the headset |
-| G1 stays still in the viewer | Wait for stable tracking, then press `Y` |
-| G1 follows only with its arms | Press `B` to leave `ARMS` and return to `MOCAP` |
+| Problem | Solution |
+|---------|----------|
+| No body frames arrive | Upgrade the Pico headset to the latest available system version, restart it, enable full-body tracking again, and rerun `scripts/dev/test_pico_bridge.py --no-video` |
 
 Once this workflow is reliable, continue with
 [VR Teleoperation on Unitree G1](pico-sim2real).

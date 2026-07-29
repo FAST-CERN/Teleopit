@@ -7,10 +7,11 @@ slug: /
 
 > **Looking for Chinese docs?** [中文文档点此进入](https://BotRunner64.github.io/Teleopit/zh-Hans/)
 
-Teleopit is a **full-embodiment teleoperation system for the Unitree G1**.
-With a Pico 4 or Pico 4 Ultra, an operator can drive the robot's whole-body
-motion in real time. Optional LinkerHand hands reproduce hand gestures, and an
-optional OpenNeck gimbal turns head motion into active camera control.
+Teleopit is a **full-embodiment humanoid teleoperation system for the Unitree
+G1**. With a supported Pico headset, an operator can drive the robot's
+whole-body motion in real time. In onboard deployments, optional LinkerHand
+hands reproduce hand gestures, and an optional OpenNeck gimbal turns head
+motion into active camera control.
 
 The same motion controller runs in MuJoCo first, so you can check tracking and
 controls before connecting a physical robot.
