@@ -58,7 +58,7 @@ The current `robots` asset bundle includes these ready-to-use examples:
 |-----------|-------|
 | `assets/robots/unitree_g1/g1_29dof.xml` | Base G1 model and the default |
 | `assets/robots/unitree_g1/g1_29dof_dex3.xml` | G1 with Dex3 hand geometry and inertial properties |
-| `assets/robots/unitree_g1/g1_29dof_avp_o6.xml` | G1 with AVP active vision and O6 hand models |
+| `assets/robots/unitree_g1/g1_29dof_neck_o6.xml` | G1 with neck active vision and O6 hand models |
 
 This table describes the models shipped in the current asset bundle; it is not
 a hard-coded model allowlist. Another XML can be passed when its joint and body
@@ -134,7 +134,7 @@ Results are written as a text summary, JSON, per-clip CSV and per-rollout CSV.
 ```bash
 python train_mimic/scripts/save_onnx.py \
     --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --output track.onnx \
+    --output ckpt/track_g1.onnx \
     --history_length 10
 ```
 
@@ -146,7 +146,7 @@ Test the export in the normal runtime:
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh
 ```
 

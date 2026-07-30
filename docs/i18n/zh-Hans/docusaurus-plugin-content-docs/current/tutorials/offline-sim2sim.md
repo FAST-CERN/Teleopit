@@ -19,7 +19,7 @@ sidebar_position: 1
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     playback.keyboard.enabled=true
 ```
@@ -42,7 +42,7 @@ python scripts/run/run_sim.py \
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     viewers=all
 ```
@@ -61,13 +61,13 @@ python scripts/run/run_sim.py \
 ```bash
 # 只看物理仿真结果
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     viewers=sim2sim
 
 # 不打开窗口，适合服务器或时序测试
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     viewers=none
 ```
@@ -80,7 +80,7 @@ LAFAN1 格式：
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=/path/to/motion.bvh \
     input.bvh_format=lafan1
 ```
@@ -89,7 +89,7 @@ python scripts/run/run_sim.py \
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=/path/to/motion.bvh \
     input.bvh_format=hc_mocap
 ```
@@ -104,7 +104,7 @@ Teleopit 不会猜测未知的骨架布局。一个文件即使是合法 BVH，�
 ```bash
 MUJOCO_GL=egl python scripts/render/render_sim.py \
     --bvh data/sample_bvh/aiming1_subject1.bvh \
-    --policy track.onnx
+    --policy ckpt/track_g1.onnx
 ```
 
 `hc_mocap` 输入需要再加 `--format hc_mocap`。渲染脚本会输出同步的 `mocap`、

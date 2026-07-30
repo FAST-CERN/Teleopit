@@ -36,7 +36,7 @@ Use `--dry-run` first for timing checks without sending motor commands:
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface enp130s0 \
     --dry-run
 ```
@@ -47,7 +47,7 @@ Run the standing controller after confirming the network interface:
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface enp130s0
 ```
 
@@ -55,7 +55,7 @@ For onboard deployment, the interface is usually `eth0`:
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface eth0
 ```
 
@@ -67,7 +67,7 @@ this startup behavior:
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface eth0 \
     --kp-ramp-duration 2.0 \
     --kp-ramp-floor-ratio 0.1

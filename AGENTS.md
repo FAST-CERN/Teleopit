@@ -167,7 +167,7 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - Recording `schema.json` stores `robot_type=unitree_g1_29dof`, `hand_type=none|linkerhand_l6|linkerhand_o6`, `neck_type=none|openneck`, FPS, and feature definitions; optional action fields are controlled directly by `hands.enabled` and `neck.enabled`; the recording worker rejects an existing mismatched schema without writing episodes, but remains non-critical and must not stop the G1 control runtime; the previous attribute-based HDF5 layout is unsupported
 - Episodes interrupted before their `episodes.jsonl` entry is committed are discarded on the next recording-worker startup and do not consume an episode index
 - Review saved sim2real recordings with `scripts/view/view_recording.py`; it validates manifest/HDF5/MP4 alignment and synchronizes camera video, an observed-vs-reference MuJoCo overlay, joint/mode plots, and optional hand/neck signals; because measured root XYZ is not recorded, the observed robot is anchored to the reference root position
-- `gripper` mode reuses `Pico4InputProvider.get_controller_snapshot()` for Pico grip/trigger open-close control and supports LinkerHand L6 and O6
+- `gripper` mode reuses `Pico4InputProvider.get_controller_snapshot()` and supports LinkerHand L6 and O6; the side grip trigger is a deadman enable, the index trigger controls closure while it is held, and releasing the side grip opens that hand
 - `vr_hand_pose` mode reuses `Pico4InputProvider.get_hand_snapshot()` and somehand 0.2.0 public `somehand.api` for continuous Pico hand-pose retargeting; do not start a second `PicoBridge` for hand control
 - Teleopit owns Pico 26-joint hand-state to 21-landmark conversion; do not import `somehand.pico_input`
 - LinkerHand O6 supports `hands.mode=gripper|vr_hand_pose`; its default `close_pose` is `[86, 73, 118, 111, 110, 111]`
@@ -278,6 +278,8 @@ python train_mimic/scripts/save_onnx.py --checkpoint logs/rsl_rl/g1_general_trac
 ### External Assets
 - Do not commit robot meshes, datasets, checkpoints, or demo media to Git; use `scripts/setup/download_assets.py`
 - G1 XML variants and their meshes are downloaded under `assets/robots/unitree_g1/` by the `robots` asset group and are not tracked in Git; `g1_29dof.xml` is the default
+- The neck-and-O6 runtime variant is `assets/robots/unitree_g1/g1_29dof_neck_o6.xml`
+- Released tracking assets download under `ckpt/` as the matching `track_g1.{pt,onnx}` and `track_g1_neck_o6.{pt,onnx}` pairs
 - `teleopit/retargeting/gmr/assets/` is gitignored; downloaded at runtime
 - `train_mimic/assets/` is no longer tracked; FK tooling uses the robot assets under `assets/robots/`, with `assets/robots/unitree_g1/g1_29dof.xml` as the default G1 model
 - `third_party/linkerhand-python-sdk` and `third_party/somehand` support optional LinkerHand sim2real control
@@ -301,7 +303,7 @@ python scripts/setup/prepare_modelscope_assets.py --only data
 
 # 2. Upload to each repo
 modelscope upload --repo-type model BingqianWu/Teleopit-models \
-  data/modelscope_upload/checkpoints checkpoints
+  data/modelscope_upload/checkpoints checkpoints --sync
 modelscope upload --repo-type model BingqianWu/Teleopit-models \
   data/modelscope_upload/archives archives
 modelscope upload --repo-type dataset BingqianWu/Teleopit-datasets \

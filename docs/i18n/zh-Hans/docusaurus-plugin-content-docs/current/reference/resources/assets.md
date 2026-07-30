@@ -12,14 +12,14 @@ Teleopit 的 Git 仓库只保存代码，不保存大型机器人 mesh、运控�
 
 - `assets/robots/` — canonical 机器人 XML/mesh
 - `teleopit/retargeting/gmr/assets/` — GMR 重定向资源、IK 配置和非 canonical 机器人描述
-- `data/`、checkpoint、缓存等生成产物
+- `data/`、`ckpt/`、checkpoint、缓存等生成产物
 - 演示媒体（`assets/demo.gif`、`assets/demo.mp4`）
 
 ## 资源清单
 
 | 资源组 | 下载后的路径 | 用途 |
 |--------|--------------|------|
-| `ckpt` | `track.onnx`、`track.pt` | 可直接运行的推理模型和对应 PyTorch checkpoint |
+| `ckpt` | `ckpt/track_g1.{onnx,pt}`、`ckpt/track_g1_neck_o6.{onnx,pt}` | 可直接运行的推理模型和对应 PyTorch checkpoint |
 | `robots` | `assets/robots/` 下的机器人 XML 变体与 mesh | 训练、MuJoCo 推理、GMR 和数据集 FK |
 | `gmr` | `teleopit/retargeting/gmr/assets/` | 动作重定向模型和 IK 配置 |
 | `bvh` | `data/sample_bvh/*.bvh` | 安装检查和仿真教程使用的示例动作 |
@@ -31,10 +31,11 @@ Teleopit 的 Git 仓库只保存代码，不保存大型机器人 mesh、运控�
 |----------|------|
 | `assets/robots/unitree_g1/g1_29dof.xml` | 基础 G1 模型，也是默认值 |
 | `assets/robots/unitree_g1/g1_29dof_dex3.xml` | 带 Dex3 手部几何和惯性参数的 G1 |
-| `assets/robots/unitree_g1/g1_29dof_avp_o6.xml` | 带 AVP 主动视觉和 O6 手部模型的 G1 |
+| `assets/robots/unitree_g1/g1_29dof_neck_o6.xml` | 带颈部主动视觉和 O6 手部模型的 G1 |
 
 默认值不是模型白名单。训练可以通过 `--robot_xml` 选择其他与任务兼容的 XML。GMR
-资源目录中的 XML 属于对应的重定向配置，与运行时机器人资源包是两套不同资源。
+资源目录中的 XML 属于对应的重定向配置，与运行时机器人资源包是两套不同资源。基础
+模型使用 `track_g1` 模型对，颈部加 O6 模型使用 `track_g1_neck_o6` 模型对。
 
 ## 远程仓库
 
@@ -56,7 +57,7 @@ Teleopit 的 Git 仓库只保存代码，不保存大型机器人 mesh、运控�
 
 | 组 | 仓库 | 远端路径 |
 |----|------|---------|
-| `ckpt` | Teleopit-models | `checkpoints/track.onnx`、`checkpoints/track.pt` |
+| `ckpt` | Teleopit-models | `checkpoints/track_g1.{onnx,pt}`、`checkpoints/track_g1_neck_o6.{onnx,pt}` |
 | `robots` | Teleopit-models | `archives/robot_assets.tar.gz` |
 | `gmr` | Teleopit-models | `archives/gmr_assets.tar.gz` |
 | `bvh` | Teleopit-models | `archives/sample_bvh.tar.gz` |
@@ -84,8 +85,10 @@ python scripts/setup/download_assets.py --source huggingface
 
 | 远端路径 | 本地路径 |
 |---------|---------|
-| `checkpoints/track.onnx` | `track.onnx` |
-| `checkpoints/track.pt` | `track.pt` |
+| `checkpoints/track_g1.onnx` | `ckpt/track_g1.onnx` |
+| `checkpoints/track_g1.pt` | `ckpt/track_g1.pt` |
+| `checkpoints/track_g1_neck_o6.onnx` | `ckpt/track_g1_neck_o6.onnx` |
+| `checkpoints/track_g1_neck_o6.pt` | `ckpt/track_g1_neck_o6.pt` |
 | `archives/robot_assets.tar.gz` | `assets/robots/`（自动解压） |
 | `archives/gmr_assets.tar.gz` | `teleopit/retargeting/gmr/assets/`（自动解压） |
 | `archives/sample_bvh.tar.gz` | `data/sample_bvh/`（自动解压） |
@@ -107,7 +110,7 @@ python scripts/setup/prepare_modelscope_assets.py --only data
 ```bash
 # 模型仓库
 modelscope upload --repo-type model BingqianWu/Teleopit-models \
-    data/modelscope_upload/checkpoints checkpoints
+    data/modelscope_upload/checkpoints checkpoints --sync
 modelscope upload --repo-type model BingqianWu/Teleopit-models \
     data/modelscope_upload/archives archives
 
@@ -115,6 +118,10 @@ modelscope upload --repo-type model BingqianWu/Teleopit-models \
 modelscope upload --repo-type dataset BingqianWu/Teleopit-datasets \
     data/modelscope_upload/data data
 ```
+
+checkpoint 上传有意使用 `--sync`。它只会在远端 `checkpoints/` 目录内删除本地不存在的
+旧模型名，不会影响 `archives/`。除非本地 staging 中包含所有需要保留的远端归档，否则
+不要给归档上传命令添加 `--sync`。
 
 ### 第三步：打版本 tag
 

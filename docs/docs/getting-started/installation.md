@@ -89,8 +89,9 @@ python scripts/setup/download_assets.py \
     --only robots gmr ckpt bvh
 ```
 
-The inference bundle creates `track.onnx`, the G1 model files, GMR files and a
-sample BVH under their expected project paths. See
+The inference bundle creates the `track_g1` and `track_g1_neck_o6` ONNX/checkpoint
+pairs under `ckpt/`, plus the G1 model files, GMR files and a sample BVH under
+their expected project paths. See
 [Assets](../reference/resources/assets) for the complete inventory
 and asset group mapping.
 
@@ -164,7 +165,7 @@ sample simulation:
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh
 ```
 

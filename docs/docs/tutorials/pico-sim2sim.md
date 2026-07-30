@@ -69,7 +69,7 @@ python scripts/dev/test_pico_bridge.py \
 ```bash
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx
+    controller.policy_path=ckpt/track_g1.onnx
 ```
 
 The robot intentionally starts in `STANDING`; live body tracking does not take
@@ -109,13 +109,13 @@ smaller layout when you no longer need all three:
 # Physics result only
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     viewers=sim2sim
 
 # Headless
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     viewers=none
 ```
 
@@ -126,7 +126,7 @@ To send the simulated `d435i_rgb` camera view back to the headset:
 ```bash
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.video.enabled=true
 ```
 

@@ -103,7 +103,7 @@ sudo /usr/sbin/ip link set can1 up type can bitrate 1000000
 
 ```bash
 python scripts/run/run_high_level_policy_sim2real.py \
-  controller.policy_path=track.onnx \
+  controller.policy_path=ckpt/track_g1_neck_o6.onnx \
   high_level_policy.endpoint=tcp://192.168.1.10:5555 \
   high_level_policy.task="pick up the object" \
   real_robot.network_interface=eth0

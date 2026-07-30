@@ -38,13 +38,15 @@ python scripts/setup/download_assets.py --only robots gmr ckpt bvh
 The default Unitree G1 robot model is downloaded to
 `assets/robots/unitree_g1/g1_29dof.xml`, with additional model variants in the
 same directory. Training can select a task-compatible XML with `--robot_xml`;
-the quick-start command below uses the default model.
+the quick-start command below uses the default model and its matching
+`ckpt/track_g1.onnx` policy. The neck-and-O6 variant uses
+`g1_29dof_neck_o6.xml` with `ckpt/track_g1_neck_o6.onnx`.
 
 **3. Run**
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh
 ```
 
@@ -54,7 +56,7 @@ To show the simulated D435i RGB camera view, add the explicit `camera` viewer:
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     'viewers=[sim2sim,camera]'
 ```
@@ -95,7 +97,7 @@ pip install -e '.[recording]'
 # On Arm machines, prefer conda-forge:
 # conda install -c conda-forge pyrealsense2
 python scripts/run/run_sim2real.py --config-name sim2real_record \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     recording.task="walk forward"
 ```
 
@@ -154,7 +156,7 @@ does not start PicoBridge, GMR, or the Pico reference worker:
 
 ```bash
 python scripts/run/run_high_level_policy_sim2real.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1_neck_o6.onnx \
     high_level_policy.endpoint=tcp://192.168.1.10:5555 \
     high_level_policy.task="pick up the object" \
     real_robot.network_interface=eth0
@@ -196,7 +198,7 @@ the same Pico receiver used for whole-body control:
 ```bash
 pip install -e '.[openneck]'
 python scripts/run/run_sim2real.py --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1_neck_o6.onnx \
     neck.enabled=true \
     neck.port=/dev/ttyACM0
 ```

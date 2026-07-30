@@ -4,9 +4,9 @@ This is a policy-only micro-benchmark intended for onboard model-size checks.
 It does not require MuJoCo, robot hardware, GMR assets, or Pico input.
 
 Examples:
-    python scripts/dev/bench_policy_onnx.py --policy track.onnx
-    python scripts/dev/bench_policy_onnx.py --policy track.onnx --runs 20000 --device cpu
-    python scripts/dev/bench_policy_onnx.py --policy track.onnx --mode direct
+    python scripts/dev/bench_policy_onnx.py --policy ckpt/track_g1.onnx
+    python scripts/dev/bench_policy_onnx.py --policy ckpt/track_g1.onnx --runs 20000 --device cpu
+    python scripts/dev/bench_policy_onnx.py --policy ckpt/track_g1.onnx --mode direct
 """
 
 from __future__ import annotations

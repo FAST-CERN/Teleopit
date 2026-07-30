@@ -55,7 +55,7 @@ assets/robots/unitree_g1/g1_29dof.xml
 |----------|------|
 | `assets/robots/unitree_g1/g1_29dof.xml` | 基础 G1 模型，也是默认值 |
 | `assets/robots/unitree_g1/g1_29dof_dex3.xml` | 带 Dex3 手部几何和惯性参数的 G1 |
-| `assets/robots/unitree_g1/g1_29dof_avp_o6.xml` | 带 AVP 主动视觉和 O6 手部模型的 G1 |
+| `assets/robots/unitree_g1/g1_29dof_neck_o6.xml` | 带颈部主动视觉和 O6 手部模型的 G1 |
 
 这个表只是当前资源包随附的模型示例，不是写死的模型白名单。只要关节和刚体定义与所选
 训练任务配置及数据集兼容，也可以传入其他模型 XML。
@@ -126,7 +126,7 @@ Benchmark 会对每个长度足够的 clip 执行一次确定性的 10 秒 rollo
 ```bash
 python train_mimic/scripts/save_onnx.py \
     --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --output track.onnx \
+    --output ckpt/track_g1.onnx \
     --history_length 10
 ```
 
@@ -137,7 +137,7 @@ python train_mimic/scripts/save_onnx.py \
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh
 ```
 

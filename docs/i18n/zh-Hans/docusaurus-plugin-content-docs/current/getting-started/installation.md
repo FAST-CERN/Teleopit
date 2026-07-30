@@ -87,8 +87,9 @@ python scripts/setup/download_assets.py \
     --only robots gmr ckpt bvh
 ```
 
-推理资源包会把 `track.onnx`、G1 模型文件、GMR 文件和示例 BVH 放到代码默认查找
-的位置。完整文件清单和资源分组见[资产](../reference/resources/assets)。
+推理资源包会把 `track_g1` 和 `track_g1_neck_o6` 两组 ONNX/checkpoint 放到 `ckpt/`，
+并把 G1 模型文件、GMR 文件和示例 BVH 放到代码默认查找的位置。完整文件清单和资源分组
+见[资产](../reference/resources/assets)。
 
 ## 5. 连接真实 G1 前的额外安装
 
@@ -156,7 +157,7 @@ python -c "import train_mimic.tasks; print('training OK')"
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh
 ```
 

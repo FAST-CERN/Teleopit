@@ -33,6 +33,9 @@ ifconfig
 如果还需要 LinkerHand、OpenNeck、RealSense 画面或数据采集，请直接在 G1 机载电脑
 上运行 Teleopit。Pico 头显需要能够访问机载电脑。
 
+机载配置同时使用 O6 双手和 OpenNeck 时，请将底层运控策略设为
+`controller.policy_path=ckpt/track_g1_neck_o6.onnx`。
+
 G1 DDS 默认使用 `eth0`。除了网络接口和可选机载硬件配置之外，全身控制的配置和启动
 命令与外部主机部署相同。
 
@@ -43,7 +46,7 @@ G1 DDS 默认使用 `eth0`。除了网络接口和可选机载硬件配置之外
 - [在仿真中进行 VR 遥操](pico-sim2sim)已经稳定运行；
 - 已按照[安装](../getting-started/installation)安装 `pico4` 依赖并编译
   `g1_bridge_sdk`；
-- 已准备好 `track.onnx`、机器人文件和 GMR 资源；
+- 已准备好 `ckpt/track_g1.onnx`、机器人文件和 GMR 资源；
 - 运行 Teleopit 的设备已经通过有线 DDS 网络连接 G1；
 - 没有其他程序正在控制机器人。
 
@@ -54,7 +57,7 @@ G1 DDS 默认使用 `eth0`。除了网络接口和可选机载硬件配置之外
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface enp130s0 \
     --dry-run
 ```
@@ -65,7 +68,7 @@ Dry run 成功后，在确保硬件安全的情况下去掉 `--dry-run` 再运�
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface enp130s0
 ```
 
@@ -79,7 +82,7 @@ python scripts/run/standalone_standing.py \
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=enp130s0
 ```
 
@@ -88,7 +91,7 @@ python scripts/run/run_sim2real.py \
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=eth0
 ```
 
@@ -149,8 +152,10 @@ hands.linkerhand_o6.left_can=can0
 hands.linkerhand_o6.right_can=can1
 ```
 
-使用 `hands.mode=gripper` 可以通过扳机键控制开合。LinkerHand L6 也受支持，对应参数
-为 `hands.linkerhand_l6.*`。
+使用 `hands.mode=gripper` 时，需要按住对应手柄侧面的握持扳机键（grip）才会启用
+该侧手部控制；保持按住后，再用食指扳机键（trigger）控制闭合程度。松开侧面握持
+扳机键会让该侧手张开。LinkerHand L6 也受支持，对应参数为
+`hands.linkerhand_l6.*`。
 
 ## 仅机载：OpenNeck
 
@@ -188,7 +193,7 @@ input.video.device=<可选的-realsense-序列号>
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name sim2real_record \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=eth0 \
     recording.task="向前走"
 ```

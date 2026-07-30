@@ -20,7 +20,7 @@ and the `robots gmr ckpt bvh` asset bundle.
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     playback.keyboard.enabled=true
 ```
@@ -44,7 +44,7 @@ Open all views when you need to find where a bad result starts:
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     viewers=all
 ```
@@ -64,13 +64,13 @@ You can also select views explicitly:
 ```bash
 # Only the physics result
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     viewers=sim2sim
 
 # No windows; useful for a server or timing test
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
     viewers=none
 ```
@@ -83,7 +83,7 @@ For a LAFAN1-style file:
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=/path/to/motion.bvh \
     input.bvh_format=lafan1
 ```
@@ -92,7 +92,7 @@ For an `hc_mocap` file:
 
 ```bash
 python scripts/run/run_sim.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.bvh_file=/path/to/motion.bvh \
     input.bvh_format=hc_mocap
 ```
@@ -108,7 +108,7 @@ windows:
 ```bash
 MUJOCO_GL=egl python scripts/render/render_sim.py \
     --bvh data/sample_bvh/aiming1_subject1.bvh \
-    --policy track.onnx
+    --policy ckpt/track_g1.onnx
 ```
 
 Add `--format hc_mocap` for that input format. The renderer writes synchronized

@@ -21,8 +21,18 @@ class AssetEntry:
 
 ASSET_GROUPS: dict[str, list[AssetEntry]] = {
     "ckpt": [
-        AssetEntry("checkpoints/track.onnx", "track.onnx", repo="model"),
-        AssetEntry("checkpoints/track.pt", "track.pt", repo="model"),
+        AssetEntry("checkpoints/track_g1.onnx", "ckpt/track_g1.onnx", repo="model"),
+        AssetEntry("checkpoints/track_g1.pt", "ckpt/track_g1.pt", repo="model"),
+        AssetEntry(
+            "checkpoints/track_g1_neck_o6.onnx",
+            "ckpt/track_g1_neck_o6.onnx",
+            repo="model",
+        ),
+        AssetEntry(
+            "checkpoints/track_g1_neck_o6.pt",
+            "ckpt/track_g1_neck_o6.pt",
+            repo="model",
+        ),
     ],
     "gmr": [
         AssetEntry(

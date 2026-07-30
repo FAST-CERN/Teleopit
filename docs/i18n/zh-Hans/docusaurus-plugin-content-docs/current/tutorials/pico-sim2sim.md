@@ -63,7 +63,7 @@ python scripts/dev/test_pico_bridge.py \
 ```bash
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx
+    controller.policy_path=ckpt/track_g1.onnx
 ```
 
 机器人会有意从 `STANDING` 开始；只有操作者主动切换后，实时身体追踪才会接管。
@@ -98,13 +98,13 @@ Pico 仿真默认会打开动捕、重定向和物理仿真三个视图。不再
 # 只看物理仿真结果
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     viewers=sim2sim
 
 # 不打开窗口
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     viewers=none
 ```
 
@@ -115,7 +115,7 @@ python scripts/run/run_sim.py \
 ```bash
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.video.enabled=true
 ```
 

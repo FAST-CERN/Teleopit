@@ -13,14 +13,14 @@ and maintainer reference.
 
 - `assets/robots/` - Canonical robot XML/meshes
 - `teleopit/retargeting/gmr/assets/` - GMR retargeting assets, IK configs, and non-canonical robot descriptions
-- `data/`, checkpoints, caches
+- `data/`, `ckpt/`, checkpoints, caches
 - Demo media (`assets/demo.gif`, `assets/demo.mp4`)
 
 ## Asset Inventory
 
 | Group | Local result | Used for |
 |-------|--------------|----------|
-| `ckpt` | `track.onnx`, `track.pt` | Ready-to-run inference and the matching PyTorch checkpoint |
+| `ckpt` | `ckpt/track_g1.{onnx,pt}`, `ckpt/track_g1_neck_o6.{onnx,pt}` | Ready-to-run inference models and matching PyTorch checkpoints |
 | `robots` | Robot XML variants and meshes under `assets/robots/` | Training, MuJoCo inference, GMR and dataset FK |
 | `gmr` | `teleopit/retargeting/gmr/assets/` | Retargeting models and IK configuration |
 | `bvh` | `data/sample_bvh/*.bvh` | Sample motions used by the installation check and simulation tutorial |
@@ -32,12 +32,13 @@ The current G1 robot bundle includes:
 |-----------|-------|
 | `assets/robots/unitree_g1/g1_29dof.xml` | Base G1 model and the default |
 | `assets/robots/unitree_g1/g1_29dof_dex3.xml` | G1 with Dex3 hand geometry and inertial properties |
-| `assets/robots/unitree_g1/g1_29dof_avp_o6.xml` | G1 with AVP active vision and O6 hand models |
+| `assets/robots/unitree_g1/g1_29dof_neck_o6.xml` | G1 with neck active vision and O6 hand models |
 
 The default is not a model allowlist. Training can select another
 task-compatible XML with `--robot_xml`. XML files in the GMR asset directory
 belong to their retargeting configurations and are separate from the runtime
-robot bundle.
+robot bundle. Use the `track_g1` policy pair with the base model and the
+`track_g1_neck_o6` pair with the neck-and-O6 model.
 
 ## Repositories
 
@@ -59,7 +60,7 @@ robot bundle.
 
 | Group | Repository | Remote Path |
 |-------|-----------|-------------|
-| `ckpt` | Teleopit-models | `checkpoints/track.onnx`, `checkpoints/track.pt` |
+| `ckpt` | Teleopit-models | `checkpoints/track_g1.{onnx,pt}`, `checkpoints/track_g1_neck_o6.{onnx,pt}` |
 | `robots` | Teleopit-models | `archives/robot_assets.tar.gz` |
 | `gmr` | Teleopit-models | `archives/gmr_assets.tar.gz` |
 | `bvh` | Teleopit-models | `archives/sample_bvh.tar.gz` |
@@ -87,8 +88,10 @@ Local paths after download:
 
 | Remote | Local |
 |--------|-------|
-| `checkpoints/track.onnx` | `track.onnx` |
-| `checkpoints/track.pt` | `track.pt` |
+| `checkpoints/track_g1.onnx` | `ckpt/track_g1.onnx` |
+| `checkpoints/track_g1.pt` | `ckpt/track_g1.pt` |
+| `checkpoints/track_g1_neck_o6.onnx` | `ckpt/track_g1_neck_o6.onnx` |
+| `checkpoints/track_g1_neck_o6.pt` | `ckpt/track_g1_neck_o6.pt` |
 | `archives/robot_assets.tar.gz` | `assets/robots/` (extracted) |
 | `archives/gmr_assets.tar.gz` | `teleopit/retargeting/gmr/assets/` (extracted) |
 | `archives/sample_bvh.tar.gz` | `data/sample_bvh/` (extracted) |
@@ -110,7 +113,7 @@ Output goes to `data/modelscope_upload/`.
 ```bash
 # Model repo
 modelscope upload --repo-type model BingqianWu/Teleopit-models \
-    data/modelscope_upload/checkpoints checkpoints
+    data/modelscope_upload/checkpoints checkpoints --sync
 modelscope upload --repo-type model BingqianWu/Teleopit-models \
     data/modelscope_upload/archives archives
 
@@ -118,6 +121,11 @@ modelscope upload --repo-type model BingqianWu/Teleopit-models \
 modelscope upload --repo-type dataset BingqianWu/Teleopit-datasets \
     data/modelscope_upload/data data
 ```
+
+The checkpoint upload intentionally uses `--sync`. Its deletion scope is the
+remote `checkpoints/` directory, so obsolete policy names are removed without
+touching `archives/`. Do not add `--sync` to the archive upload unless the local
+staging directory contains every remote archive that must be retained.
 
 ### Step 3: Tag Version
 

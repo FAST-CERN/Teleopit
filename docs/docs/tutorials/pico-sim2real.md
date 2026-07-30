@@ -36,6 +36,10 @@ Run Teleopit directly on the G1 onboard computer when you also need LinkerHand,
 OpenNeck, RealSense preview or data collection. The Pico headset must be able to
 reach the onboard computer.
 
+When the onboard setup includes both O6 hands and OpenNeck, set the low-level
+tracking policy to
+`controller.policy_path=ckpt/track_g1_neck_o6.onnx`.
+
 The G1 DDS interface is `eth0` by default. Apart from the network interface and
 the optional onboard hardware settings, the body-control configuration and
 launch command are the same as for an external host.
@@ -47,7 +51,7 @@ Do not continue until all of these are true:
 - [VR Teleoperation in Simulation](pico-sim2sim) works reliably.
 - You installed the `pico4` profile and built `g1_bridge_sdk` as described in
   [Installation](../getting-started/installation).
-- `track.onnx`, the robot files and GMR assets are present.
+- `ckpt/track_g1.onnx`, the robot files and GMR assets are present.
 - The machine running Teleopit has a wired DDS connection to G1.
 - No other program is commanding the robot.
 
@@ -58,7 +62,7 @@ external host, replace `enp130s0` with the interface reported by `ifconfig`:
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface enp130s0 \
     --dry-run
 ```
@@ -70,7 +74,7 @@ hardware setup:
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface enp130s0
 ```
 
@@ -84,7 +88,7 @@ External-host example:
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=enp130s0
 ```
 
@@ -93,7 +97,7 @@ Onboard-computer example:
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=eth0
 ```
 
@@ -161,7 +165,9 @@ hands.linkerhand_o6.left_can=can0
 hands.linkerhand_o6.right_can=can1
 ```
 
-Use `hands.mode=gripper` for trigger-based open and close. LinkerHand L6 is also
+With `hands.mode=gripper`, hold the controller's side grip trigger to enable
+that hand, then use the index trigger to control how far it closes. Releasing
+the side grip trigger commands that hand to open. LinkerHand L6 is also
 supported through the matching `hands.linkerhand_l6.*` settings.
 
 ## Onboard Only: OpenNeck
@@ -202,7 +208,7 @@ Recording requires a fresh RealSense RGB frame:
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name sim2real_record \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=eth0 \
     recording.task="walk forward"
 ```

@@ -177,12 +177,14 @@ Realtime Pico resume re-centers heading and ground-plane position before trackin
 `hands.enabled=true` requires `input.provider=pico4` plus local editable
 installs of `third_party/linkerhand-python-sdk` and `third_party/somehand`.
 When enabled, hand control remains active in all sim2real modes.
-`gripper` supports `linkerhand_l6` and `linkerhand_o6` by interpolating Pico
-trigger input between the configured open and close poses. `vr_hand_pose` is
-supported by `linkerhand_l6` and `linkerhand_o6`: missing hand pose holds the
-last command for that side, the selected hand speed is set to the maximum, and
-Teleopit converts Pico hand state to 21 landmarks before calling somehand 0.2.0
-through `somehand.api` only.
+`gripper` supports `linkerhand_l6` and `linkerhand_o6`. The corresponding
+controller's side grip trigger is a deadman enable: while it is held, the index
+trigger interpolates between the configured open and close poses; releasing
+the side grip trigger commands that hand to open. `vr_hand_pose` is supported
+by `linkerhand_l6` and `linkerhand_o6`: missing hand pose holds the last command
+for that side, the selected hand speed is set to the maximum, and Teleopit
+converts Pico hand state to 21 landmarks before calling somehand 0.2.0 through
+`somehand.api` only.
 
 | Field | Description | Default |
 |-------|-------------|---------|

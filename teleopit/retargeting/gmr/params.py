@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from teleopit.runtime.assets import (
-    UNITREE_G1_AVP_O6_XML,
     UNITREE_G1_DEX3_XML,
+    UNITREE_G1_NECK_O6_XML,
     UNITREE_G1_XML,
 )
 
@@ -19,7 +19,7 @@ ASSET_ROOT = _resolve_path("assets")
 ROBOT_XML_DICT = {
     "unitree_g1": UNITREE_G1_XML,
     "unitree_g1_with_hands": UNITREE_G1_DEX3_XML,
-    "unitree_g1_avp_o6": UNITREE_G1_AVP_O6_XML,
+    "unitree_g1_neck_o6": UNITREE_G1_NECK_O6_XML,
     "unitree_h1": _resolve_path("assets/unitree_h1/h1.xml"),
     "unitree_h1_2": _resolve_path("assets/unitree_h1_2/h1_2_handless.xml"),
     "booster_t1": _resolve_path("assets/booster_t1/T1_serial.xml"),
@@ -43,7 +43,7 @@ IK_CONFIG_DICT = {
     "smplx": {
         "unitree_g1": _resolve_path("ik_configs/smplx_to_g1.json"),
         "unitree_g1_with_hands": _resolve_path("ik_configs/smplx_to_g1.json"),
-        "unitree_g1_avp_o6": _resolve_path("ik_configs/smplx_to_g1.json"),
+        "unitree_g1_neck_o6": _resolve_path("ik_configs/smplx_to_g1.json"),
         "unitree_h1": _resolve_path("ik_configs/smplx_to_h1.json"),
         "unitree_h1_2": _resolve_path("ik_configs/smplx_to_h1_2.json"),
         "booster_t1": _resolve_path("ik_configs/smplx_to_t1.json"),
@@ -63,7 +63,7 @@ IK_CONFIG_DICT = {
     "bvh_lafan1": {
         "unitree_g1": _resolve_path("ik_configs/bvh_lafan1_to_g1.json"),
         "unitree_g1_with_hands": _resolve_path("ik_configs/bvh_lafan1_to_g1.json"),
-        "unitree_g1_avp_o6": _resolve_path("ik_configs/bvh_lafan1_to_g1.json"),
+        "unitree_g1_neck_o6": _resolve_path("ik_configs/bvh_lafan1_to_g1.json"),
         "booster_t1_29dof": _resolve_path("ik_configs/bvh_lafan1_to_t1_29dof.json"),
         "fourier_n1": _resolve_path("ik_configs/bvh_lafan1_to_n1.json"),
         "stanford_toddy": _resolve_path("ik_configs/bvh_lafan1_to_toddy.json"),
@@ -83,7 +83,7 @@ IK_CONFIG_DICT = {
     "fbx": {
         "unitree_g1": _resolve_path("ik_configs/fbx_to_g1.json"),
         "unitree_g1_with_hands": _resolve_path("ik_configs/fbx_to_g1.json"),
-        "unitree_g1_avp_o6": _resolve_path("ik_configs/fbx_to_g1.json"),
+        "unitree_g1_neck_o6": _resolve_path("ik_configs/fbx_to_g1.json"),
     },
     "fbx_offline": {
         "unitree_g1": _resolve_path("ik_configs/fbx_offline_to_g1.json"),
@@ -97,7 +97,7 @@ IK_CONFIG_DICT = {
 ROBOT_BASE_DICT = {
     "unitree_g1": "pelvis",
     "unitree_g1_with_hands": "pelvis",
-    "unitree_g1_avp_o6": "pelvis",
+    "unitree_g1_neck_o6": "pelvis",
     "unitree_h1": "pelvis",
     "unitree_h1_2": "pelvis",
     "booster_t1": "Waist",
@@ -119,7 +119,7 @@ ROBOT_BASE_DICT = {
 VIEWER_CAM_DISTANCE_DICT = {
     "unitree_g1": 2.0,
     "unitree_g1_with_hands": 2.0,
-    "unitree_g1_avp_o6": 2.0,
+    "unitree_g1_neck_o6": 2.0,
     "unitree_h1": 3.0,
     "unitree_h1_2": 3.0,
     "booster_t1": 2.0,
