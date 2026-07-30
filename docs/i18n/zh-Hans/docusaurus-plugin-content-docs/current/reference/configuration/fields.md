@@ -195,7 +195,7 @@ dead-zone 或 pitch-gain 映射。
 松开侧面握持扳机键会让该侧手张开。
 `vr_hand_pose` 支持 `linkerhand_l6` 和 `linkerhand_o6`：手部 pose 消失时，对应侧会保持上一条命令；
 所选手的速度会设为最大值；Teleopit 会先将 Pico 手部状态转成 21 个 landmarks，
-再只通过 somehand 0.2.0 公开的 `somehand.api` 调用。
+再只通过 somehand 0.3.0 公开的 `somehand.api` 调用。
 
 | 字段 | 说明 | 默认值 |
 |---|---|---|
@@ -213,8 +213,8 @@ dead-zone 或 pitch-gain 映射。
 | `hands.linkerhand_o6.left_can` / `right_can` | 左右 O6 手 CAN 通道 | `can0` / `can1` |
 | `hands.linkerhand_o6.speed` | `gripper` 使用的 O6 速度；`vr_hand_pose` 会覆盖为最大速度 | 见配置 |
 | `hands.linkerhand_o6.open_pose` / `close_pose` | O6 的 6 维张开/闭合姿态 | 见配置 |
-| `hands.somehand.l6_config_path` | L6 `vr_hand_pose` 使用的 somehand 双手 L6 配置 | 见配置 |
-| `hands.somehand.o6_config_path` | O6 `vr_hand_pose` 使用的 somehand 双手 O6 配置 | 见配置 |
+| `hands.somehand.l6_config_path` | L6 `vr_hand_pose` 使用的 somehand 0.3.0 官方双手 L6 配置 | 见配置 |
+| `hands.somehand.o6_config_path` | O6 `vr_hand_pose` 使用的 somehand 0.3.0 官方双手 O6 配置 | 见配置 |
 | `hands.somehand.rate_hz` | 低延时 `vr_hand_pose` 命令频率（Hz） | `60.0` |
 | `hands.somehand.max_iterations` | `vr_hand_pose` 的 somehand solver 迭代上限 | `12` |
 | `hands.somehand.temporal_filter_alpha` | somehand 输入 landmarks 平滑 alpha；`1.0` 表示关闭平滑延时 | `1.0` |

@@ -168,7 +168,7 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - Episodes interrupted before their `episodes.jsonl` entry is committed are discarded on the next recording-worker startup and do not consume an episode index
 - Review saved sim2real recordings with `scripts/view/view_recording.py`; it validates manifest/HDF5/MP4 alignment and synchronizes camera video, an observed-vs-reference MuJoCo overlay, joint/mode plots, and optional hand/neck signals; because measured root XYZ is not recorded, the observed robot is anchored to the reference root position
 - `gripper` mode reuses `Pico4InputProvider.get_controller_snapshot()` and supports LinkerHand L6 and O6; the side grip trigger is a deadman enable, the index trigger controls closure while it is held, and releasing the side grip opens that hand
-- `vr_hand_pose` mode reuses `Pico4InputProvider.get_hand_snapshot()` and somehand 0.2.0 public `somehand.api` for continuous Pico hand-pose retargeting; do not start a second `PicoBridge` for hand control
+- `vr_hand_pose` mode reuses `Pico4InputProvider.get_hand_snapshot()` and somehand 0.3.0 public `somehand.api` for continuous Pico hand-pose retargeting; do not start a second `PicoBridge` for hand control
 - Teleopit owns Pico 26-joint hand-state to 21-landmark conversion; do not import `somehand.pico_input`
 - LinkerHand O6 supports `hands.mode=gripper|vr_hand_pose`; its default `close_pose` is `[86, 73, 118, 111, 110, 111]`
 - L6 `gripper` mode uses the configured `hands.linkerhand_l6.speed` (default `[50]*6`); O6 `gripper` mode uses `hands.linkerhand_o6.speed` (default `[255]*6`); `vr_hand_pose` always sets LinkerHand L6/O6 speed to `[255]*6`

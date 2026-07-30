@@ -31,7 +31,7 @@ bridge 读取关节状态、基座方向、角速度和无线遥控器输入，�
 ## somehand
 
 somehand 提供可配置的人手到机器人手部动作重定向。Teleopit 把兼容源码固定为
-`third_party/somehand` Git submodule，并使用 0.2.0 的公共 `somehand.api`。
+`third_party/somehand` Git submodule，并使用 0.3.0 的公共 `somehand.api`。
 
 在 `hands.mode=vr_hand_pose` 下，Teleopit 把 PICO 的 26 关节手部状态转换为 21 个
 landmark，调用 somehand 连续重定向，再把结果发送给 LinkerHand L6 或 O6。Pico

@@ -37,7 +37,7 @@ teleoperation, the standalone standing check, and host-policy deployment.
 
 somehand provides configurable human-to-robot hand retargeting. Teleopit pins
 the compatible source as the `third_party/somehand` Git submodule and uses its
-0.2.0 public `somehand.api` surface.
+0.3.0 public `somehand.api` surface.
 
 In `hands.mode=vr_hand_pose`, Teleopit converts PICO's 26-joint hand state to
 21 landmarks, calls somehand for continuous retargeting, and sends the result

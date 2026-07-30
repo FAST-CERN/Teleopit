@@ -228,7 +228,7 @@ class SomehandRetargetMapper(HandInputMapper):
         self._active = False
 
     def start(self) -> None:
-        _require_somehand_020()
+        _require_somehand_030()
         from somehand.api import HandFrame, RetargetingEngine, load_bihand_config, load_retargeting_config
 
         config_path = _resolve_project_path(self.config_path)
@@ -373,13 +373,13 @@ def trigger_to_pose(
     return pose
 
 
-def _require_somehand_020() -> None:
+def _require_somehand_030() -> None:
     try:
         installed = version("somehand")
     except PackageNotFoundError as exc:
-        raise ImportError("somehand==0.2.0 is required for hands.mode=vr_hand_pose") from exc
-    if installed != "0.2.0":
-        raise ImportError(f"somehand==0.2.0 is required for hands.mode=vr_hand_pose, found {installed}")
+        raise ImportError("somehand==0.3.0 is required for hands.mode=vr_hand_pose") from exc
+    if installed != "0.3.0":
+        raise ImportError(f"somehand==0.3.0 is required for hands.mode=vr_hand_pose, found {installed}")
 
 
 def _resolve_l6_joint_index(joint_index: dict[str, int], semantic_name: str, *, side: str) -> int:

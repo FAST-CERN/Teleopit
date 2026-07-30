@@ -183,7 +183,7 @@ trigger interpolates between the configured open and close poses; releasing
 the side grip trigger commands that hand to open. `vr_hand_pose` is supported
 by `linkerhand_l6` and `linkerhand_o6`: missing hand pose holds the last command
 for that side, the selected hand speed is set to the maximum, and Teleopit
-converts Pico hand state to 21 landmarks before calling somehand 0.2.0 through
+converts Pico hand state to 21 landmarks before calling somehand 0.3.0 through
 `somehand.api` only.
 
 | Field | Description | Default |
@@ -200,8 +200,8 @@ converts Pico hand state to 21 landmarks before calling somehand 0.2.0 through
 | `hands.linkerhand_o6.left_can` / `right_can` | CAN channels for each O6 hand | `can0` / `can1` |
 | `hands.linkerhand_o6.speed` | O6 speed used by `gripper`; `vr_hand_pose` overrides this to maximum speed | see config |
 | `hands.linkerhand_o6.open_pose` / `close_pose` | Six-value O6 open/closed poses | see config |
-| `hands.somehand.l6_config_path` | Official somehand 0.2.0 bi-hand L6 config used by L6 `vr_hand_pose` | see config |
-| `hands.somehand.o6_config_path` | Official somehand 0.2.0 bi-hand O6 config used by O6 `vr_hand_pose` | see config |
+| `hands.somehand.l6_config_path` | Official somehand 0.3.0 bi-hand L6 config used by L6 `vr_hand_pose` | see config |
+| `hands.somehand.o6_config_path` | Official somehand 0.3.0 bi-hand O6 config used by O6 `vr_hand_pose` | see config |
 | `hands.somehand.rate_hz` | Low-latency `vr_hand_pose` command rate in Hz | `60.0` |
 | `hands.somehand.max_iterations` | somehand solver iteration cap for `vr_hand_pose` | `12` |
 | `hands.somehand.temporal_filter_alpha` | somehand input landmark smoothing alpha; `1.0` disables smoothing delay | `1.0` |

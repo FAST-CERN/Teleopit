@@ -308,7 +308,7 @@ def test_somehand_mapper_loads_only_configured_side(monkeypatch) -> None:
     somehand_pkg.__path__ = []
     monkeypatch.setitem(sys.modules, "somehand", somehand_pkg)
     monkeypatch.setitem(sys.modules, "somehand.api", somehand_api)
-    monkeypatch.setattr("teleopit.sim2real.hands.linkerhand_l6.version", lambda name: "0.2.0")
+    monkeypatch.setattr("teleopit.sim2real.hands.linkerhand_l6.version", lambda name: "0.3.0")
     monkeypatch.setattr("teleopit.sim2real.hands.linkerhand_l6._resolve_project_path", lambda path: SimpleNamespace(exists=lambda: True))
     monkeypatch.setattr(
         "teleopit.sim2real.hands.linkerhand_l6._load_linkerhand_mapping_module",
