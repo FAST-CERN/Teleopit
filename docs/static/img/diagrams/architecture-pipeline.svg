@@ -56,8 +56,9 @@
 
   <text x="48" y="302" class="lane">INDEPENDENT HOST-POLICY DEPLOYMENT</text>
   <rect x="48" y="322" width="220" height="96" rx="16" fill="#e0f2fe" stroke="#0284c7" stroke-width="2.5"/>
-  <text x="158" y="359" class="box-title" text-anchor="middle">Onboard observation</text>
-  <text x="158" y="386" class="copy" text-anchor="middle">RealSense JPEG + state(68)</text>
+  <text x="158" y="353" class="box-title" text-anchor="middle">Onboard observation</text>
+  <text x="158" y="380" class="copy" text-anchor="middle">JPEG + 43D measured state</text>
+  <text x="158" y="401" class="copy" text-anchor="middle">+ camera-time reference root</text>
 
   <rect x="340" y="322" width="220" height="96" rx="16" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
   <text x="450" y="359" class="box-title" text-anchor="middle">Host policy server</text>

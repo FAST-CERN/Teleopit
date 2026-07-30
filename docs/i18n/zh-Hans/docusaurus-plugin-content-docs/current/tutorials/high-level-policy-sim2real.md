@@ -12,10 +12,11 @@ ZeroMQ/msgpack 消息通信。
 主机工作站（lerobot-teleopit）
   ReplayPolicy 或 ACT -> policy server
                               |
-                              | 通过 TCP 传输 float32 state/action + JPEG
+                              | 通过 TCP 传输 float32 observations/actions + JPEG
                               v
 G1 onboard 计算机（Teleopit）
-  RealSense + G1 state -> 异步 client -> 已验证的 30 Hz action plan
+  RealSense + G1/O6/OpenNeck state -> 异步 client
+  -> 已验证的 30 Hz action plan
   -> 按时间戳对齐的 receding-horizon 替换
   -> 50 Hz 插值 -> motion tracker -> G1 关节角目标
                  -> LinkerHand O6 / OpenNeck
@@ -38,9 +39,24 @@ Teleopit/teleopit/high_level_policy/hand_calibration.json
 ```
 
 `hand_calibration.json` 定义 LinkerHand O6 的 raw open/close 值和 range tolerance。
-当前 `describe` 响应将 68D observation 标识为 `teleopit-g1-state`，将 canonical 50D
-action 标识为 `teleopit-g1-reference`。action 布局和使用物理角度的 OpenNeck 命令由
-当前代码与测试约束。
+当前 `describe` 响应将 43 维模型 observation 标识为
+`teleopit-g1-joint-pos-dex-neck-state`，将 canonical 50 维 action 标识为
+`teleopit-g1-reference`。action 布局和使用物理角度的 OpenNeck 命令由当前代码与测试
+约束。
+
+每个 `get_action` 请求都包含：
+
+```text
+body_joint_positions       float32[29]  G1 实测关节位置，弧度
+dex_state                  float32[12]  左/右 O6 原始实测 readback
+neck_state                 float32[2]   实测 yaw/pitch，物理角度
+source_reference_root_pose float32[7]   session-local xyz + quaternion wxyz
+image                      JPEG         RGB 640x480 相机观测
+```
+
+主机会标定 O6 原始值，并把前三个数组组合成 43 维模型 state。
+`source_reference_root_pose` 是相机时间戳对应的 active reference root。它不是模型
+输入；主机用它从 source-relative 模型输出重建 session-local absolute root pose。
 
 canonical action 布局为：
 
@@ -116,8 +132,9 @@ python scripts/run/run_high_level_policy_sim2real.py \
 Teleopit 每隔 `high_level_policy.replan_steps` 个 30 Hz source frame 提交最新的合格
 observation，默认间隔为三帧。该 stride 不得超过主机 `describe` 响应中的
 `max_action_horizon`。隔离的 client 同一时间只允许一个 REQ/REP exchange，但该请求
-在途时 active plan 会继续执行。ACT 主机使用回显的 onboard 单调时间戳聚合相互重叠的
-prediction；Teleopit 使用同一时间戳，在正确的 source-frame 位置替换 active plan。
+在途时 active plan 会继续执行。每份 learned-policy response 都基于其请求中的 source
+reference 独立重建；主机不会聚合相互重叠的 chunk。Teleopit 使用回显的 onboard 单调
+时间戳，在正确的 source-frame 位置替换 active plan。
 
 生产相机契约固定为 30 Hz 的 RGB `uint8[480,640,3]`。
 `camera.source=test-pattern` 只用于受控集成测试；部署时应使用
@@ -187,6 +204,12 @@ camera/client worker 退出，Teleopit 会保持在 `POLICY`，进入普通的�
 最后一条 body、hand 和 neck 命令。无效或过期 response 会被拒绝，不会替换当前仍然有效的
 plan。故障恢复后按 `B` 请求恢复；在收到新的有效 chunk 前，执行仍保持暂停。只有 `X`
 会把模式切换到 `STANDING`。
+
+scheduler 会以 50 Hz 记录经过限速的 session-local reference。对于每个相机帧，它会
+在相机单调时间戳处查询该历史或进行插值，并把得到的 root pose 作为
+`source_reference_root_pose` 发送。session 启动时用当时的 active standing reference
+初始化历史；pause/resume 会记录 held-reference 边界，因此锚点绝不会来自机器人实测
+root pose。
 
 默认安全范围位于 `high_level_policy_sim2real.yaml` 的
 `high_level_policy.safety` 下。只有在检查录制数据、G1 关节限位和已安装的 OpenNeck

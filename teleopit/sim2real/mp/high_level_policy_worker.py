@@ -227,7 +227,10 @@ class HighLevelPolicyWorker:
                 onboard_monotonic_timestamp_ns=int(packet.onboard_monotonic_timestamp_ns),
                 task=session.task,
                 jpeg_image=jpeg,
-                state=packet.state,
+                body_joint_positions=packet.body_joint_positions,
+                dex_state=packet.dex_state,
+                neck_state=packet.neck_state,
+                source_reference_root_pose=packet.source_reference_root_pose,
             )
             if self._policy_id is None or chunk.policy_id != self._policy_id:
                 raise PolicyProtocolError(

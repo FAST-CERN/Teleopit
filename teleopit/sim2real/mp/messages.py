@@ -139,7 +139,10 @@ class HighLevelPolicyObservationPacket:
     session_id: str
     sequence_id: int
     onboard_monotonic_timestamp_ns: int
-    state: Float32Array
+    body_joint_positions: Float32Array
+    dex_state: Float32Array
+    neck_state: Float32Array
+    source_reference_root_pose: Float32Array
     frame: SharedFrameDescriptor
     timestamp_s: float
 

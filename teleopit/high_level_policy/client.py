@@ -91,8 +91,8 @@ class HighLevelPolicyClient:
         if set(data) != expected_fields:
             raise PolicyProtocolError("invalid_response", "describe data contains unexpected fields")
         expected_schema = {
-            "observation_schema": "teleopit-g1-state",
-            "observation_dim": 68,
+            "observation_schema": "teleopit-g1-joint-pos-dex-neck-state",
+            "observation_dim": 43,
             "action_schema": "teleopit-g1-reference",
             "action_dim": 50,
         }
@@ -134,7 +134,10 @@ class HighLevelPolicyClient:
         onboard_monotonic_timestamp_ns: int,
         task: str,
         jpeg_image: bytes,
-        state: object,
+        body_joint_positions: object,
+        dex_state: object,
+        neck_state: object,
+        source_reference_root_pose: object,
     ) -> PolicyActionChunk:
         if not isinstance(jpeg_image, bytes):
             raise PolicyProtocolError("invalid_image", "jpeg_image must be bytes")
@@ -142,13 +145,24 @@ class HighLevelPolicyClient:
             raise PolicyProtocolError("invalid_image", "jpeg_image size is outside limits")
         if not jpeg_image.startswith(b"\xff\xd8") or not jpeg_image.endswith(b"\xff\xd9"):
             raise PolicyProtocolError("invalid_image", "jpeg_image is missing JPEG start/end markers")
-        state_array = np.asarray(state, dtype=np.float32)
-        if state_array.shape != (68,) or not np.all(np.isfinite(state_array)):
-            raise PolicyProtocolError("invalid_state", f"state must be finite float32[68], got {state_array.shape}")
-        quaternion_norm = float(np.linalg.norm(state_array[58:62]))
+        body_array = _finite_float32_vector(
+            body_joint_positions,
+            name="body_joint_positions",
+            size=29,
+        )
+        dex_array = _finite_float32_vector(dex_state, name="dex_state", size=12)
+        neck_array = _finite_float32_vector(neck_state, name="neck_state", size=2)
+        source_pose_array = _finite_float32_vector(
+            source_reference_root_pose,
+            name="source_reference_root_pose",
+            size=7,
+        )
+        quaternion_norm = float(np.linalg.norm(source_pose_array[3:7]))
         if abs(quaternion_norm - 1.0) > 1e-3:
             raise PolicyProtocolError(
-                "invalid_state", f"state base quaternion norm must be near 1, got {quaternion_norm:.6g}"
+                "invalid_reference_pose",
+                "source_reference_root_pose quaternion norm must be near 1, "
+                f"got {quaternion_norm:.6g}",
             )
         request_data = {
             "session_id": session_id,
@@ -160,7 +174,10 @@ class HighLevelPolicyClient:
             "task": task,
             "image_encoding": "jpeg",
             "image": jpeg_image,
-            "state": encode_float32_array(state_array),
+            "body_joint_positions": encode_float32_array(body_array),
+            "dex_state": encode_float32_array(dex_array),
+            "neck_state": encode_float32_array(neck_array),
+            "source_reference_root_pose": encode_float32_array(source_pose_array),
         }
         data = self._request("get_action", request_data)
         expected_fields = {
@@ -274,3 +291,13 @@ def _int64(value: object, *, name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 2**63 - 1:
         raise PolicyProtocolError("invalid_value", f"{name} must be an int64 in [0, 2^63-1]")
     return int(value)
+
+
+def _finite_float32_vector(value: object, *, name: str, size: int) -> np.ndarray:
+    array = np.asarray(value, dtype=np.float32)
+    if array.shape != (size,) or not np.all(np.isfinite(array)):
+        raise PolicyProtocolError(
+            "invalid_observation",
+            f"{name} must be finite float32[{size}], got {array.shape}",
+        )
+    return np.ascontiguousarray(array, dtype=np.float32)

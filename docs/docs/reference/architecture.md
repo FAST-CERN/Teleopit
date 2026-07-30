@@ -23,11 +23,14 @@ control. These optional hardware paths are supported by onboard deployment;
 external-host Pico deployment supports whole-body control only.
 
 Host-policy deployment is independent from the Pico runtime. A separate host
-environment receives JPEG RGB and `observation.state(68)`, then returns
-canonical `float32[T,50]` action chunks over strict ZeroMQ/msgpack messages.
-The onboard validator and scheduler convert the body portion into a 36D
-reference for the existing motion tracker; host output never bypasses that
-tracker or becomes a direct motor command.
+environment receives JPEG RGB, measured G1 joint positions, raw measured O6
+readback, measured OpenNeck angles, and an observation-time source reference
+root pose. The body/hand/neck arrays form the 43D model observation; the
+session-local source pose only anchors reconstruction of source-relative root
+output. The host returns canonical `float32[T,50]` action chunks over strict
+ZeroMQ/msgpack messages. The onboard validator and scheduler convert the body
+portion into a 36D reference for the existing motion tracker; host output never
+bypasses that tracker or becomes a direct motor command.
 
 The Teleopit and host environments share semantic data and one identical
 `hand_calibration.json`, but do not import each other's Python packages. The
@@ -102,7 +105,7 @@ tests/                                — Unit, protocol and integration tests
 | Distributed motion data | Minimal recursive HDF5 `shard_*.h5` files |
 | Optional hands | LinkerHand L6/O6 with gripper or PICO hand-pose input |
 | Optional active vision | OpenNeck yaw/pitch in physical degrees |
-| Host-policy observation | JPEG RGB + `observation.state(68)` |
+| Host-policy observation | JPEG RGB + G1 joint position (29D) + raw O6 readback (12D) + OpenNeck degrees (2D); request also carries the camera-time active reference root pose (7D) |
 | Host-policy action | `float32[T,50]`, 30 Hz source horizon, `T` in `[1,50]` |
 | Host-policy body control | 36D root/joint reference through the existing 50 Hz motion tracker |
 

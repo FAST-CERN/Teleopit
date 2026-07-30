@@ -31,8 +31,10 @@ from teleopit.sim2real.hands.linkerhand_o6 import (
 from teleopit.sim2real.mp.high_level_policy_worker import HighLevelPolicyWorker
 from teleopit.sim2real.mp.ipc import (
     COMMAND_TOPIC,
+    HAND_COMMAND_TOPIC,
     HIGH_LEVEL_POLICY_TARGET_TOPIC,
     MODE_TOPIC,
+    NECK_COMMAND_TOPIC,
     VIDEO_TOPIC,
     LatestSubscriber,
     Sim2RealIpcEndpoints,
@@ -41,8 +43,10 @@ from teleopit.sim2real.mp.ipc import (
 )
 from teleopit.sim2real.mp.messages import (
     CommandPacket,
+    HandCommandPacket,
     HighLevelPolicyTargetPacket,
     ModeStatePacket,
+    NeckCommandPacket,
 )
 from teleopit.sim2real.mp.runtime import (
     HIGH_LEVEL_POLICY_FAULT_COMMAND,
@@ -214,6 +218,8 @@ def _validate_high_level_policy_runtime_config(cfg: dict[str, Any]) -> None:
     neck_cfg = parse_neck_config(cfg)
     if not neck_cfg.enabled or neck_cfg.driver != "openneck":
         raise ValueError("High-level policy action[48:50] requires neck.enabled=true and driver=openneck")
+    if neck_cfg.dry_run:
+        raise ValueError("High-level policy neck_state requires neck.dry_run=false")
 
 
 def _run_high_level_policy_client_worker(
@@ -413,23 +419,35 @@ def _apply_policy_hand_target(
     device: LinkerHandO6Device,
     target: HighLevelPolicyTargetPacket,
     calibration: HandCalibration,
-) -> None:
+) -> tuple[np.ndarray, np.ndarray]:
     action = _policy_target_action(target)
+    left_pose = closure_to_o6_pose(action[36:42], calibration)
+    right_pose = closure_to_o6_pose(action[42:48], calibration)
     device.send_pose(
         "left",
-        closure_to_o6_pose(action[36:42], calibration),
+        left_pose,
         reason="policy",
     )
     device.send_pose(
         "right",
-        closure_to_o6_pose(action[42:48], calibration),
+        right_pose,
         reason="policy",
+    )
+    return (
+        np.asarray(left_pose, dtype=np.float32),
+        np.asarray(right_pose, dtype=np.float32),
     )
 
 
-def _apply_policy_neck_target(device: Any, target: HighLevelPolicyTargetPacket) -> None:
+def _apply_policy_neck_target(
+    device: Any,
+    target: HighLevelPolicyTargetPacket,
+) -> tuple[float, float]:
     action = _policy_target_action(target)
-    device.move_deg(float(action[48]), float(action[49]))
+    yaw_deg = float(action[48])
+    pitch_deg = float(action[49])
+    device.move_deg(yaw_deg, pitch_deg)
+    return yaw_deg, pitch_deg
 
 
 def _run_high_level_policy_hand_worker(
@@ -445,10 +463,45 @@ def _run_high_level_policy_hand_worker(
         )
         mode_sub = LatestSubscriber(endpoints.mode_pub, MODE_TOPIC)
         command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
+        state_pub = ZmqPublisher(endpoints.hand_command_pub)
         latest_mode: ModeStatePacket | None = None
         last_target_seq = -1
         was_in_policy = False
+        state_seq = 0
+        last_state_s = float("-inf")
+        state_period_s = 1.0 / 30.0
+        left_pose = np.asarray(config.open_pose, dtype=np.float32)
+        right_pose = np.asarray(config.open_pose, dtype=np.float32)
         sleep_s = 1.0 / max(float(cfg_get(_mp_cfg(cfg), "hand_worker_hz", 120.0)), 1.0)
+
+        def _publish_state(*, active: bool, timestamp_s: float) -> None:
+            nonlocal state_seq
+            try:
+                left_state = np.asarray(device.get_state("left"), dtype=np.float32)
+                right_state = np.asarray(device.get_state("right"), dtype=np.float32)
+            except Exception as exc:
+                logger.warning("LinkerHand O6 policy state read failed: %s", exc)
+                left_state = right_state = None
+            state_seq += 1
+            state_pub.publish(
+                HAND_COMMAND_TOPIC,
+                HandCommandPacket(
+                    timestamp_s=float(timestamp_s),
+                    driver="linkerhand_o6",
+                    mode="policy",
+                    active=bool(active),
+                    left_pose=left_pose.copy(),
+                    right_pose=right_pose.copy(),
+                    seq=state_seq,
+                    left_state=(
+                        None if left_state is None else left_state.copy()
+                    ),
+                    right_state=(
+                        None if right_state is None else right_state.copy()
+                    ),
+                ),
+            )
+
         try:
             device.connect()
             while not stop_event.is_set():
@@ -461,6 +514,8 @@ def _run_high_level_policy_hand_worker(
                 in_policy = bool(latest_mode is not None and latest_mode.mode == "policy")
                 if was_in_policy and not in_policy:
                     device.open_all(force=True, reason="policy-inactive")
+                    left_pose = np.asarray(config.open_pose, dtype=np.float32)
+                    right_pose = np.asarray(config.open_pose, dtype=np.float32)
                 was_in_policy = in_policy
                 target = target_sub.recv_latest()
                 if _policy_target_is_current(
@@ -469,8 +524,16 @@ def _run_high_level_policy_hand_worker(
                     last_target_seq=last_target_seq,
                     max_age_s=config.frame_timeout_s,
                 ):
-                    _apply_policy_hand_target(device, target, calibration)
+                    left_pose, right_pose = _apply_policy_hand_target(
+                        device,
+                        target,
+                        calibration,
+                    )
                     last_target_seq = int(target.seq)
+                now_s = time.monotonic()
+                if now_s - last_state_s >= state_period_s:
+                    _publish_state(active=in_policy, timestamp_s=now_s)
+                    last_state_s = now_s
                 time.sleep(sleep_s)
         finally:
             try:
@@ -479,6 +542,7 @@ def _run_high_level_policy_hand_worker(
                 target_sub.close()
                 mode_sub.close()
                 command_sub.close()
+                state_pub.close()
 
     _worker_loop("policy_hand", cfg, _main)
 
@@ -495,10 +559,39 @@ def _run_high_level_policy_neck_worker(
         )
         mode_sub = LatestSubscriber(endpoints.mode_pub, MODE_TOPIC)
         command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
+        state_pub = ZmqPublisher(endpoints.neck_command_pub)
         latest_mode: ModeStatePacket | None = None
         last_target_seq = -1
         was_in_policy = False
+        state_seq = 0
+        last_state_s = float("-inf")
+        state_period_s = 1.0 / 30.0
+        yaw_deg = 0.0
+        pitch_deg = 0.0
         sleep_s = 1.0 / max(config.rate_hz, 1.0)
+
+        def _publish_state(*, active: bool, timestamp_s: float) -> None:
+            nonlocal state_seq
+            try:
+                state_yaw_deg, state_pitch_deg = device.read_deg()
+            except Exception as exc:
+                logger.warning("OpenNeck policy state read failed: %s", exc)
+                state_yaw_deg = state_pitch_deg = None
+            state_seq += 1
+            state_pub.publish(
+                NECK_COMMAND_TOPIC,
+                NeckCommandPacket(
+                    timestamp_s=float(timestamp_s),
+                    driver="openneck",
+                    active=bool(active),
+                    yaw_deg=float(yaw_deg),
+                    pitch_deg=float(pitch_deg),
+                    seq=state_seq,
+                    state_yaw_deg=state_yaw_deg,
+                    state_pitch_deg=state_pitch_deg,
+                ),
+            )
+
         try:
             device.connect()
             if config.center_on_start:
@@ -513,6 +606,8 @@ def _run_high_level_policy_neck_worker(
                 in_policy = bool(latest_mode is not None and latest_mode.mode == "policy")
                 if was_in_policy and not in_policy:
                     device.center()
+                    yaw_deg = 0.0
+                    pitch_deg = 0.0
                 was_in_policy = in_policy
                 target = target_sub.recv_latest()
                 if _policy_target_is_current(
@@ -521,8 +616,12 @@ def _run_high_level_policy_neck_worker(
                     last_target_seq=last_target_seq,
                     max_age_s=config.frame_timeout_s,
                 ):
-                    _apply_policy_neck_target(device, target)
+                    yaw_deg, pitch_deg = _apply_policy_neck_target(device, target)
                     last_target_seq = int(target.seq)
+                now_s = time.monotonic()
+                if now_s - last_state_s >= state_period_s:
+                    _publish_state(active=in_policy, timestamp_s=now_s)
+                    last_state_s = now_s
                 time.sleep(sleep_s)
         finally:
             try:
@@ -534,5 +633,6 @@ def _run_high_level_policy_neck_worker(
                 target_sub.close()
                 mode_sub.close()
                 command_sub.close()
+                state_pub.close()
 
     _worker_loop("policy_neck", cfg, _main)

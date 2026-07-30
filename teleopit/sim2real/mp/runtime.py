@@ -1324,6 +1324,16 @@ class _RobotControlWorker:
             if self.high_level_policy_enabled
             else None
         )
+        self._policy_hand_state_sub = (
+            LatestSubscriber(endpoints.hand_command_pub, HAND_COMMAND_TOPIC)
+            if self.high_level_policy_enabled
+            else None
+        )
+        self._policy_neck_state_sub = (
+            LatestSubscriber(endpoints.neck_command_pub, NECK_COMMAND_TOPIC)
+            if self.high_level_policy_enabled
+            else None
+        )
         self._policy_action_sub = (
             LatestSubscriber(endpoints.high_level_policy_result_pub, HIGH_LEVEL_POLICY_ACTION_TOPIC)
             if self.high_level_policy_enabled
@@ -1341,6 +1351,8 @@ class _RobotControlWorker:
         )
         self._mode_pub = ZmqPublisher(endpoints.mode_pub)
         self._record_pub = ZmqPublisher(endpoints.record_pub) if _recording_enabled(cfg) else None
+        self._latest_policy_hand_state: HandCommandPacket | None = None
+        self._latest_policy_neck_state: NeckCommandPacket | None = None
 
         viewers = _parse_sim2real_viewers(cfg)
         self._retarget_viewer = _Sim2RealRetargetViewer(
@@ -1407,6 +1419,8 @@ class _RobotControlWorker:
             self._reference_sub,
             self._events_sub,
             self._policy_video_sub,
+            self._policy_hand_state_sub,
+            self._policy_neck_state_sub,
             self._policy_action_sub,
             self._policy_status_sub,
         ):
@@ -1683,6 +1697,14 @@ class _RobotControlWorker:
         )
         return initial_action
 
+    def _build_high_level_policy_reference_action(self, reference_qpos: object) -> np.ndarray:
+        transform = self._policy_frame_transform
+        if transform is None:
+            raise RuntimeError("High-level policy entry is missing its frame transform")
+        initial_reference = np.zeros(50, dtype=np.float32)
+        initial_reference[:36] = transform.localize_body_action(reference_qpos)
+        return initial_reference
+
     def _start_high_level_policy_entry_session(self) -> None:
         policy_cfg = self._high_level_policy_cfg
         scheduler = self._high_level_policy_scheduler
@@ -1696,18 +1718,28 @@ class _RobotControlWorker:
             root_pos[:2],
             getattr(state, "quat"),
         )
+        active_reference = (
+            np.asarray(self._last_commanded_motion_qpos, dtype=np.float64).copy()
+            if self._last_commanded_motion_qpos is not None
+            else self._standing_qpos.copy()
+        )
+        session_started_s = time.monotonic()
         self._policy_session_id = uuid.uuid4().hex
         scheduler.reset(
             self._policy_session_id,
             initial_action=self._build_high_level_policy_boundary_action(state),
+            initial_reference=self._build_high_level_policy_reference_action(
+                active_reference
+            ),
+            initial_timestamp_s=session_started_s,
         )
         self._policy_entry_pending = True
-        self._policy_entry_deadline_s = time.monotonic() + policy_cfg.entry_timeout_s
+        self._policy_entry_deadline_s = session_started_s + policy_cfg.entry_timeout_s
         self._policy_paused = False
         self._policy_resume_pending = False
         self._policy_resume_deadline_s = None
         self._policy_resume_source_timestamp_ns = None
-        self._policy_hold_qpos = self._build_robot_state_qpos(state)
+        self._policy_hold_qpos = active_reference.copy()
         self._policy_observation_seq = 0
         self._last_policy_video_seq = (
             -1
@@ -1746,17 +1778,36 @@ class _RobotControlWorker:
             return
         publisher = self._policy_control_pub
         frame = self._latest_policy_video
-        transform = self._policy_frame_transform
+        scheduler = self._high_level_policy_scheduler
         session_id = self._policy_session_id
         policy_cfg = self._high_level_policy_cfg
-        if publisher is None or frame is None or transform is None or session_id is None or policy_cfg is None:
+        if (
+            publisher is None
+            or frame is None
+            or scheduler is None
+            or session_id is None
+            or policy_cfg is None
+        ):
             return
         if int(frame.seq) <= self._last_policy_video_seq:
             return
         now_s = time.monotonic()
         if abs(now_s - float(frame.timestamp_s)) > policy_cfg.max_observation_age_s:
             return
-        state = transform.localize_state(build_observation_state(robot_state))
+        self._drain_high_level_policy_hardware_state()
+        hardware_state = self._high_level_policy_hardware_state(
+            now_s=now_s,
+            max_age_s=policy_cfg.max_observation_age_s,
+        )
+        if hardware_state is None:
+            return
+        dex_state, neck_state = hardware_state
+        source_reference_root_pose = scheduler.reference_root_pose_at(
+            float(frame.timestamp_s)
+        )
+        if source_reference_root_pose is None:
+            return
+        body_joint_positions = build_observation_state(robot_state)[:NUM_JOINTS]
         sequence_id = self._policy_observation_seq
         publisher.publish(
             HIGH_LEVEL_POLICY_OBSERVATION_TOPIC,
@@ -1764,13 +1815,70 @@ class _RobotControlWorker:
                 session_id=session_id,
                 sequence_id=sequence_id,
                 onboard_monotonic_timestamp_ns=int(round(float(frame.timestamp_s) * 1e9)),
-                state=state.astype(np.float32, copy=True),
+                body_joint_positions=body_joint_positions.astype(
+                    np.float32,
+                    copy=True,
+                ),
+                dex_state=dex_state,
+                neck_state=neck_state,
+                source_reference_root_pose=source_reference_root_pose,
                 frame=frame,
                 timestamp_s=now_s,
             ),
         )
         self._policy_observation_seq += 1
         self._last_policy_video_seq = int(frame.seq)
+
+    def _drain_high_level_policy_hardware_state(self) -> None:
+        hand_subscriber = self._policy_hand_state_sub
+        neck_subscriber = self._policy_neck_state_sub
+        if hand_subscriber is None or neck_subscriber is None:
+            return
+        hand_state = hand_subscriber.recv_latest()
+        if isinstance(hand_state, HandCommandPacket):
+            self._latest_policy_hand_state = hand_state
+        neck_state = neck_subscriber.recv_latest()
+        if isinstance(neck_state, NeckCommandPacket):
+            self._latest_policy_neck_state = neck_state
+
+    def _high_level_policy_hardware_state(
+        self,
+        *,
+        now_s: float,
+        max_age_s: float,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        hand = self._latest_policy_hand_state
+        neck = self._latest_policy_neck_state
+        if (
+            hand is None
+            or hand.left_state is None
+            or hand.right_state is None
+            or neck is None
+            or neck.state_yaw_deg is None
+            or neck.state_pitch_deg is None
+        ):
+            return None
+        hand_age_s = float(now_s) - float(hand.timestamp_s)
+        neck_age_s = float(now_s) - float(neck.timestamp_s)
+        if not (
+            np.isfinite(hand_age_s)
+            and 0.0 <= hand_age_s <= float(max_age_s)
+            and np.isfinite(neck_age_s)
+            and 0.0 <= neck_age_s <= float(max_age_s)
+        ):
+            return None
+        left_state = np.asarray(hand.left_state, dtype=np.float32).reshape(-1)
+        right_state = np.asarray(hand.right_state, dtype=np.float32).reshape(-1)
+        dex_state = np.concatenate((left_state, right_state), dtype=np.float32)
+        neck_state = np.asarray(
+            [neck.state_yaw_deg, neck.state_pitch_deg],
+            dtype=np.float32,
+        )
+        if dex_state.shape != (12,) or not np.all(np.isfinite(dex_state)):
+            return None
+        if neck_state.shape != (2,) or not np.all(np.isfinite(neck_state)):
+            return None
+        return dex_state.copy(), neck_state.copy()
 
     def _transition_to_high_level_policy(self) -> None:
         state = self.robot.get_state()

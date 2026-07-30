@@ -13,10 +13,11 @@ ZeroMQ/msgpack messages.
 Host workstation (lerobot-teleopit)
   ReplayPolicy or ACT -> policy server
                               |
-                              | float32 state/action + JPEG over TCP
+                              | float32 observations/actions + JPEG over TCP
                               v
 G1 onboard computer (Teleopit)
-  RealSense + G1 state -> asynchronous client -> validated 30 Hz action plan
+  RealSense + G1/O6/OpenNeck state -> asynchronous client
+  -> validated 30 Hz action plan
   -> timestamp-aligned receding-horizon replacement
   -> 50 Hz interpolation -> motion tracker -> G1 joint-angle targets
                            -> LinkerHand O6 / OpenNeck
@@ -41,10 +42,26 @@ Teleopit/teleopit/high_level_policy/hand_calibration.json
 ```
 
 `hand_calibration.json` defines the LinkerHand O6 raw open/close values and
-range tolerance. The current `describe` response identifies the 68D
-observation as `teleopit-g1-state` and the canonical 50D action as
-`teleopit-g1-reference`. The action layout and physical-degree OpenNeck
-commands are enforced by the current code and tests.
+range tolerance. The current `describe` response identifies the 43D model
+observation as `teleopit-g1-joint-pos-dex-neck-state` and the canonical 50D
+action as `teleopit-g1-reference`. The action layout and physical-degree
+OpenNeck commands are enforced by the current code and tests.
+
+Every `get_action` request contains:
+
+```text
+body_joint_positions       float32[29]  measured G1 joint positions, radians
+dex_state                  float32[12]  raw measured left/right O6 readback
+neck_state                 float32[2]   measured yaw/pitch, physical degrees
+source_reference_root_pose float32[7]   session-local xyz + quaternion wxyz
+image                      JPEG         RGB 640x480 camera observation
+```
+
+The host calibrates the raw O6 values and combines the first three arrays into
+the 43D model state. `source_reference_root_pose` is the active reference root
+at the camera timestamp. It is not a model input: the host uses it to
+reconstruct session-local absolute root poses from source-relative model
+output.
 
 The canonical action layout is:
 
@@ -125,9 +142,10 @@ Teleopit submits the latest eligible observation every
 `high_level_policy.replan_steps` 30 Hz source frames; the default is three. The
 stride must not exceed `max_action_horizon` from the host's `describe`
 response. The isolated client permits only one REQ/REP exchange at a time, but
-the active plan continues while that request is in flight. The ACT host uses
-the echoed onboard monotonic timestamp to aggregate overlapping predictions,
-and Teleopit uses the same timestamp to replace the active plan at the correct
+the active plan continues while that request is in flight. Each learned-policy
+response is independently reconstructed from its request's source reference;
+the host does not aggregate overlapping chunks. Teleopit uses the echoed
+onboard monotonic timestamp to replace the active plan at the correct
 source-frame position.
 
 The production camera contract is exactly RGB `uint8[480,640,3]` at 30 Hz.
@@ -213,6 +231,13 @@ normal resumable pause state, and holds the latest body, hand, and neck
 commands. Invalid or stale responses are rejected without replacing the active
 valid plan. After recovery, `B` requests resume; execution stays paused until a
 fresh validated chunk arrives. Only `X` changes the mode to `STANDING`.
+
+The scheduler records its rate-limited session-local reference at 50 Hz.
+For each camera frame it looks up or interpolates that history at the camera's
+monotonic timestamp and sends the resulting root pose as
+`source_reference_root_pose`. Session start seeds the history from the active
+standing reference, and pause/resume records held-reference boundaries, so the
+anchor never comes from measured robot root pose.
 
 The default safety envelope lives under `high_level_policy.safety` in
 `high_level_policy_sim2real.yaml`. Adjust it only after checking the recorded

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
+from collections import deque
 from dataclasses import dataclass
 import math
 
@@ -15,11 +17,11 @@ from teleopit.math_utils import quat_inv_np, quat_mul_np
 from teleopit.sim.reference_motion import interpolate_retarget_qpos
 
 
-STATE_DIM = 68
 ACTION_DIM = 50
 BODY_ACTION_DIM = 36
-STATE_BASE_QUATERNION = slice(58, 62)
 ROOT_QUATERNION = slice(3, 7)
+REFERENCE_HISTORY_SIZE = 256
+MAX_REFERENCE_INTERPOLATION_GAP_PERIODS = 2.5
 
 
 def _normalized_quaternion(value: object, *, name: str) -> np.ndarray:
@@ -58,20 +60,6 @@ class PolicyFrameTransform:
             origin_xy=(float(xy[0]), float(xy[1])),
             yaw_rad=_yaw_from_quaternion(quaternion_wxyz),
         )
-
-    def localize_state(self, state: object) -> np.ndarray:
-        localized = np.asarray(state, dtype=np.float32).reshape(-1).copy()
-        if localized.shape != (STATE_DIM,) or not np.all(np.isfinite(localized)):
-            raise ValueError(f"High-level policy state must be finite float32[{STATE_DIM}]")
-        base_quaternion = _normalized_quaternion(
-            localized[STATE_BASE_QUATERNION], name="state base quaternion"
-        )
-        inverse_yaw = quat_inv_np(_yaw_quaternion(self.yaw_rad))
-        localized_quaternion = quat_mul_np(inverse_yaw, base_quaternion)
-        localized[STATE_BASE_QUATERNION] = _normalized_quaternion(
-            localized_quaternion, name="localized state base quaternion"
-        )
-        return localized
 
     def localize_body_action(self, action: object) -> np.ndarray:
         body = np.asarray(action, dtype=np.float32).reshape(-1).copy()
@@ -128,6 +116,9 @@ class HighLevelPolicyScheduler:
         self._paused_at_s: float | None = None
         self._timestamp_shift_s = 0.0
         self._last_output_action: np.ndarray | None = None
+        self._reference_history: deque[tuple[float, np.ndarray]] = deque(
+            maxlen=REFERENCE_HISTORY_SIZE
+        )
 
     @property
     def session_id(self) -> str | None:
@@ -141,9 +132,20 @@ class HighLevelPolicyScheduler:
     def paused(self) -> bool:
         return self._paused_at_s is not None
 
-    def reset(self, session_id: str, *, initial_action: object | None = None) -> None:
+    def reset(
+        self,
+        session_id: str,
+        *,
+        initial_action: object | None = None,
+        initial_reference: object | None = None,
+        initial_timestamp_s: float | None = None,
+    ) -> None:
         if not isinstance(session_id, str) or not session_id:
             raise ValueError("High-level policy session_id must be non-empty")
+        if (initial_reference is None) != (initial_timestamp_s is None):
+            raise ValueError(
+                "High-level policy initial reference and initial_timestamp_s must be provided together"
+            )
         self._session_id = session_id
         self._chunk = None
         self._last_source_sequence_id = -1
@@ -158,6 +160,10 @@ class HighLevelPolicyScheduler:
         self._last_output_action = (
             None if initial_output is None else initial_output.copy()
         )
+        self._reference_history.clear()
+        if initial_reference is not None:
+            assert initial_timestamp_s is not None
+            self._record_reference(initial_timestamp_s, initial_reference)
 
     def clear(self) -> None:
         self._session_id = None
@@ -167,6 +173,7 @@ class HighLevelPolicyScheduler:
         self._paused_at_s = None
         self._timestamp_shift_s = 0.0
         self._last_output_action = None
+        self._reference_history.clear()
 
     def accept(self, chunk: PolicyActionChunk, *, now_s: float) -> None:
         self._accept(chunk, now_s=now_s)
@@ -243,16 +250,21 @@ class HighLevelPolicyScheduler:
 
     def pause(self, now_s: float) -> None:
         if self._paused_at_s is None:
-            self._paused_at_s = float(now_s)
+            timestamp_s = self._validated_timestamp(now_s, name="pause now_s")
+            self._paused_at_s = timestamp_s
+            self._record_last_output_reference(timestamp_s)
 
     def resume(self, now_s: float) -> None:
         if self._paused_at_s is None:
             return
-        self._timestamp_shift_s += max(0.0, float(now_s) - self._paused_at_s)
+        timestamp_s = self._validated_timestamp(now_s, name="resume now_s")
+        self._timestamp_shift_s += max(0.0, timestamp_s - self._paused_at_s)
         self._paused_at_s = None
+        self._record_last_output_reference(timestamp_s)
 
     def sample(self, now_s: float) -> np.ndarray | None:
-        desired = self._sample_unlimited(now_s)
+        timestamp_s = self._validated_timestamp(now_s, name="sample now_s")
+        desired = self._sample_unlimited(timestamp_s)
         if desired is None:
             return None
         previous = self._last_output_action
@@ -260,7 +272,64 @@ class HighLevelPolicyScheduler:
         if previous is not None and safety is not None:
             desired = self._rate_limit_output(previous, desired, safety=safety)
         self._last_output_action = desired.copy()
+        self._record_reference(timestamp_s, desired)
         return desired
+
+    def reference_root_pose_at(self, timestamp_s: float) -> np.ndarray | None:
+        """Return the active session-local reference root at a camera timestamp."""
+
+        query_s = self._validated_timestamp(timestamp_s, name="reference timestamp_s")
+        history = tuple(self._reference_history)
+        if not history:
+            return None
+        if query_s <= history[0][0]:
+            return history[0][1].copy()
+        if query_s >= history[-1][0]:
+            return history[-1][1].copy()
+        timestamps = [sample[0] for sample in history]
+        right_index = bisect_right(timestamps, query_s)
+        left_timestamp, left_pose = history[right_index - 1]
+        right_timestamp, right_pose = history[right_index]
+        if (
+            right_timestamp - left_timestamp
+            > MAX_REFERENCE_INTERPOLATION_GAP_PERIODS / self.output_hz
+        ):
+            return left_pose.copy()
+        alpha = (query_s - left_timestamp) / (right_timestamp - left_timestamp)
+        return np.asarray(
+            interpolate_retarget_qpos(left_pose, right_pose, alpha),
+            dtype=np.float32,
+        )
+
+    def _record_last_output_reference(self, timestamp_s: float) -> None:
+        if self._last_output_action is not None:
+            self._record_reference(timestamp_s, self._last_output_action)
+
+    def _record_reference(self, timestamp_s: float, action: object) -> None:
+        timestamp = self._validated_timestamp(
+            timestamp_s,
+            name="reference history timestamp_s",
+        )
+        validated = self._validate_single_action(action, name="reference history action")
+        root_pose = validated[:7].copy()
+        if self._reference_history:
+            latest_timestamp = self._reference_history[-1][0]
+            if timestamp < latest_timestamp:
+                raise ValueError(
+                    "High-level policy reference history timestamp must not decrease: "
+                    f"last={latest_timestamp:.9f}s received={timestamp:.9f}s"
+                )
+            if timestamp == latest_timestamp:
+                self._reference_history[-1] = (timestamp, root_pose)
+                return
+        self._reference_history.append((timestamp, root_pose))
+
+    @staticmethod
+    def _validated_timestamp(value: object, *, name: str) -> float:
+        timestamp = float(value)
+        if not np.isfinite(timestamp) or timestamp < 0.0:
+            raise ValueError(f"High-level policy {name} must be finite and >= 0")
+        return timestamp
 
     def _sample_unlimited(self, now_s: float) -> np.ndarray | None:
         chunk = self._chunk

@@ -152,6 +152,13 @@ eligible observation every configured `replan_steps` at the 30 Hz action rate
 while the current plan keeps executing. The isolated client keeps at most one
 ZeroMQ request in flight. Each newer response is aligned with its echoed
 onboard monotonic observation timestamp and replaces the active plan.
+Each `get_action` request carries the camera JPEG, measured G1 joint positions,
+raw measured O6 readback, measured OpenNeck angles, and the active
+session-local reference root pose at that camera timestamp. The first three
+state arrays form the host's 43D model observation. The source pose is not a
+model input; it anchors reconstruction of the model's source-relative root
+output. Teleopit's scheduler obtains it from a short history of references
+actually sent to the motion tracker, never from the measured robot root.
 
 Pico and high-level-policy deployment use separate scripts. The policy runtime
 does not start PicoBridge, GMR, or the Pico reference worker:
@@ -189,7 +196,8 @@ structure. During active development, Teleopit and `lerobot-teleopit` must be
 updated together. Their only shared data file is `hand_calibration.json`, which
 contains the LinkerHand O6 open/close calibration. See the
 [host-policy deployment tutorial](https://BotRunner64.github.io/Teleopit/tutorials/high-level-policy-sim2real)
-for the 68D observation, 50D action layout, supported 1-to-50-frame action
+for the 43D model observation, source-reference request anchor, 50D action
+layout, supported 1-to-50-frame action
 horizon, safety envelope, host startup, and operator procedure.
 
 ## OpenNeck Active Vision

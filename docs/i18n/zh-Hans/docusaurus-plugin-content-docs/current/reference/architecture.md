@@ -18,10 +18,13 @@ Pico 手部和主动视觉路径是可选的进程隔离 worker。它们复用�
 `PicoBridge` 接收器，不会向 167 维运控策略观测增加字段。手部或颈部故障不能停止
 G1 身体控制。这些可选硬件路径只支持机载部署；外部主机 Pico 部署只支持全身控制。
 
-主机高层策略部署与 Pico 运行时彼此独立。单独的主机环境接收 JPEG RGB 和
-`observation.state(68)`，再通过严格的 ZeroMQ/msgpack 消息返回 canonical
-`float32[T,50]` action chunk。机载校验器和调度器把其中的身体部分转换为 36 维参考，
-交给现有 motion tracker；主机输出不能绕过 tracker，也不能直接成为电机命令。
+主机高层策略部署与 Pico 运行时彼此独立。单独的主机环境接收 JPEG RGB、G1 实测关节
+位置、O6 原始实测 readback、OpenNeck 实测角度，以及 observation 时刻的 source
+reference root pose。身体、手部和颈部数组组成 43 维模型观测；session-local source
+pose 只用于重建 source-relative root 输出。主机再通过严格的 ZeroMQ/msgpack 消息返回
+canonical `float32[T,50]` action chunk。机载校验器和调度器把其中的身体部分转换为
+36 维参考，交给现有 motion tracker；主机输出不能绕过 tracker，也不能直接成为电机
+命令。
 
 Teleopit 和主机环境共享语义数据和一份完全相同的 `hand_calibration.json`，但不会导入
 对方的 Python 包。当前 client/server 代码和协议测试定义网络结构，因此协议变化时
@@ -92,7 +95,7 @@ tests/                                — 单元、协议和集成测试
 | 分发动作数据 | 递归 minimal HDF5 `shard_*.h5` 文件 |
 | 可选手部 | LinkerHand L6/O6，支持 gripper 或 PICO 手部姿态输入 |
 | 可选主动视觉 | 使用物理角度的 OpenNeck yaw/pitch |
-| 主机策略观测 | JPEG RGB + `observation.state(68)` |
+| 主机策略观测 | JPEG RGB + G1 关节位置（29 维）+ O6 原始 readback（12 维）+ OpenNeck 角度（2 维）；请求还携带相机时刻的 active reference root pose（7 维） |
 | 主机策略动作 | `float32[T,50]`，30 Hz 源时间线，`T` 在 `[1,50]` 内 |
 | 主机策略身体控制 | 36 维根部/关节参考，通过现有 50 Hz motion tracker |
 
