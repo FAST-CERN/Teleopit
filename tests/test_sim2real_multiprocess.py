@@ -19,11 +19,13 @@ from teleopit.recording.hdf5 import (
     ACTION_KEY,
     FRAME_INDEX_KEY,
     HAND_ACTION_KEY,
+    HAND_STATE_KEY,
     HDF5_RECORDING_FORMAT,
     HDF5_RECORDING_VERSION,
     IMAGE_KEY,
     MODE_KEY,
     NECK_ACTION_KEY,
+    NECK_STATE_KEY,
     STATE_KEY,
     TIMESTAMP_KEY,
     build_mode_observation,
@@ -123,6 +125,26 @@ def test_sim2real_runtime_rejects_recording_without_input_video() -> None:
         "recording": {"enabled": True},
     }
     with pytest.raises(ValueError, match="recording.enabled=true requires input.video.enabled=true"):
+        Sim2RealRuntime(cfg)
+
+
+@pytest.mark.parametrize(
+    ("device_cfg", "message"),
+    [
+        ({"hands": {"enabled": True, "sides": ["left"]}}, "hands.sides"),
+        ({"neck": {"enabled": True, "dry_run": True}}, "neck.dry_run"),
+    ],
+)
+def test_sim2real_runtime_rejects_recording_without_device_readback(
+    device_cfg: dict[str, object],
+    message: str,
+) -> None:
+    cfg = {
+        "input": {"provider": "pico4"},
+        "recording": {"enabled": True},
+        **device_cfg,
+    }
+    with pytest.raises(ValueError, match=message):
         Sim2RealRuntime(cfg)
 
 
@@ -469,10 +491,14 @@ def test_pico_auxiliary_failure_does_not_stop_pico_input(monkeypatch, failure_st
 def test_neck_command_publisher_is_only_created_for_recording(monkeypatch, recording_enabled: bool) -> None:
     publisher_endpoints: list[str] = []
     published_topics: list[str] = []
+    published_packets: list[object] = []
 
     class FakeRuntime:
         def start(self) -> None:
             return None
+
+        def read_deg(self) -> tuple[float, float]:
+            return 1.0, -2.0
 
         def close(self) -> None:
             return None
@@ -489,8 +515,8 @@ def test_neck_command_publisher_is_only_created_for_recording(monkeypatch, recor
             publisher_endpoints.append(endpoint)
 
         def publish(self, topic: str, payload: object) -> None:
-            del payload
             published_topics.append(topic)
+            published_packets.append(payload)
 
         def close(self) -> None:
             return None
@@ -512,6 +538,11 @@ def test_neck_command_publisher_is_only_created_for_recording(monkeypatch, recor
 
     assert publisher_endpoints == ([endpoints.neck_command_pub] if recording_enabled else [])
     assert published_topics == (["neck_command"] if recording_enabled else [])
+    if recording_enabled:
+        packet = published_packets[0]
+        assert isinstance(packet, NeckCommandPacket)
+        assert packet.state_yaw_deg == 1.0
+        assert packet.state_pitch_deg == -2.0
 
 
 @pytest.mark.parametrize("worker_name", ["neck_worker", "pico_input"])
@@ -602,7 +633,7 @@ def test_hdf5_recording_schema() -> None:
     features = sidecar["features"]
 
     assert sidecar["format"] == HDF5_RECORDING_FORMAT
-    assert sidecar["version"] == HDF5_RECORDING_VERSION
+    assert sidecar["version"] == HDF5_RECORDING_VERSION == 4
     assert sidecar["fps"] == 30
     assert sidecar["robot_type"] == "unitree_g1_29dof"
     assert sidecar["hand_type"] == "linkerhand_o6"
@@ -615,19 +646,26 @@ def test_hdf5_recording_schema() -> None:
     assert features[MODE_KEY]["shape"] == []
     assert features[MODE_KEY]["dtype"] == "int8"
     assert features[ACTION_KEY]["shape"] == [36]
+    assert features[HAND_STATE_KEY]["shape"] == [12]
     assert features[HAND_ACTION_KEY]["shape"] == [12]
+    assert features[NECK_STATE_KEY]["shape"] == [2]
     assert features[NECK_ACTION_KEY]["shape"] == [2]
     assert features[STATE_KEY]["groups"]["joint_pos"] == [0, 29]
     assert features[STATE_KEY]["groups"]["projected_gravity"] == [65, 68]
     assert features[MODE_KEY]["values"]["pause"] == 3
     assert features[ACTION_KEY]["groups"]["reference_joint_pos"] == [7, 36]
+    assert features[HAND_STATE_KEY]["groups"]["left_hand_state"] == [0, 6]
+    assert features[HAND_STATE_KEY]["groups"]["right_hand_state"] == [6, 12]
     assert features[HAND_ACTION_KEY]["groups"]["left_hand_target"] == [0, 6]
     assert features[HAND_ACTION_KEY]["groups"]["right_hand_target"] == [6, 12]
     assert features[NECK_ACTION_KEY]["names"] == ["yaw_deg", "pitch_deg"]
+    assert features[NECK_STATE_KEY]["names"] == ["yaw_deg", "pitch_deg"]
+    assert features[NECK_STATE_KEY]["units"] == "degrees"
     assert features[NECK_ACTION_KEY]["units"] == "degrees"
     assert "range" not in features[NECK_ACTION_KEY]
     assert len(features[STATE_KEY]["names"]) == 68
     assert len(features[ACTION_KEY]["names"]) == 36
+    assert len(features[HAND_STATE_KEY]["names"]) == 12
     assert len(features[HAND_ACTION_KEY]["names"]) == 12
 
 
@@ -655,7 +693,9 @@ def test_hdf5_recording_schema_optional_action_combinations(
 
     assert schema.has_hand_action is has_hand_action
     assert schema.has_neck_action is has_neck_action
+    assert (HAND_STATE_KEY in features) is has_hand_action
     assert (HAND_ACTION_KEY in features) is has_hand_action
+    assert (NECK_STATE_KEY in features) is has_neck_action
     assert (NECK_ACTION_KEY in features) is has_neck_action
 
 
@@ -681,7 +721,9 @@ def test_hdf5_recorder_mp4_sidecar_writes_sync_metadata(tmp_path: Path) -> None:
             state=np.arange(68, dtype=np.float32),
             mode=build_mode_observation("mocap"),
             action=np.arange(36, dtype=np.float32),
+            hand_state=np.arange(12, dtype=np.float32) + 20.0,
             hand_action=np.arange(12, dtype=np.float32),
+            neck_state=np.array([11.5, -7.5], dtype=np.float32),
             neck_action=np.array([12.5, -8.0], dtype=np.float32),
         )
     recorder.save_episode()
@@ -718,8 +760,14 @@ def test_hdf5_recorder_mp4_sidecar_writes_sync_metadata(tmp_path: Path) -> None:
         assert h5[MODE_KEY].shape == (2,)
         assert h5[MODE_KEY].dtype == np.dtype(np.int8)
         assert h5[ACTION_KEY].shape == (2, 36)
+        assert h5[HAND_STATE_KEY].shape == (2, 12)
         assert h5[HAND_ACTION_KEY].shape == (2, 12)
+        assert h5[NECK_STATE_KEY].shape == (2, 2)
         assert h5[NECK_ACTION_KEY].shape == (2, 2)
+        np.testing.assert_allclose(
+            h5[NECK_STATE_KEY][...],
+            np.array([[11.5, -7.5], [11.5, -7.5]], dtype=np.float32),
+        )
         np.testing.assert_allclose(
             h5[NECK_ACTION_KEY][...],
             np.array([[12.5, -8.0], [12.5, -8.0]], dtype=np.float32),
@@ -761,7 +809,9 @@ def test_hdf5_recorder_resumes_and_keeps_tasks_in_editable_manifest(tmp_path: Pa
         "episode_000001.h5",
     ]
     with h5py.File(tmp_path / "data" / "episode_000001.h5", "r") as h5:
+        assert HAND_STATE_KEY not in h5
         assert HAND_ACTION_KEY not in h5
+        assert NECK_STATE_KEY not in h5
         assert NECK_ACTION_KEY not in h5
 
 
@@ -1465,10 +1515,14 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             state: np.ndarray,
             mode: object,
             action: np.ndarray,
+            hand_state: np.ndarray | None = None,
+            neck_state: np.ndarray | None = None,
             hand_action: np.ndarray | None = None,
             neck_action: np.ndarray | None = None,
         ) -> None:
             calls.append("frame")
+            assert hand_state is not None
+            assert neck_state is not None
             assert hand_action is not None
             assert neck_action is not None
             frames.append(
@@ -1477,6 +1531,8 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
                     "state": state.copy(),
                     "mode": np.asarray(mode).copy(),
                     "action": action.copy(),
+                    "hand_state": hand_state.copy(),
+                    "neck_state": neck_state.copy(),
                     "hand_action": hand_action.copy(),
                     "neck_action": neck_action.copy(),
                 }
@@ -1546,7 +1602,6 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
         worker._save_episode()
         assert calls == ["start", "discard"]
 
-        worker._start_episode()
         worker._latest_hand_command = HandCommandPacket(
             timestamp_s=2.05,
             driver="linkerhand_l6",
@@ -1555,6 +1610,8 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             left_pose=np.arange(6, dtype=np.float32),
             right_pose=np.arange(6, 12, dtype=np.float32),
             seq=1,
+            left_state=np.arange(20, 26, dtype=np.float32),
+            right_state=np.arange(26, 32, dtype=np.float32),
         )
         worker._latest_neck_command = NeckCommandPacket(
             timestamp_s=2.06,
@@ -1563,7 +1620,10 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             yaw_deg=12.5,
             pitch_deg=-8.0,
             seq=1,
+            state_yaw_deg=11.5,
+            state_pitch_deg=-7.5,
         )
+        worker._start_episode()
         desc = writer.write(np.full((2, 2, 3), 5, dtype=np.uint8), timestamp_s=2.1)
         worker._handle_video(desc)
         worker._save_episode()
@@ -1573,7 +1633,9 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
         np.testing.assert_allclose(frames[0]["state"], np.arange(68, dtype=np.float32))
         assert int(frames[0]["mode"]) == int(build_mode_observation("standing"))
         np.testing.assert_allclose(frames[0]["action"], np.arange(36, dtype=np.float32))
+        np.testing.assert_allclose(frames[0]["hand_state"], np.arange(20, 32, dtype=np.float32))
         np.testing.assert_allclose(frames[0]["hand_action"], np.arange(12, dtype=np.float32))
+        np.testing.assert_allclose(frames[0]["neck_state"], np.array([11.5, -7.5], dtype=np.float32))
         np.testing.assert_allclose(frames[0]["neck_action"], np.array([12.5, -8.0], dtype=np.float32))
 
         worker._latest_record = RecordStepPacket(

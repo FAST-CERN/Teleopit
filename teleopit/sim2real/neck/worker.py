@@ -26,6 +26,9 @@ class NeckRuntime:
         if self._cfg.center_on_start:
             self._device.center()
 
+    def read_deg(self) -> tuple[float, float]:
+        return self._device.read_deg()
+
     def tick(
         self,
         *,
@@ -75,6 +78,9 @@ class NeckRuntime:
 class DisabledNeckRuntime:
     def start(self) -> None:
         return None
+
+    def read_deg(self) -> tuple[float, float]:
+        raise RuntimeError("OpenNeck control is disabled")
 
     def tick(
         self,

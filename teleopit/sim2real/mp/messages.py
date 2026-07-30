@@ -83,6 +83,8 @@ class HandCommandPacket:
     left_pose: Float64Array
     right_pose: Float64Array
     seq: int
+    left_state: Float64Array | None = None
+    right_state: Float64Array | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,8 @@ class NeckCommandPacket:
     yaw_deg: float
     pitch_deg: float
     seq: int
+    state_yaw_deg: float | None = None
+    state_pitch_deg: float | None = None
 
 
 @dataclass(frozen=True)

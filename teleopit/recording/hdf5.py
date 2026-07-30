@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 IMAGE_KEY = "observation.images.d435i_rgb"
 STATE_KEY = "observation.state"
+HAND_STATE_KEY = "observation.state.hand"
+NECK_STATE_KEY = "observation.state.neck"
 MODE_KEY = "observation.mode"
 ACTION_KEY = "action"
 HAND_ACTION_KEY = "action.hand"
@@ -32,12 +34,14 @@ NECK_ACTION_KEY = "action.neck"
 FRAME_INDEX_KEY = "frame_index"
 TIMESTAMP_KEY = "timestamp"
 STATE_DIM = 68
+HAND_STATE_DIM = 12
+NECK_STATE_DIM = 2
 ACTION_DIM = FULL_QPOS_DIM
 HAND_ACTION_DIM = 12
 NECK_ACTION_DIM = 2
 DEFAULT_IMAGE_SHAPE = (480, 640, 3)
 HDF5_RECORDING_FORMAT = "teleopit_hdf5"
-HDF5_RECORDING_VERSION = 3
+HDF5_RECORDING_VERSION = 4
 DEFAULT_ROBOT_TYPE = "unitree_g1_29dof"
 NO_HAND_TYPE = "none"
 SUPPORTED_HAND_TYPES = (NO_HAND_TYPE, "linkerhand_l6", "linkerhand_o6")
@@ -63,6 +67,10 @@ class RecordingSchema:
     neck_type: str = NO_NECK_TYPE
     state_key: str = STATE_KEY
     state_dim: int = STATE_DIM
+    hand_state_key: str = HAND_STATE_KEY
+    hand_state_dim: int = HAND_STATE_DIM
+    neck_state_key: str = NECK_STATE_KEY
+    neck_state_dim: int = NECK_STATE_DIM
     mode_key: str = MODE_KEY
     action_key: str = ACTION_KEY
     action_dim: int = ACTION_DIM
@@ -181,6 +189,15 @@ def hdf5_schema(schema: RecordingSchema) -> dict[str, object]:
         },
     }
     if schema.has_hand_action:
+        features[schema.hand_state_key] = {
+            "dtype": "float32",
+            "shape": [schema.hand_state_dim],
+            "names": _hand_action_names(schema.hand_type),
+            "groups": {
+                "left_hand_state": [0, 6],
+                "right_hand_state": [6, 12],
+            },
+        }
         features[schema.hand_action_key] = {
             "dtype": "float32",
             "shape": [schema.hand_action_dim],
@@ -191,6 +208,12 @@ def hdf5_schema(schema: RecordingSchema) -> dict[str, object]:
             },
         }
     if schema.has_neck_action:
+        features[schema.neck_state_key] = {
+            "dtype": "float32",
+            "shape": [schema.neck_state_dim],
+            "names": ["yaw_deg", "pitch_deg"],
+            "units": "degrees",
+        }
         features[schema.neck_action_key] = {
             "dtype": "float32",
             "shape": [schema.neck_action_dim],
@@ -364,6 +387,8 @@ class TeleopitHDF5Recorder:
         state: np.ndarray,
         mode: object,
         action: np.ndarray,
+        hand_state: np.ndarray | None = None,
+        neck_state: np.ndarray | None = None,
         hand_action: np.ndarray | None = None,
         neck_action: np.ndarray | None = None,
     ) -> None:
@@ -375,28 +400,19 @@ class TeleopitHDF5Recorder:
         state_arr = self._validate_vector(state, self._schema.state_key, self._schema.state_dim)
         mode_value = self._validate_mode(mode)
         action_arr = self._validate_vector(action, self._schema.action_key, self._schema.action_dim)
-        hand_action_arr: np.ndarray | None = None
-        if self._schema.has_hand_action:
-            if hand_action is None:
-                raise ValueError(f"{self._schema.hand_action_key} is required for hand_type={self._schema.hand_type}")
-            hand_action_arr = self._validate_vector(
-                hand_action,
-                self._schema.hand_action_key,
-                self._schema.hand_action_dim,
-            )
-        elif hand_action is not None:
-            raise ValueError(f"{self._schema.hand_action_key} must be omitted for hand_type={NO_HAND_TYPE}")
-        neck_action_arr: np.ndarray | None = None
-        if self._schema.has_neck_action:
-            if neck_action is None:
-                raise ValueError(f"{self._schema.neck_action_key} is required for neck_type={self._schema.neck_type}")
-            neck_action_arr = self._validate_vector(
-                neck_action,
-                self._schema.neck_action_key,
-                self._schema.neck_action_dim,
-            )
-        elif neck_action is not None:
-            raise ValueError(f"{self._schema.neck_action_key} must be omitted for neck_type={NO_NECK_TYPE}")
+        optional_vectors: dict[str, np.ndarray] = {}
+        for enabled, value, key, dim in (
+            (self._schema.has_hand_action, hand_state, self._schema.hand_state_key, self._schema.hand_state_dim),
+            (self._schema.has_hand_action, hand_action, self._schema.hand_action_key, self._schema.hand_action_dim),
+            (self._schema.has_neck_action, neck_state, self._schema.neck_state_key, self._schema.neck_state_dim),
+            (self._schema.has_neck_action, neck_action, self._schema.neck_action_key, self._schema.neck_action_dim),
+        ):
+            if enabled and value is None:
+                raise ValueError(f"{key} is required when its device is enabled")
+            if not enabled and value is not None:
+                raise ValueError(f"{key} must be omitted when its device is disabled")
+            if value is not None:
+                optional_vectors[key] = self._validate_vector(value, key, dim)
 
         row = self._frames_in_episode
         for dataset in self._datasets.values():
@@ -409,10 +425,8 @@ class TeleopitHDF5Recorder:
         self._datasets[self._schema.state_key][row] = state_arr
         self._datasets[self._schema.mode_key][row] = mode_value
         self._datasets[self._schema.action_key][row] = action_arr
-        if hand_action_arr is not None:
-            self._datasets[self._schema.hand_action_key][row] = hand_action_arr
-        if neck_action_arr is not None:
-            self._datasets[self._schema.neck_action_key][row] = neck_action_arr
+        for key, value in optional_vectors.items():
+            self._datasets[key][row] = value
         self._frames_in_episode += 1
 
     def save_episode(self) -> None:
@@ -664,18 +678,14 @@ class TeleopitHDF5Recorder:
                 self._schema.action_dim,
             ),
         }
-        if self._schema.has_hand_action:
-            datasets[self._schema.hand_action_key] = self._create_vector_dataset(
-                h5,
-                self._schema.hand_action_key,
-                self._schema.hand_action_dim,
-            )
-        if self._schema.has_neck_action:
-            datasets[self._schema.neck_action_key] = self._create_vector_dataset(
-                h5,
-                self._schema.neck_action_key,
-                self._schema.neck_action_dim,
-            )
+        for enabled, key, dim in (
+            (self._schema.has_hand_action, self._schema.hand_state_key, self._schema.hand_state_dim),
+            (self._schema.has_hand_action, self._schema.hand_action_key, self._schema.hand_action_dim),
+            (self._schema.has_neck_action, self._schema.neck_state_key, self._schema.neck_state_dim),
+            (self._schema.has_neck_action, self._schema.neck_action_key, self._schema.neck_action_dim),
+        ):
+            if enabled:
+                datasets[key] = self._create_vector_dataset(h5, key, dim)
         return datasets
 
     @staticmethod

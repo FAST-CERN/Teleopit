@@ -43,6 +43,9 @@ class FakeDevice:
         self.moves.append((yaw_deg, pitch_deg))
         return max(-20.0, min(20.0, yaw_deg)), max(-10.0, min(10.0, pitch_deg))
 
+    def read_deg(self) -> tuple[float, float]:
+        return -18.5, 9.5
+
     def close(self) -> None:
         self.closed = True
 
@@ -130,6 +133,7 @@ def test_neck_runtime_sends_degrees_and_returns_applied_target() -> None:
     runtime = NeckRuntime(cfg, device=device)
 
     runtime.start()
+    assert runtime.read_deg() == (-18.5, 9.5)
     command = runtime.tick(
         hmd_rotation_wxyz=_quat_y(30.0),
         spine3_rotation_wxyz=_quat_y(0.0),

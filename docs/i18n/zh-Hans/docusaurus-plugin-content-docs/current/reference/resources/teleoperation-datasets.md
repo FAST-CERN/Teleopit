@@ -57,6 +57,8 @@ shape、dtype、名称和分组。硬件类型必须与当前运行配置一致�
 | `frame_index` | scalar | 相机/动作帧序号 |
 | `timestamp` | scalar | 单调时钟时间戳，单位为秒 |
 | `observation.state` | `(68,)` | G1 关节状态、基座方向/角速度和投影重力 |
+| `observation.state.hand` | `(12,)`，可选 | 左右 LinkerHand 硬件关节回读 |
+| `observation.state.neck` | `(2,)`，可选 | 以度为单位的 OpenNeck 舵机 yaw/pitch 回读 |
 | `observation.mode` | scalar | `STANDING`、`MOCAP`、`ARMS` 或动捕暂停状态码 |
 | `action` | `(36,)` | motion tracker 使用的根部姿态和 29 关节参考 |
 | `action.hand` | `(12,)`，可选 | 启用手部控制时的左右 LinkerHand 目标 |
@@ -64,11 +66,14 @@ shape、dtype、名称和分组。硬件类型必须与当前运行配置一致�
 
 `observation.state` 的顺序为 `joint_pos(29)`、`joint_vel(29)`、
 `base_quat_wxyz(4)`、`base_ang_vel(3)` 和 `projected_gravity(3)`。
+`observation.state.hand` 使用 LinkerHand SDK 的 0-255 关节数值，顺序是左手六个
+通道，然后是右手六个通道。`observation.state.neck` 是 OpenNeck `read_deg()`
+返回的 `[yaw_deg, pitch_deg]`。
 `observation.mode` 使用 `standing=0`、`mocap=1`、`arms=2` 和 `pause=3`。
 `action` 的结构是 `root_pos(3) + root_quat_wxyz(4) + reference_joint_pos(29)`。
 
 相机 RGB 只保存在 MP4 sidecar 中，HDF5 不重复保存 raw image。只有启用对应硬件时，
-才会出现可选 action 字段。
+才会出现可选 state 和 action 字段。
 
 ## 提交与恢复规则
 

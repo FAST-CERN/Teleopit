@@ -21,8 +21,10 @@ from teleopit.recording.hdf5 import (
     ACTION_KEY,
     FRAME_INDEX_KEY,
     HAND_ACTION_KEY,
+    HAND_STATE_KEY,
     MODE_KEY,
     NECK_ACTION_KEY,
+    NECK_STATE_KEY,
     RecordingSchema,
     STATE_KEY,
     TIMESTAMP_KEY,
@@ -66,9 +68,17 @@ def _write_recording(
         h5.create_dataset(MODE_KEY, data=np.ones(frames, dtype=np.int8))
         h5.create_dataset(ACTION_KEY, data=action)
         if hand_type != "none":
+            h5.create_dataset(HAND_STATE_KEY, data=np.full((frames, 12), 20.0, dtype=np.float32))
             h5.create_dataset(HAND_ACTION_KEY, data=np.zeros((frames, 12), dtype=np.float32))
         if neck_type != "none":
-            h5.create_dataset(NECK_ACTION_KEY, data=np.zeros((frames, 2), dtype=np.float32))
+            h5.create_dataset(
+                NECK_STATE_KEY,
+                data=np.tile(np.array([11.5, -7.5], dtype=np.float32), (frames, 1)),
+            )
+            h5.create_dataset(
+                NECK_ACTION_KEY,
+                data=np.tile(np.array([12.5, -8.0], dtype=np.float32), (frames, 1)),
+            )
 
     video_path = root / "videos" / "d435i_rgb" / "episode_000000.mp4"
     video_path.parent.mkdir(parents=True)
@@ -99,8 +109,12 @@ def test_recording_viewer_loads_schema_episode_and_tracking_metrics(tmp_path: Pa
     assert dataset.image_shape == (4, 6, 3)
     assert dataset.has_hand_action is True
     assert dataset.has_neck_action is True
+    assert data.hand_state is not None
     assert data.hand_action is not None
+    assert data.neck_state is not None
     assert data.neck_action is not None
+    np.testing.assert_allclose(data.hand_state[0], 20.0)
+    np.testing.assert_allclose(data.neck_state[0], [11.5, -7.5])
     assert data.joint_rmse_rad == pytest.approx(0.1)
     assert data.root_orientation_rmse_rad == pytest.approx(0.0)
     assert data.max_joint_error_rad == pytest.approx(0.1)

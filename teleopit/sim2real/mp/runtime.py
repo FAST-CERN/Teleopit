@@ -380,6 +380,12 @@ def _validate_new_runtime_config(cfg: Any) -> None:
     if _recording_enabled(cfg):
         if provider != "pico4":
             raise ValueError("recording.enabled=true requires input.provider=pico4")
+        if bool(cfg_get(hands_cfg, "enabled", False)):
+            hand_sides = {str(side).strip().lower() for side in cfg_get(hands_cfg, "sides", ("left", "right"))}
+            if hand_sides != {"left", "right"}:
+                raise ValueError("hand-state recording requires hands.sides=[left, right]")
+        if neck_cfg.enabled and neck_cfg.dry_run:
+            raise ValueError("neck-state recording requires neck.dry_run=false")
         rec_cfg = _recording_cfg(cfg)
         if str(cfg_get(rec_cfg, "format", "hdf5")) != "hdf5":
             raise ValueError("Only recording.format=hdf5 is supported")
@@ -2725,13 +2731,39 @@ class _RecordingWorker:
             logger.warning("Recording stopped because mode is no longer recordable: %s", record.mode)
             self._discard_episode("mode not recordable")
             return
+        if self._schema.has_hand_action and (
+            self._latest_hand_command.left_state is None
+            or self._latest_hand_command.right_state is None
+        ):
+            return
+        if self._schema.has_neck_action and (
+            self._latest_neck_command.state_yaw_deg is None
+            or self._latest_neck_command.state_pitch_deg is None
+        ):
+            return
         image = self._frame_reader.read(descriptor, copy=True)
+        hand_state = (
+            normalize_hand_action(
+                self._latest_hand_command.left_state,
+                self._latest_hand_command.right_state,
+            )
+            if self._schema.has_hand_action
+            else None
+        )
         hand_action = (
             normalize_hand_action(
                 self._latest_hand_command.left_pose,
                 self._latest_hand_command.right_pose,
             )
             if self._schema.has_hand_action
+            else None
+        )
+        neck_state = (
+            build_neck_action(
+                self._latest_neck_command.state_yaw_deg,
+                self._latest_neck_command.state_pitch_deg,
+            )
+            if self._schema.has_neck_action
             else None
         )
         neck_action = (
@@ -2747,8 +2779,11 @@ class _RecordingWorker:
             "state": np.asarray(record.observation_state, dtype=np.float32),
             "mode": record.observation_mode,
             "action": np.asarray(record.action_reference_qpos, dtype=np.float32),
+            "hand_state": hand_state,
             "hand_action": hand_action,
         }
+        if neck_state is not None:
+            frame_kwargs["neck_state"] = neck_state
         if neck_action is not None:
             frame_kwargs["neck_action"] = neck_action
         self._recorder.add_frame(**frame_kwargs)
@@ -2815,6 +2850,11 @@ def _run_neck_worker(
             nonlocal command_seq
             if neck_command_pub is None:
                 return
+            try:
+                state_yaw_deg, state_pitch_deg = runtime.read_deg()
+            except Exception:
+                logger.exception("OpenNeck state read failed")
+                state_yaw_deg = state_pitch_deg = None
             command_seq += 1
             neck_command_pub.publish(
                 NECK_COMMAND_TOPIC,
@@ -2825,12 +2865,14 @@ def _run_neck_worker(
                     yaw_deg=float(yaw_deg),
                     pitch_deg=float(pitch_deg),
                     seq=command_seq,
+                    state_yaw_deg=state_yaw_deg,
+                    state_pitch_deg=state_pitch_deg,
                 ),
             )
 
         try:
             runtime.start()
-            if neck_cfg.center_on_start:
+            if neck_cfg.center_on_start or neck_command_pub is not None:
                 _publish_neck_command(
                     timestamp_s=time.monotonic(),
                     active=False,
@@ -2932,6 +2974,11 @@ def _run_hand_worker(
         hand_mode = str(cfg_get(hands_cfg, "mode", "gripper")).strip().lower()
         left_pose, right_pose = _configured_open_hand_pose(cfg)
         command_seq = 0
+        recording_enabled = _recording_enabled(cfg)
+        state_interval_s = (
+            1.0 / float(cfg_get(_recording_cfg(cfg), "fps", 30))
+            if recording_enabled else 0.0
+        )
 
         def _apply_hand_commands(commands: tuple[HandPoseCommand, ...]) -> bool:
             nonlocal left_pose, right_pose
@@ -2951,8 +2998,20 @@ def _run_hand_worker(
                     logger.warning("Ignoring hand command with unsupported side %r", hand_command.side)
             return changed
 
-        def _publish_hand_command(*, timestamp_s: float, active_state: bool) -> None:
+        def _publish_hand_command(
+            *,
+            timestamp_s: float,
+            active_state: bool,
+            read_state: bool = True,
+        ) -> None:
             nonlocal command_seq
+            left_state = right_state = None
+            if recording_enabled and read_state:
+                try:
+                    left_state = np.asarray(runtime.get_state("left"), dtype=np.float32)
+                    right_state = np.asarray(runtime.get_state("right"), dtype=np.float32)
+                except Exception:
+                    logger.exception("LinkerHand state read failed")
             command_seq += 1
             hand_command_pub.publish(
                 HAND_COMMAND_TOPIC,
@@ -2964,6 +3023,8 @@ def _run_hand_worker(
                     left_pose=np.asarray(left_pose, dtype=np.float32).copy(),
                     right_pose=np.asarray(right_pose, dtype=np.float32).copy(),
                     seq=command_seq,
+                    left_state=None if left_state is None else left_state.copy(),
+                    right_state=None if right_state is None else right_state.copy(),
                 ),
             )
 
@@ -2972,6 +3033,7 @@ def _run_hand_worker(
             startup_s = time.monotonic()
             _apply_hand_commands(startup_commands)
             _publish_hand_command(timestamp_s=startup_s, active_state=False)
+            last_state_s = startup_s
             while not stop_event.is_set():
                 command = command_sub.recv_latest()
                 if isinstance(command, CommandPacket) and command.command == "shutdown":
@@ -2994,9 +3056,11 @@ def _run_hand_worker(
                         active=active,
                         now_s=now_s,
                     )
-                    if commands:
-                        if _apply_hand_commands(commands):
-                            _publish_hand_command(timestamp_s=now_s, active_state=active)
+                    commands_changed = bool(commands) and _apply_hand_commands(commands)
+                    state_due = recording_enabled and now_s - last_state_s >= state_interval_s
+                    if commands_changed or state_due:
+                        _publish_hand_command(timestamp_s=now_s, active_state=active)
+                        last_state_s = now_s
                 except Exception:
                     logger.exception("Dexterous hand worker tick failed; hand control continues")
                 time.sleep(sleep_s)
@@ -3005,7 +3069,7 @@ def _run_hand_worker(
                 shutdown_commands = runtime.close()
                 shutdown_s = time.monotonic()
                 if _apply_hand_commands(shutdown_commands):
-                    _publish_hand_command(timestamp_s=shutdown_s, active_state=False)
+                    _publish_hand_command(timestamp_s=shutdown_s, active_state=False, read_state=False)
             finally:
                 hand_sub.close()
                 controller_sub.close()

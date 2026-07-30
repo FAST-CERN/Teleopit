@@ -302,7 +302,7 @@ feature definitions. `robot_type` comes from `robot.type`; `hand_type` is `none`
 when hands are disabled, otherwise it is the configured `hands.driver`.
 `neck_type` is `none` when active-neck control is disabled, otherwise it is the
 configured `neck.driver`. These enabled flags directly control whether their
-action fields are recorded; there are no separate recording switches.
+state and action fields are recorded; there are no separate recording switches.
 `episodes.jsonl` contains one object per saved episode with `episode_index`,
 `frames`, editable `task`, HDF5 path, and video paths. Task prompts can therefore
 be relabeled without rewriting HDF5 or MP4 data. Starting another recording run
@@ -323,6 +323,8 @@ HDF5 datasets:
 frame_index                    int64[N]
 timestamp                      float64[N]
 observation.state              float32[N, 68]
+observation.state.hand         float32[N, 12]  # only when hands are enabled
+observation.state.neck         float32[N, 2]   # only when OpenNeck is enabled
 observation.mode               int8[N]
 action                         float32[N, 36]
 action.hand                    float32[N, 12]  # only when hands are enabled
@@ -335,6 +337,10 @@ attributes. RGB frames remain in MP4 and are associated through
 
 `observation.state` is ordered as `joint_pos(29)`, `joint_vel(29)`,
 `base_quat_wxyz(4)`, `base_ang_vel(3)`, and `projected_gravity(3)`.
+`observation.state.hand` is the latest LinkerHand hardware readback:
+`left_state(6) + right_state(6)`, using the SDK's 0-255 joint values.
+`observation.state.neck` is the latest OpenNeck servo position returned by
+`read_deg()`: `[yaw_deg, pitch_deg]` in degrees.
 `observation.mode` is a numeric categorical: `standing=0`, `mocap=1`,
 `arms=2`, and `pause=3`. `action` is the current reference qpos:
 `root_pos(3) + root_quat_wxyz(4) + reference_joint_pos(29)`. It is the

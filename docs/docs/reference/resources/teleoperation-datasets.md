@@ -63,6 +63,8 @@ Each HDF5 file contains only frame-aligned arrays:
 | `frame_index` | scalar | Camera/action frame index |
 | `timestamp` | scalar | Monotonic timestamp in seconds |
 | `observation.state` | `(68,)` | G1 joint state, base orientation/angular velocity, and projected gravity |
+| `observation.state.hand` | `(12,)`, optional | Left/right LinkerHand hardware joint readback |
+| `observation.state.neck` | `(2,)`, optional | OpenNeck servo yaw/pitch readback in degrees |
 | `observation.mode` | scalar | `STANDING`, `MOCAP`, `ARMS`, or paused mocap code |
 | `action` | `(36,)` | Root pose plus 29-joint reference consumed by the motion tracker |
 | `action.hand` | `(12,)`, optional | Left/right LinkerHand target when hand control is enabled |
@@ -70,12 +72,16 @@ Each HDF5 file contains only frame-aligned arrays:
 
 `observation.state` is ordered as `joint_pos(29)`, `joint_vel(29)`,
 `base_quat_wxyz(4)`, `base_ang_vel(3)`, and `projected_gravity(3)`.
+`observation.state.hand` uses the LinkerHand SDK's 0-255 joint values, ordered
+as six left-hand channels followed by six right-hand channels.
+`observation.state.neck` is `[yaw_deg, pitch_deg]` returned by OpenNeck
+`read_deg()`.
 `observation.mode` uses `standing=0`, `mocap=1`, `arms=2`, and `pause=3`.
 `action` is `root_pos(3) + root_quat_wxyz(4) + reference_joint_pos(29)`.
 
 Camera RGB is stored only in the MP4 sidecar; HDF5 does not duplicate raw image
-frames. Optional action fields appear exactly when the corresponding hardware
-is enabled.
+frames. Optional state and action fields appear exactly when the corresponding
+hardware is enabled.
 
 ## Commit and Recovery Rules
 

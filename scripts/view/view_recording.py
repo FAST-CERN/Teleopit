@@ -24,10 +24,12 @@ from teleopit.recording.hdf5 import (
     ACTION_KEY,
     FRAME_INDEX_KEY,
     HAND_ACTION_KEY,
+    HAND_STATE_KEY,
     HDF5_RECORDING_FORMAT,
     HDF5_RECORDING_VERSION,
     MODE_KEY,
     NECK_ACTION_KEY,
+    NECK_STATE_KEY,
     STATE_KEY,
     TIMESTAMP_KEY,
 )
@@ -84,7 +86,9 @@ class EpisodeReviewData:
     state: np.ndarray
     mode: np.ndarray
     action: np.ndarray
+    hand_state: np.ndarray | None
     hand_action: np.ndarray | None
+    neck_state: np.ndarray | None
     neck_action: np.ndarray | None
     joint_error: np.ndarray
     group_error: dict[str, np.ndarray]
@@ -266,27 +270,29 @@ def load_recording_dataset(recording_root: str | Path) -> RecordingDataset:
     has_neck_action = neck_type != "none"
     hand_names: tuple[str, ...] = ()
     if has_hand_action:
+        if _feature_shape(features, HAND_STATE_KEY) != (12,):
+            raise ValueError(f"Recording schema feature {HAND_STATE_KEY!r} must be 12D")
+        _feature_names(features, HAND_STATE_KEY, 12)
         if _feature_shape(features, HAND_ACTION_KEY) != (12,):
             raise ValueError(f"Recording schema feature {HAND_ACTION_KEY!r} must be 12D")
         hand_names = _feature_names(features, HAND_ACTION_KEY, 12)
-    elif HAND_ACTION_KEY in features:
-        raise ValueError(
-            f"Recording schema hand_type={hand_type!r} must not define {HAND_ACTION_KEY!r}"
-        )
+    elif HAND_STATE_KEY in features or HAND_ACTION_KEY in features:
+        raise ValueError(f"Recording schema hand_type={hand_type!r} must not define hand features")
     if has_neck_action:
+        if _feature_shape(features, NECK_STATE_KEY) != (2,):
+            raise ValueError(f"Recording schema feature {NECK_STATE_KEY!r} must be 2D")
+        _feature_names(features, NECK_STATE_KEY, 2)
         if _feature_shape(features, NECK_ACTION_KEY) != (2,):
             raise ValueError(f"Recording schema feature {NECK_ACTION_KEY!r} must be 2D")
         _feature_names(features, NECK_ACTION_KEY, 2)
-    elif NECK_ACTION_KEY in features:
-        raise ValueError(
-            f"Recording schema neck_type={neck_type!r} must not define {NECK_ACTION_KEY!r}"
-        )
+    elif NECK_STATE_KEY in features or NECK_ACTION_KEY in features:
+        raise ValueError(f"Recording schema neck_type={neck_type!r} must not define neck features")
 
     hdf5_keys = [FRAME_INDEX_KEY, TIMESTAMP_KEY, STATE_KEY, MODE_KEY, ACTION_KEY]
     if has_hand_action:
-        hdf5_keys.append(HAND_ACTION_KEY)
+        hdf5_keys.extend((HAND_STATE_KEY, HAND_ACTION_KEY))
     if has_neck_action:
-        hdf5_keys.append(NECK_ACTION_KEY)
+        hdf5_keys.extend((NECK_STATE_KEY, NECK_ACTION_KEY))
 
     manifest_path = root / "episodes.jsonl"
     try:
@@ -387,9 +393,9 @@ def load_episode_review_data(
 
     keys = [FRAME_INDEX_KEY, TIMESTAMP_KEY, STATE_KEY, MODE_KEY, ACTION_KEY]
     if dataset.has_hand_action:
-        keys.append(HAND_ACTION_KEY)
+        keys.extend((HAND_STATE_KEY, HAND_ACTION_KEY))
     if dataset.has_neck_action:
-        keys.append(NECK_ACTION_KEY)
+        keys.extend((NECK_STATE_KEY, NECK_ACTION_KEY))
     with h5py.File(episode.data_path, "r") as h5:
         arrays = {key: np.asarray(h5[key]) for key in keys}
 
@@ -398,9 +404,19 @@ def load_episode_review_data(
     state = arrays[STATE_KEY].astype(np.float64, copy=False)
     mode = arrays[MODE_KEY].astype(np.int64, copy=False)
     action = arrays[ACTION_KEY].astype(np.float64, copy=False)
+    hand_state = (
+        arrays[HAND_STATE_KEY].astype(np.float64, copy=False)
+        if dataset.has_hand_action
+        else None
+    )
     hand_action = (
         arrays[HAND_ACTION_KEY].astype(np.float64, copy=False)
         if dataset.has_hand_action
+        else None
+    )
+    neck_state = (
+        arrays[NECK_STATE_KEY].astype(np.float64, copy=False)
+        if dataset.has_neck_action
         else None
     )
     neck_action = (
@@ -419,8 +435,12 @@ def load_episode_review_data(
         STATE_KEY: state,
         ACTION_KEY: action,
     }
+    if hand_state is not None:
+        numeric_arrays[HAND_STATE_KEY] = hand_state
     if hand_action is not None:
         numeric_arrays[HAND_ACTION_KEY] = hand_action
+    if neck_state is not None:
+        numeric_arrays[NECK_STATE_KEY] = neck_state
     if neck_action is not None:
         numeric_arrays[NECK_ACTION_KEY] = neck_action
     for key, values in numeric_arrays.items():
@@ -468,7 +488,9 @@ def load_episode_review_data(
         state=state,
         mode=mode,
         action=action,
+        hand_state=hand_state,
         hand_action=hand_action,
+        neck_state=neck_state,
         neck_action=neck_action,
         joint_error=joint_error,
         group_error=group_error,
@@ -925,37 +947,50 @@ class RecordingReviewerApp:
             order=1,
         )
 
-        if self._data.hand_action is not None and self._hand_dropdown is not None:
+        if (
+            self._data.hand_state is not None
+            and self._data.hand_action is not None
+            and self._hand_dropdown is not None
+        ):
             selected_hand = str(self._hand_dropdown.value)
             hand_index = self._dataset.hand_names.index(selected_hand)
             self._hand_chart = self._add_chart(
                 self._signals_folder,
-                data=(timestamps, self._data.hand_action[:, hand_index]),
+                data=(
+                    timestamps,
+                    self._data.hand_state[:, hand_index],
+                    self._data.hand_action[:, hand_index],
+                ),
                 series=(
                     {"label": "time"},
-                    {"label": selected_hand, "stroke": "#8b5cf6", "width": 2.0},
+                    {"label": "state", "stroke": "#3b82f6", "width": 2.0},
+                    {"label": "target", "stroke": "#8b5cf6", "width": 2.0},
                 ),
-                title="LinkerHand target",
+                title=f"LinkerHand state vs target: {selected_hand}",
                 y_label="SDK pose",
                 order=2,
             )
         else:
             self._hand_chart = None
 
-        if self._data.neck_action is not None:
+        if self._data.neck_state is not None and self._data.neck_action is not None:
             self._neck_chart = self._add_chart(
                 self._signals_folder,
                 data=(
                     timestamps,
+                    self._data.neck_state[:, 0],
                     self._data.neck_action[:, 0],
+                    self._data.neck_state[:, 1],
                     self._data.neck_action[:, 1],
                 ),
                 series=(
                     {"label": "time"},
-                    {"label": "yaw", "stroke": "#06b6d4", "width": 2.0},
-                    {"label": "pitch", "stroke": "#ec4899", "width": 2.0},
+                    {"label": "yaw state", "stroke": "#3b82f6", "width": 2.0},
+                    {"label": "yaw target", "stroke": "#06b6d4", "width": 2.0},
+                    {"label": "pitch state", "stroke": "#f59e0b", "width": 2.0},
+                    {"label": "pitch target", "stroke": "#ec4899", "width": 2.0},
                 ),
-                title="OpenNeck target",
+                title="OpenNeck state vs target",
                 y_label="degrees",
                 order=3,
             )

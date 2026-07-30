@@ -408,6 +408,10 @@ def test_hand_runtime_reports_actual_open_commands() -> None:
         def connect(self) -> None:
             calls.append(("connect", None, None))
 
+        def get_state(self, side: str) -> tuple[float, ...]:
+            start = 1.0 if side == "left" else 11.0
+            return tuple(start + index for index in range(6))
+
         def send_pose(self, side, pose, *, force=False, reason="") -> None:
             calls.append((side, tuple(pose), reason))
 
@@ -436,6 +440,7 @@ def test_hand_runtime_reports_actual_open_commands() -> None:
     runtime = HandRuntime(FakeDevice(), mapper, open_commands=open_commands)
 
     startup = runtime.start()
+    assert runtime.get_state("right") == (11.0, 12.0, 13.0, 14.0, 15.0, 16.0)
     ticked = runtime.tick(controller_snapshot=None, hand_snapshot=None, active=True, now_s=1.0)
     mapper.fail = True
     failure = runtime.tick(controller_snapshot=None, hand_snapshot=None, active=True, now_s=2.0)

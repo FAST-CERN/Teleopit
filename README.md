@@ -109,9 +109,11 @@ and neck types, plus feature shapes, names, and groups. `episodes.jsonl` maps ea
 to its HDF5/video files and stores its editable task prompt. HDF5 contains only
 frame-aligned arrays: `observation.state(68)`, scalar `observation.mode`, and
 `action(36)` as the aligned reference qpos consumed by the motion tracker.
-`action.hand(12)` is present exactly when LinkerHand control is enabled, and
-`action.neck(2)` contains the latest mechanically clamped OpenNeck
-`[yaw_deg, pitch_deg]` target when OpenNeck control is enabled.
+When LinkerHand control is enabled, `observation.state.hand(12)` contains the
+left/right hardware joint readback and `action.hand(12)` contains the target.
+When OpenNeck control is enabled, `observation.state.neck(2)` contains the
+servo `[yaw_deg, pitch_deg]` readback and `action.neck(2)` contains the latest
+mechanically clamped target.
 Recording is non-critical: an incompatible output schema stops only the
 recording worker while G1 control continues. Episodes interrupted before their
 manifest entry is committed are discarded on the next recording startup.
