@@ -51,6 +51,7 @@ class FakeLinkerHandApi:
         self.hand = FakeInnerHand()
         self.speed: list[int] | None = None
         self.poses: list[list[int]] = []
+        self.state = [1, 2, 3, 4, 5, 6] if hand_type == "left" else [11, 12, 13, 14, 15, 16]
         self.close_can_calls = 0
         FakeLinkerHandApi.instances.append(self)
 
@@ -59,6 +60,9 @@ class FakeLinkerHandApi:
 
     def finger_move(self, pose: list[int]) -> None:
         self.poses.append(list(pose))
+
+    def get_state(self) -> list[int]:
+        return list(self.state)
 
     def close_can(self) -> None:
         self.close_can_calls += 1
@@ -206,8 +210,10 @@ def test_linkerhand_l6_device_starts_sdk(monkeypatch) -> None:
 
     device.connect()
     device.send_pose("left", cfg.close_pose)
+    state = device.get_state("left")
     device.close()
 
+    assert state == (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
     assert [hand.can for hand in FakeLinkerHandApi.instances] == ["can0", "can1"]
     assert FakeLinkerHandApi.instances[0].speed == [50, 50, 50, 50, 50, 50]
     assert FakeLinkerHandApi.instances[0].poses[-2] == list(cfg.close_pose)
@@ -243,8 +249,10 @@ def test_linkerhand_o6_device_starts_sdk(monkeypatch) -> None:
 
     device.connect()
     device.send_pose("left", cfg.close_pose)
+    state = device.get_state("right")
     device.close()
 
+    assert state == (11.0, 12.0, 13.0, 14.0, 15.0, 16.0)
     assert [hand.hand_joint for hand in FakeLinkerHandApi.instances] == ["O6", "O6"]
     assert [hand.can for hand in FakeLinkerHandApi.instances] == ["can0", "can1"]
     assert FakeLinkerHandApi.instances[0].speed == [255, 255, 255, 255, 255, 255]

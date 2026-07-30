@@ -255,6 +255,10 @@ def test_openneck_device_uses_angle_api_and_returns_applied_target(monkeypatch) 
             calls.append(f"move-{yaw_deg}-{pitch_deg}")
             return SimpleNamespace(yaw_deg=-20.0, pitch_deg=10.0)
 
+        def read_deg(self) -> SimpleNamespace:
+            calls.append("read")
+            return SimpleNamespace(yaw_deg=-18.5, pitch_deg=9.5)
+
         def release_torque(self) -> None:
             calls.append("release-torque")
 
@@ -271,15 +275,18 @@ def test_openneck_device_uses_angle_api_and_returns_applied_target(monkeypatch) 
     device.connect()
     device.center()
     applied = device.move_deg(-25.0, 15.0)
+    state = device.read_deg()
     device.release_torque()
     device.close()
 
     assert applied == (-20.0, 10.0)
+    assert state == (-18.5, 9.5)
     assert calls == [
         "init-neck.json-/dev/ttyACM0",
         "connect",
         "center",
         "move--25.0-15.0",
+        "read",
         "release-torque",
         "close",
     ]
@@ -295,6 +302,9 @@ def test_dry_run_neck_device_reuses_openneck_calibration_clamp(monkeypatch) -> N
         def move_deg(self, yaw_deg: float, pitch_deg: float) -> None:
             del yaw_deg, pitch_deg
             raise AssertionError("dry-run must not send a hardware command")
+
+        def read_deg(self) -> None:
+            raise AssertionError("dry-run must not read hardware state")
 
         def _angle_to_step(self, axis: str, angle_deg: float) -> int:
             calls.append(f"angle-to-step-{axis}-{angle_deg}")
@@ -319,6 +329,12 @@ def test_dry_run_neck_device_reuses_openneck_calibration_clamp(monkeypatch) -> N
     )
     device.connect()
     applied = device.move_deg(25.0, -15.0)
+    try:
+        device.read_deg()
+    except RuntimeError as exc:
+        assert "no hardware state" in str(exc)
+    else:
+        raise AssertionError("expected dry-run state read to fail")
     device.close()
 
     assert applied == (20.0, -10.0)

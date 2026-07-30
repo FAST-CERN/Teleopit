@@ -131,6 +131,17 @@ class LinkerHandO6Device(HandDevice):
             raise
         self.open_all(force=True, reason="startup")
 
+    def get_state(self, side: str) -> tuple[float, ...]:
+        if side not in self.config.sides:
+            raise ValueError(f"LinkerHand O6 side is not configured: {side!r}")
+        hand = self._hands.get(side)
+        if hand is None:
+            raise RuntimeError(f"LinkerHand O6 {side} is not connected")
+        state = tuple(float(value) for value in hand.get_state())
+        if len(state) != 6:
+            raise RuntimeError(f"LinkerHand O6 {side} state must contain 6 values, got {len(state)}")
+        return state
+
     def send_pose(self, side: str, pose: Sequence[int], *, force: bool = False, reason: str = "") -> None:
         del reason
         next_pose = tuple(_uint8(value, f"{side}.pose") for value in pose)
