@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/teleopit_logo.jpg" width="80" alt="Teleopit">
+  <img src="assets/teleopit.png" width="720" alt="Teleopit whole-body teleoperation demo">
 </p>
 
 <h1 align="center">Teleopit</h1>
