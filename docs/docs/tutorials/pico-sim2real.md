@@ -241,4 +241,4 @@ for the stored fields.
 
 - [Standalone Standing Test](standalone-standing)
 - [BVH Playback on Unitree G1](bvh-sim2real)
-- [Host Policy Deployment on Unitree G1](high-level-policy-sim2real)
+- [From Teleoperation Data to Imitation Learning / VLA Deployment](high-level-policy-sim2real)

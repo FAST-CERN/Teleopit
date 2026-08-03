@@ -223,4 +223,4 @@ python scripts/view/view_recording.py \
 
 - [单独测试站立运控](standalone-standing)
 - [在 Unitree G1 上回放 BVH](bvh-sim2real)
-- [在 Unitree G1 上部署主机策略](high-level-policy-sim2real)
+- [从遥操数据到模仿学习 / VLA 真机部署](high-level-policy-sim2real)

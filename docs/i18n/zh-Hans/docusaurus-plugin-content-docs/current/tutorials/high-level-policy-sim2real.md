@@ -1,233 +1,217 @@
 ---
-sidebar_position: 6
+sidebar_position: 4
 ---
 
-# 在 Unitree G1 上部署主机策略
+# 从遥操数据到模仿学习 / VLA 真机部署
 
-该工作流在主机工作站上运行 LeRobot 策略服务，在 G1 onboard 计算机上运行
-Teleopit motion tracker。两个仓库使用相互独立的 Python 环境，只通过严格的
-ZeroMQ/msgpack 消息通信。
-
-```text
-主机工作站（lerobot-teleopit）
-  ReplayPolicy 或 ACT -> policy server
-                              |
-                              | 通过 TCP 传输 float32 observations/actions + JPEG
-                              v
-G1 onboard 计算机（Teleopit）
-  RealSense + G1/O6/OpenNeck state -> 异步 client
-  -> 已验证的 30 Hz action plan
-  -> 按时间戳对齐的 receding-horizon 替换
-  -> 50 Hz 插值 -> motion tracker -> G1 关节角目标
-                 -> LinkerHand O6 / OpenNeck
-```
-
-这是与 Pico 遥操作相互独立的运行时。该工作流不应启动 PicoBridge、GMR 或
-`run_sim2real.py`。在 Pico 控制与主机策略控制之间切换时，需要先停止一个运行时，
-再启动另一个。
-
-## 1. 网络消息与手部标定
-
-当前 client/server 代码和协议测试定义 request 与 response 结构。活跃开发期间，
-任何结构变更都必须同时修改 Teleopit 和 `lerobot-teleopit`；不支持旧网络 envelope。
-
-两个仓库唯一共享的数据文件为：
+本教程串联完整工作流：使用 Teleopit 录制 Pico 示教，在 `lerobot-teleopit` 中训练
+ACT 或 GR00T N1.7 策略，再把训练结果运行到 Unitree G1 真机上。
 
 ```text
-lerobot-teleopit/src/lerobot_teleopit/hand_calibration.json
-Teleopit/teleopit/high_level_policy/hand_calibration.json
+Pico 示教
+  -> Teleopit v4 录制数据
+  -> LeRobot Dataset
+  -> ACT 或 GR00T checkpoint
+  -> 主机策略服务
+  -> Teleopit onboard motion tracker
+  -> G1 + LinkerHand O6 + OpenNeck
 ```
 
-`hand_calibration.json` 定义 LinkerHand O6 的 raw open/close 值和 range tolerance。
-当前 `describe` 响应将 43 维模型 observation 标识为
-`teleopit-g1-joint-pos-dex-neck-state`，将 canonical 50 维 action 标识为
-`teleopit-g1-reference`。action 布局和使用物理角度的 OpenNeck 命令由当前代码与测试
-约束。
+Teleopit 负责录制和实时机器人控制；
+[`lerobot-teleopit`](https://github.com/BotRunner64/lerobot-teleopit)
+负责数据转换、模型训练和主机策略服务。两个仓库使用相互独立的 Python 环境；主机发送
+reference motion，而不是 G1 电机命令。
 
-每个 `get_action` 请求都包含：
+## 开始之前
 
-```text
-body_joint_positions       float32[29]  G1 实测关节位置，弧度
-dex_state                  float32[12]  左/右 O6 原始实测 readback
-neck_state                 float32[2]   实测 yaw/pitch，物理角度
-source_reference_root_pose float32[7]   session-local xyz + quaternion wxyz
-image                      JPEG         RGB 640x480 相机观测
-```
+- [Unitree G1 VR 遥操作](pico-sim2real)已经可靠运行。
+- Onboard 配置包含两只 LinkerHand O6、OpenNeck 和一台 RealSense RGB 相机。
+  当前训练与部署路径要求这些硬件全部存在。
+- Onboard 计算机已经按照[安装指南](../getting-started/installation)安装 recording、
+  OpenNeck、LinkerHand 和 somehand 支持，并且存在
+  `ckpt/track_g1_neck_o6.onnx`。
+- 使用相同 G1 网络接口和底层 tracking policy 时，
+  [独立站立测试](standalone-standing)已经稳定运行。
+- 主机工作站已经单独按照
+  [`lerobot-teleopit` 安装指南](https://github.com/BotRunner64/lerobot-teleopit#installation)
+  准备完成。
 
-主机会标定 O6 原始值，并把前三个数组组合成 43 维模型 state。
-`source_reference_root_pose` 是相机时间戳对应的 active reference root。它不是模型
-输入；主机用它从 source-relative 模型输出重建 session-local absolute root pose。
+:::danger 始终把 Unitree 遥控器拿在手中
+动作异常时立即按 `L1+R1` 进入 `DAMPING`。确保机器人周围有足够的安全空间，
+安排另一人随时准备扶住或停止机器人，并且不要同时运行两个可能向 G1 发送命令的程序。
+:::
 
-canonical action 布局为：
+## 1. 录制并检查示教
 
-```text
-[0:3]    session-local root x/y 与绝对 z
-[3:7]    session-local root quaternion，wxyz
-[7:36]   G1 29D reference joint positions，弧度
-[36:48]  左/右 LinkerHand O6 closure，[0, 1]
-[48:50]  OpenNeck yaw/pitch，物理角度
-```
-
-主机发送的是 reference motion，而不是 G1 电机命令。Teleopit 会把 body slice 送入
-现有 motion tracker，由它为本地 G1 控制器生成关节角目标。
-
-## 2. 准备主机
-
-在工作站上使用独立的 `lerobot-teleopit` 环境。首次网络测试应先运行
-ReplayPolicy，再使用 ACT：
+在 G1 onboard 计算机上运行录制配置。下面的示例使用 Pico 手部姿态重定向；
+如果示教需要使用手柄扳机，请改用 `hands.mode=gripper`。
 
 ```bash
-cd /path/to/lerobot-teleopit
-uv run teleopit-policy-server \
-  --dataset-root data/lerobot/teleopit_v3 \
-  --repo-id local/teleopit_v3 \
+python scripts/run/run_sim2real.py \
+  --config-name sim2real_record \
+  controller.policy_path=ckpt/track_g1_neck_o6.onnx \
+  real_robot.network_interface=eth0 \
+  hands.enabled=true \
+  hands.driver=linkerhand_o6 \
+  hands.mode=vr_hand_pose \
+  neck.enabled=true \
+  recording.output_dir=data/recordings/my_task \
+  recording.task="pick up the object"
+```
+
+使用 G1 遥控器进入 `MOCAP` 或 `ARMS`，然后操作录制终端：
+
+| 按键 | 动作 |
+|------|------|
+| `R` | RealSense 有新鲜画面后，开始一条 episode |
+| `S` | 保存当前 episode |
+| `D` | 丢弃当前 episode |
+| `Q` | 关闭运行时 |
+
+每个 dataset 只录制一项任务，并保持 `recording.task` 一致。只保存成功示教，
+同时覆盖有意义的初始姿态、物体位置和执行速度变化。
+
+训练前检查同步视频、实测状态和 reference：
+
+```bash
+python scripts/view/view_recording.py \
+  --recording data/recordings/my_task
+```
+
+出现追踪丢失、相机中断或不安全 reference 时，应丢弃对应 episode。录制 schema
+和恢复规则见[遥操数据集](../reference/resources/teleoperation-datasets)。
+
+## 2. 将 Dataset 交给 `lerobot-teleopit`
+
+把完整录制目录复制到主机，不要展开目录层级或修改其中的名称。典型 source 目录为：
+
+```text
+lerobot-teleopit/data/raw/my_task/
+├── schema.json
+├── episodes.jsonl
+├── data/
+└── videos/d435i_rgb/
+```
+
+当前转换器要求 Teleopit v4 dataset 包含 LinkerHand O6 和 OpenNeck 的 state/action
+字段；缺失字段会被拒绝，不会自动补齐。如果同一任务录制在多个目录中，请在转换前使用
+主机仓库的 `merge_raw_datasets.py` 工具合并。
+
+后续所有主机命令都应在独立的 `lerobot-teleopit` 环境中运行。其
+[数据转换与训练指南](https://github.com/BotRunner64/lerobot-teleopit/blob/main/docs/training-entrypoint.zh-CN.md)
+包含依赖、合并选项、训练规模、多 GPU 设置和实验日志说明。
+
+## 3. 在主机上转换并训练
+
+最短的数据转换命令为：
+
+```bash
+python scripts/convert_dataset.py \
+  --source data/raw/my_task \
+  --output data/lerobot/my_task \
+  --repo-id local/my_task \
+  --workers 4
+```
+
+选择一种训练命令。训练 ACT：
+
+```bash
+python scripts/train_policy.py \
+  --policy act \
+  --dataset-root data/lerobot/my_task \
+  --devices 0
+```
+
+训练 GR00T N1.7：
+
+```bash
+python scripts/train_policy.py \
+  --policy groot \
+  --dataset-root data/lerobot/my_task \
+  --devices 0,1,2,3
+```
+
+追加 `--dry-run` 可以检查最终启动配置，而不实际开始训练。如果没有设置
+`--output-dir`，训练结果会写入 `outputs/train/`。可部署产物是对应 run 下的
+`checkpoints/last/pretrained_model/` 目录。
+
+## 4. 使用 ReplayPolicy 验证真机链路
+
+加载 learned checkpoint 前，先从主机回放一条已经录制的 episode：
+
+```bash
+python scripts/run_policy_server.py \
+  --backend replay \
+  --dataset-root data/lerobot/my_task \
+  --repo-id local/my_task \
   --episode 0 \
+  --start-frame 0 \
   --chunk-size 15 \
   --bind tcp://0.0.0.0:5555
 ```
 
-使用 ACT 时，改用主机仓库中的 checkpoint 命令。只在可信的机器人网络上放行 TCP
-端口 `5555`。该协议有意不提供远程关机或电机控制 endpoint。
+只在可信的机器人网络上绑定 `0.0.0.0`。该服务没有身份验证，不得暴露到公网。
 
-## 3. 准备 Onboard 运行时
-
-在 Teleopit 自己的环境中安装 Teleopit 与硬件依赖：
-
-```bash
-pip install -e '.[openneck]'
-git submodule update --init --recursive
-pip install -e third_party/linkerhand-python-sdk
-bash scripts/setup/setup_g1_bridge.sh
-```
-
-需要根据 onboard 平台单独安装 `pyrealsense2`。在 Arm 系统上，conda-forge 包通常
-最可靠。
-
-启动前开启两个 LinkerHand CAN 接口：
-
-```bash
-sudo /usr/sbin/ip link set can0 up type can bitrate 1000000
-sudo /usr/sbin/ip link set can1 up type can bitrate 1000000
-```
-
-使用 OpenNeck 0.2.0 完成校准；如果校准文件不在运行目录中，请设置
-`neck.config_path`。
-
-## 4. 启动 Teleopit
-
-运行专用 onboard 入口，并设置主机 IP、底层 tracking policy 和 G1 网卡：
+在 G1 onboard 计算机上启动 Teleopit 专用运行时。将 `HOST_IP` 替换为工作站地址，
+并使用与 dataset 一致的任务描述：
 
 ```bash
 python scripts/run/run_high_level_policy_sim2real.py \
   controller.policy_path=ckpt/track_g1_neck_o6.onnx \
-  high_level_policy.endpoint=tcp://192.168.1.10:5555 \
+  high_level_policy.endpoint=tcp://HOST_IP:5555 \
   high_level_policy.task="pick up the object" \
   real_robot.network_interface=eth0
 ```
 
-协议接受 1 到 50 帧的 action chunk。当前 ACT 主机会返回完整的 checkpoint horizon
-（生产 checkpoint 为 50 帧）；ReplayPolicy 最多返回 `--chunk-size` 配置的帧数，
-最后一段可以更短。
+进程启动后，机器人保持 `IDLE`。使用 Unitree 遥控器操作：
 
-Teleopit 每隔 `high_level_policy.replan_steps` 个 30 Hz source frame 提交最新的合格
-observation，默认间隔为三帧。该 stride 不得超过主机 `describe` 响应中的
-`max_action_horizon`。隔离的 client 同一时间只允许一个 REQ/REP exchange，但该请求
-在途时 active plan 会继续执行。每份 learned-policy response 都基于其请求中的 source
-reference 独立重建；主机不会聚合相互重叠的 chunk。Teleopit 使用回显的 onboard 单调
-时间戳，在正确的 source-frame 位置替换 active plan。
-
-生产相机契约固定为 30 Hz 的 RGB `uint8[480,640,3]`。
-`camera.source=test-pattern` 只用于受控集成测试；部署时应使用
-`camera.source=realsense`。
-
-## 5. 操作流程
-
-始终把 Unitree 遥控器拿在手中。该运行时只有 `IDLE`、`STANDING`、`POLICY` 和
-`DAMPING` 四个正式机器人模式。
-
-| 控制 | 动作 |
+| 操作 | 动作 |
 |------|------|
-| Unitree remote `Start` | 进入 `STANDING` |
-| Unitree remote `Y` | 请求主机策略接管 |
-| Unitree remote `B` | 暂停或恢复 `POLICY` |
-| Unitree remote `X` | 返回 `STANDING`，或取消等待中的请求 |
-| Unitree remote `L1+R1` | 紧急切换到 `DAMPING` |
+| `Start` | 进入 `STANDING` |
+| `Y` | 创建策略 session；第一份有效 chunk 会进入 `POLICY` |
+| `B` | 暂停，或在新鲜 chunk 可用后恢复 |
+| `X` | 结束 session 并返回 `STANDING` |
+| `L1+R1` | 立即进入 `DAMPING` |
 
-按下 `Y` 后，Teleopit 会创建一个 entry session，以当前 root XY/yaw 建立锚点，并请求
-该 session 的第一份 chunk。等待期间机器人在形式上仍处于 `STANDING`；没有单独的
-“policy starting”状态。运行时会验证 chunk 的结构、有限值、四元数和绝对硬件范围，
-同时接受 root、yaw 和关节 reference 的时间跳变。第一份有效 chunk 会直接进入
-`POLICY`。entry 不会对齐候选 reference、运行 Kp ramp、暂停/恢复 host 请求，也不会
-创建或 reset 第二个 session。scheduler 的 50 Hz 输出 limiter 从 session 开始时捕获的
-机器人实测 reference 起步。失败或超时会让机器人保持普通 standing reference。
+ReplayPolicy 应当足够准确地重现录制 reference，以验证网络、action 约定和 onboard
+执行链路。如果回放不正确，请在这里停止。Learned policy 无法修复录制、转换、坐标或
+底层 tracking 问题。
 
-在 `POLICY` 内，较新的 response 通常会在 active plan 的 horizon 结束前替换它。如果
-推理耗时更长，Teleopit 会在配置的 `hold_s` grace period 内保持该计划最后一条 body、
-hand 和 neck target，同时本地 50 Hz 控制循环继续运行。超过该 grace period 会触发
-action watchdog，并进入普通的可恢复暂停。
+## 5. 部署训练好的策略
 
-暂停会冻结 body reference，并保持最后一条 LinkerHand 和 OpenNeck 命令。恢复时会请求
-新的 action chunk，并在等待期间继续保持暂停姿态。按 `X` 会停止策略 session；运行时
-返回 `STANDING` 时会张开手并让辅助硬件回中。
+按 `X` 让 G1 返回 `STANDING`，然后停止 ReplayPolicy。在主机上使用
+`pretrained_model` 目录本身启动 learned-policy server：
 
-Watchdog、主机/网络、相机或 policy client 故障也会进入同一个普通暂停状态，并保持
-当前 body、hand 和 neck 命令。输入路径恢复后按 `B`；Teleopit 会继续保持暂停姿态，
-直到收到新的有效 action chunk，再恢复 `POLICY`。运行时不会自动进入 `STANDING`；
-`X` 仍是手动切换到 `STANDING` 的操作。
+```bash
+python scripts/run_policy_server.py \
+  --backend lerobot \
+  --checkpoint outputs/train/<run>/checkpoints/last/pretrained_model \
+  --device cuda \
+  --bind tcp://0.0.0.0:5555
+```
 
-## 6. Onboard 验证与 Watchdog
+ACT 和 GR00T 使用相同的 server 命令。按 Unitree 遥控器 `Y` 创建新的策略 session。
+开始时使用训练分布内熟悉的场景，并只允许幅度小、容易恢复的动作。
 
-当修正量不超过 `max_joint_projection_rad` 时，Teleopit 会先把 G1 关节 reference 裁剪到
-配置的真机关节位置范围，并把 OpenNeck yaw/pitch 命令裁剪到配置的角度范围；如果任一帧
-违反其余契约，则拒绝整个 chunk。它不会对错误的主机结果进行补齐或删减。检查包括：
+如果需要记录一次运行中交换的 observation 和 action，增加以下主机参数：
 
-- 精确且有限的 `float32[T,50]`、当前 session，以及递增的 source sequence；
-- 归一化 root quaternion 与时间连续的符号；
-- 绝对 root 高度限制；
-- 按 `real_robot.joint_pos_lower/upper` 裁剪 G1 关节位置，并拒绝更大的修正量；
-- LinkerHand closure `[0,1]`；
-- 将 OpenNeck yaw/pitch 裁剪到配置的角度范围；
-- observation/result 时效、source timestamp 和 action horizon。
+```bash
+--record-dir outputs/policy-recordings
+```
 
-reference 连续性不是接收条件。entry、chunk 内部和 chunk 之间的 root translation、root
-yaw 与 G1 关节 reference 跳变都会被接受，因为录制的 pause/resume 转换可能有意地不
-连续；50 Hz 输出 limiter 会衔接这些已接受的跳变。单个 entry session 的第一份有效
-chunk 会立即开始实时执行。格式错误、过期、非关节字段超出绝对范围（已裁剪的 OpenNeck
-角度除外）或关节修正量过大会终止 entry。
+Teleopit 会在 50 Hz motion tracker 使用之前校验并限速每一份 plan。格式错误的输出
+会被拒绝，不会被补齐或删减。主机、网络、相机或 action watchdog 故障会暂停 session
+并保持最后一条命令，不会自动进入 `STANDING`。恢复故障链路后按 `B` 继续，或根据情况
+使用 `X` 或 `L1+R1`。
 
-通过验证的 30 Hz body reference 会在本地插值到 50 Hz 并执行 rate limit。回显的
-source timestamp 用于选择每份 response 中的当前位置，因此主机延迟可以跳过已经过去的
-source frame，较新的 chunk 也可以替换执行中的计划。配置的 root displacement/XY
-speed、yaw rate 和 joint rate 是输出限制，而不是 chunk 拒绝阈值。plan horizon 结束后，
-最后一条有效 reference 会继续保留 `hold_s`。如果网络交换超时、watchdog 到期，或必要的
-camera/client worker 退出，Teleopit 会保持在 `POLICY`，进入普通的可恢复暂停状态，并保持
-最后一条 body、hand 和 neck 命令。无效或过期 response 会被拒绝，不会替换当前仍然有效的
-plan。故障恢复后按 `B` 请求恢复；在收到新的有效 chunk 前，执行仍保持暂停。只有 `X`
-会把模式切换到 `STANDING`。
+## 常见问题
 
-scheduler 会以 50 Hz 记录经过限速的 session-local reference。对于每个相机帧，它会
-在相机单调时间戳处查询该历史或进行插值，并把得到的 root pose 作为
-`source_reference_root_pose` 发送。session 启动时用当时的 active standing reference
-初始化历史；pause/resume 会记录 held-reference 边界，因此锚点绝不会来自机器人实测
-root pose。
+| 现象 | 检查项 |
+|------|--------|
+| 按 `Y` 后始终不进入 `POLICY` | 主机 IP 和防火墙、server 日志、新鲜的 RealSense 画面、两边匹配的代码版本，以及完全一致的 `hand_calibration.json` |
+| `POLICY` 进入暂停 | 主机推理延迟、请求超时、相机/结果过期、action watchdog，或必要 worker 退出 |
 
-默认安全范围位于 `high_level_policy_sim2real.yaml` 的
-`high_level_policy.safety` 下。只有在检查录制数据、G1 关节限位和已安装的 OpenNeck
-校准后，才应调整这些值。
-
-## 7. 故障排查
-
-**按 `Y` 后始终不进入 `POLICY`：** 检查主机 endpoint、防火墙、server 日志、
-`describe` schema、消息 envelope、task、checkpoint manifest、`replan_steps` 和 entry
-日志。Teleopit 会保持 `STANDING`，直到单个 entry session 返回第一份有效 chunk。
-
-**第一份 entry chunk 被拒绝或 entry 超时：** 请检查日志中的契约错误、关节顺序、绝对
-reference 约定、硬件范围以及 host/network 延迟。单纯的 reference 跳变不会导致 chunk
-被拒绝。
-
-**策略短暂运行后进入暂停：** 检查 timeout、推理延迟、stale result、worker 退出和
-安全拒绝日志。底层 50 Hz tracker 不会等待主机推理；当前 plan 会继续执行，随后使用配置的
-最终 reference grace period。恢复故障输入路径后按 `B` 继续。
-
-**Pico 无法连接：** 该运行时有意不启动 Pico。请先停止它，再改用 Pico 专用的
-`run_sim2real.py --config-name pico4_sim2real` 工作流。
+模型 action 坐标和主机端行为见
+[`lerobot-teleopit` Action Space 指南](https://github.com/BotRunner64/lerobot-teleopit/blob/main/docs/planar-relative-root-actions.zh-CN.md)。
+Onboard 时序和安全设置见
+[配置字段](../reference/configuration/fields#主机-high-level-policy独立-sim2real)。
