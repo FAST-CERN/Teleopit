@@ -11,11 +11,9 @@
 </p>
 
 <p align="center">
+  <a href="https://botrunner64.github.io/teleopit-page/">Project Homepage</a> &bull;
   <a href="https://BotRunner64.github.io/Teleopit/">Documentation</a> &bull;
-  <a href="https://BotRunner64.github.io/Teleopit/zh-Hans/">中文文档</a> &bull;
-  <a href="https://BotRunner64.github.io/Teleopit/tutorials/pico-sim2sim">Pico Sim2Sim</a> &bull;
-  <a href="https://BotRunner64.github.io/Teleopit/tutorials/pico-sim2real">Pico Sim2Real</a> &bull;
-  <a href="https://BotRunner64.github.io/Teleopit/tutorials/training">Training</a>
+  <a href="https://BotRunner64.github.io/Teleopit/zh-Hans/">中文文档</a>
 </p>
 
 ---
