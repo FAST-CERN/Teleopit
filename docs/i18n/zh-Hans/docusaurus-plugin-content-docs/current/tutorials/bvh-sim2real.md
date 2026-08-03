@@ -34,7 +34,7 @@ real_robot.network_interface=enp130s0
 
 ```bash
 python scripts/run/run_sim2real.py \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=enp130s0 \
     input.bvh_file=data/sample_bvh/aiming1_subject1.bvh
 ```

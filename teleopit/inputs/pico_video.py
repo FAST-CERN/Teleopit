@@ -23,7 +23,6 @@ class PicoVideoConfig:
     height: int = 720
     fps: int = 30
     device: str | None = None
-    fail_on_error: bool = False
 
 
 def parse_pico_video_config(input_cfg: Any) -> PicoVideoConfig:
@@ -48,7 +47,6 @@ def parse_pico_video_config(input_cfg: Any) -> PicoVideoConfig:
         height=height,
         fps=fps,
         device=None if device in (None, "", "null") else str(device),
-        fail_on_error=bool(cfg_get(video_cfg, "fail_on_error", False)),
     )
 
 
@@ -68,13 +66,11 @@ class PicoVideoRuntime:
         *,
         provider: Any,
         config: PicoVideoConfig,
-        mode: str,
         robot: Any | None = None,
         frame_callback: Callable[[np.ndarray, float], None] | None = None,
     ) -> None:
         self._provider = provider
         self._config = config
-        self._mode = mode
         self._robot = robot
         self._frame_callback = frame_callback
         self._producer: _VideoProducer | None = None
@@ -140,9 +136,7 @@ class PicoVideoRuntime:
             self._producer = None
 
     def _handle_error(self, exc: Exception) -> None:
-        if self._config.fail_on_error:
-            raise RuntimeError("Pico video pipeline failed") from exc
-        logger.warning("Pico video disabled after error: %s", exc)
+        logger.warning("Pico video disabled after error; tracking and control continue: %s", exc)
 
 
 class _VideoProducer:
@@ -154,6 +148,10 @@ class _VideoProducer:
 
 
 class _RealSenseVideoProducer(_VideoProducer):
+    _STARTUP_WAIT_S = 5.0
+    _FRAME_TIMEOUT_MS = 1000
+    _RECONNECT_DELAY_S = 1.0
+
     def __init__(
         self,
         provider: Any,
@@ -175,11 +173,14 @@ class _RealSenseVideoProducer(_VideoProducer):
 
     def start(self) -> None:
         self._thread.start()
-        self._ready_event.wait(timeout=5.0)
+        self._ready_event.wait(timeout=self._STARTUP_WAIT_S)
         if self._error is not None:
             raise RuntimeError("failed to start RealSense video producer") from self._error
         if not self._ready_event.is_set():
-            raise TimeoutError("RealSense video producer did not become ready within 5s")
+            logger.warning(
+                "RealSense video producer is not ready after %.1fs; reconnecting in background",
+                self._STARTUP_WAIT_S,
+            )
 
     def tick(self) -> None:
         if self._error is not None:
@@ -193,36 +194,66 @@ class _RealSenseVideoProducer(_VideoProducer):
     def _run(self) -> None:
         try:
             import pyrealsense2 as rs
-
-            pipeline = rs.pipeline()
-            config = rs.config()
-            if self._config.device is not None:
-                config.enable_device(self._config.device)
-            config.enable_stream(
-                rs.stream.color,
-                self._config.width,
-                self._config.height,
-                rs.format.rgb8,
-                self._config.fps,
-            )
-            pipeline.start(config)
+        except BaseException as exc:
+            self._error = exc
             self._ready_event.set()
-            try:
-                while not self._stop_event.is_set():
-                    frames = pipeline.wait_for_frames()
-                    color_frame = frames.get_color_frame()
-                    if not color_frame:
-                        continue
-                    rgb = np.ascontiguousarray(np.asanyarray(color_frame.get_data()), dtype=np.uint8)
-                    timestamp_s = time.monotonic()
-                    if self._frame_callback is not None:
-                        self._frame_callback(rgb, timestamp_s)
-                    if callable(getattr(self._provider, "push_video_frame", None)):
-                        self._pushed_frames = int(self._provider.push_video_frame(rgb))
-                    else:
-                        self._pushed_frames += 1
-            finally:
-                pipeline.stop()
+            logger.exception("RealSense Pico video producer could not load pyrealsense2")
+            return
+
+        reconnecting = False
+        try:
+            while not self._stop_event.is_set():
+                pipeline = None
+                pipeline_started = False
+                try:
+                    pipeline = rs.pipeline()
+                    config = rs.config()
+                    if self._config.device is not None:
+                        config.enable_device(self._config.device)
+                    config.enable_stream(
+                        rs.stream.color,
+                        self._config.width,
+                        self._config.height,
+                        rs.format.rgb8,
+                        self._config.fps,
+                    )
+                    pipeline.start(config)
+                    pipeline_started = True
+                    self._ready_event.set()
+                    if reconnecting:
+                        logger.info("RealSense Pico video stream reconnected")
+                    reconnecting = False
+                    while not self._stop_event.is_set():
+                        frames = pipeline.wait_for_frames(self._FRAME_TIMEOUT_MS)
+                        color_frame = frames.get_color_frame()
+                        if not color_frame:
+                            continue
+                        rgb = np.ascontiguousarray(np.asanyarray(color_frame.get_data()), dtype=np.uint8)
+                        timestamp_s = time.monotonic()
+                        if self._frame_callback is not None:
+                            self._frame_callback(rgb, timestamp_s)
+                        if callable(getattr(self._provider, "push_video_frame", None)):
+                            self._pushed_frames = int(self._provider.push_video_frame(rgb))
+                        else:
+                            self._pushed_frames += 1
+                except Exception as exc:
+                    if self._stop_event.is_set():
+                        break
+                    reconnecting = True
+                    logger.warning(
+                        "RealSense Pico video stream lost; reconnecting in %.1fs: %s",
+                        self._RECONNECT_DELAY_S,
+                        exc,
+                    )
+                finally:
+                    if pipeline_started and pipeline is not None:
+                        try:
+                            pipeline.stop()
+                        except RuntimeError as exc:
+                            logger.warning("Failed to stop RealSense pipeline during reconnect: %s", exc)
+
+                if not self._stop_event.is_set():
+                    self._stop_event.wait(self._RECONNECT_DELAY_S)
         except BaseException as exc:
             self._error = exc
             self._ready_event.set()

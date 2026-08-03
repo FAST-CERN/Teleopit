@@ -3,43 +3,38 @@ sidebar_position: 1
 slug: /
 ---
 
-# 简介
+# Teleopit
 
-**Teleopit** 是一个轻量、可扩展的人形机器人全身遥操作框架。它能够将人类操作者的动作实时映射到 Unitree G1 机器人上，同时支持 MuJoCo 仿真和实物硬件部署。
+Teleopit 是一套面向 Unitree G1 的**全具身人形机器人遥操作系统**。操作者戴上支持的
+Pico 头显后，可以实时控制机器人的全身动作。机载部署还可以接入可选的 LinkerHand
+控制手势，并通过可选的 OpenNeck 把头部动作转换为机器人相机朝向。
 
-## 核心特性
+同一套运控策略会先在 MuJoCo 中运行。你可以先在仿真里确认动作和控制方式，再连接
+真实机器人。
 
-- **离线 sim2sim**：在 MuJoCo 中回放 BVH 动捕文件，通过 RL 策略驱动机器人
-- **VR 遥操作**：基于 Pico 4 / Pico 4 Ultra 全身追踪的实时全身控制
-- **Sim2Real 部署**：使用同一套流程直接部署到 Unitree G1 实物
-- **训练流程**：基于 General-Tracking-G1 任务的端到端强化学习训练
-- **可扩展设计**：基于协议的组件体系（InputProvider、Retargeter、Controller、Robot）
+## 从这里开始
 
-## 流程概览
+第一次使用 Teleopit 时，建议按这个顺序：
 
-```text
-InputProvider (BVH / Pico4 VR)
-    -> Retargeter (GMR)
-    -> ObservationBuilder (167D)
-    -> Controller (双输入 TemporalCNN ONNX)
-    -> Robot (MuJoCo 仿真 或 Unitree G1)
-```
+1. 根据自己的目标[安装 Teleopit](getting-started/installation)，并完成该页面最后的
+   安装检查。
+2. 从下面四条路径中选择一条继续。
 
-## 技术规格
+| 我想做什么 | 对应教程 |
+|------------|----------|
+| 在 MuJoCo 中检查运控策略 | [在仿真中运行运控](tutorials/offline-sim2sim) |
+| 不连接真机，先尝试 Pico VR 遥操 | [在仿真中进行 VR 遥操](tutorials/pico-sim2sim) |
+| 使用 Pico VR 控制真实 G1 | [用 VR 遥操真实 G1](tutorials/pico-sim2real) |
+| 训练并导出自己的运控策略 | [训练运控策略](tutorials/training) |
 
-| 项目 | 参数 |
-|------|------|
-| 策略频率 | 50 Hz |
-| PD 控制频率 | 200 Hz |
-| 观测维度 | 167D |
-| 动作维度 | 29D（G1 关节） |
-| ONNX 模型 | 双输入 TemporalCNN |
-| 运动重定向 | GMR（General Motion Retargeting） |
-| 仿真器 | MuJoCo |
-| 硬件平台 | Unitree G1（29 自由度） |
+:::warning 连接真机之前
+请先把 Pico 仿真遥操跑通。真机运行时始终把 Unitree 遥控器拿在手里；
+`L1+R1` 是进入 `DAMPING` 的紧急停止方式。
+:::
 
-## 下一步
+## 想了解实现细节？
 
-- [安装指南](getting-started/installation) - 搭建开发环境
-- [快速上手](getting-started/quick-start) - 运行你的第一个 sim2sim 示例
-- [教程](tutorials/offline-sim2sim) - 各使用场景的详细步骤指引
+主线教程只保留完成任务所需的内容。运行流程和技术规格见
+[系统架构](reference/architecture)，下载文件与资源分组见
+[资产](reference/resources/assets)，Hydra 参数见
+[配置说明](reference/configuration/overview)。

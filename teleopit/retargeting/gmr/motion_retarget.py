@@ -165,12 +165,56 @@ class GeneralMotionRetargeting:
         pause/resume) so the warm-start IK solver does not get stuck in a
         local minimum far from the new target.
 
-        The next ``retarget()`` call will use many more iterations so the
-        solver can converge from the default pose to the (potentially distant)
-        new target.
+        The next ``retarget()`` call will seed the floating root from the live
+        target and use many more iterations so the articulated joints can
+        converge from their default pose.
         """
         self.configuration.update(q=self.model.qpos0.copy())
         self._warmup_needed = True
+
+    def _seed_warmup_root_from_target(self):
+        """Seed a floating root from the current human-root target.
+
+        Starting every reset from the model's fixed world heading can make the
+        nonlinear IK solve converge to a different joint branch when the live
+        subject faces some directions.  The root target is already known after
+        ``update_targets()``, so initialize only the floating root from it and
+        leave all articulated joints at their default values.
+        """
+        root_body_id = mj.mj_name2id(
+            self.model,
+            mj.mjtObj.mjOBJ_BODY,
+            self.robot_root_name,
+        )
+        if root_body_id < 0:
+            raise ValueError(f"Robot root body '{self.robot_root_name}' was not found")
+
+        free_joint_id = None
+        joint_start = int(self.model.body_jntadr[root_body_id])
+        joint_count = int(self.model.body_jntnum[root_body_id])
+        for joint_id in range(joint_start, joint_start + joint_count):
+            if self.model.jnt_type[joint_id] == mj.mjtJoint.mjJNT_FREE:
+                free_joint_id = joint_id
+                break
+        if free_joint_id is None:
+            return
+
+        root_pos, root_quat = self.scaled_human_data[self.human_root_name]
+        root_pos = np.asarray(root_pos, dtype=np.float64).reshape(-1)
+        root_quat = np.asarray(root_quat, dtype=np.float64).reshape(-1)
+        if root_pos.shape != (3,) or not np.all(np.isfinite(root_pos)):
+            raise ValueError(f"Human root position must be finite 3D, got {root_pos}")
+        if root_quat.shape != (4,) or not np.all(np.isfinite(root_quat)):
+            raise ValueError(f"Human root quaternion must be finite wxyz, got {root_quat}")
+        quat_norm = float(np.linalg.norm(root_quat))
+        if quat_norm <= 1e-9:
+            raise ValueError("Human root quaternion norm must be positive")
+
+        q_seed = self.model.qpos0.copy()
+        qpos_adr = int(self.model.jnt_qposadr[free_joint_id])
+        q_seed[qpos_adr:qpos_adr + 3] = root_pos
+        q_seed[qpos_adr + 3:qpos_adr + 7] = root_quat / quat_norm
+        self.configuration.update(q=q_seed)
 
     def setup_retarget_configuration(self):
         self.configuration = mink.Configuration(self.model)
@@ -244,10 +288,11 @@ class GeneralMotionRetargeting:
         # Update the task targets
         self.update_targets(human_data, offset_to_ground)
 
-        # After a reset, use a large dt and more iterations so the solver
-        # can converge from the default pose to a potentially distant target.
+        # After a reset, seed the floating root and use a large dt plus more
+        # iterations so the articulated joints can converge from defaults.
         warmup = self._warmup_needed
         if warmup:
+            self._seed_warmup_root_from_target()
             self._warmup_needed = False
         iter_limit = self._warmup_max_iter if warmup else self.max_iter
         dt = self._warmup_dt if warmup else self.configuration.model.opt.timestep

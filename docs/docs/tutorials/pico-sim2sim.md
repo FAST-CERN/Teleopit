@@ -2,149 +2,160 @@
 sidebar_position: 2
 ---
 
-# Pico 4 VR Teleoperation in Simulation
+# VR Teleoperation in Simulation
 
-Use this tutorial to verify Pico 4 / Pico 4 Ultra full-body tracking in MuJoCo
-before running on real Unitree G1 hardware.
+Use Pico tracking to control a simulated G1 before connecting a physical robot.
+Do not skip this step: it lets you fix headset, network and body-tracking
+problems without putting hardware at risk.
 
-```text
-Pico headset -> pico-bridge receiver -> retarget -> RL policy -> MuJoCo G1
-```
-
-After this works, continue with [Pico Sim2Real](pico-sim2real).
-
-## Supported Devices
+## Supported Headsets
 
 - Pico 4
 - Pico 4 Ultra
+- Pico 4 Ultra Enterprise
+- Pico 4 Pro
 
-## 1. Set Up The Headset
+All headsets must have full-body tracking enabled and run a Pico system version
+that supports the current body-tracking interface.
 
-1. Download the headset APK from [pico-bridge Releases](https://github.com/BotRunner64/pico-bridge/releases).
-2. Install it with adb:
+## Before You Start
+
+You need:
+
+- the headset and the computer running Teleopit on the same network,
+- the `pico4` install profile and `robots gmr ckpt bvh` assets, and
+- a working result from
+  [Run a Motion Controller in Simulation](offline-sim2sim).
+
+## 1. Prepare the Headset
+
+1. Download the headset APK from
+   [pico-bridge Releases](https://github.com/BotRunner64/pico-bridge/releases).
+2. Install it:
+
    ```bash
    adb install pico-bridge.apk
    ```
-3. Launch the pico-bridge headset client.
-4. Enable full-body tracking.
-5. Keep the headset and Teleopit host on the same network.
 
-## 2. Install The Pico Host Extra
+3. Open the pico-bridge app in the headset.
+4. Turn on full-body tracking.
 
-On the machine that will run Teleopit:
+Teleopit uses pico-bridge 0.2.1. The receiver runs inside Teleopit on your
+computer; there is no second relay program to start.
 
-```bash
-pip install -e '.[pico4]'
-```
+## 2. Check That the Computer Receives Pico Data
 
-Verify the receiver package:
+This diagnostic prints body-frame and connection information without starting
+the robot controller:
 
 ```bash
-python -c "from pico_bridge import PicoBridge; print('OK')"
+python scripts/dev/test_pico_bridge.py --no-video
 ```
 
-Teleopit starts `pico_bridge.PicoBridge` in-process through
-`Pico4InputProvider`. The same Pico input path is used later for wired and
-onboard sim2real deployment.
+Move slightly and confirm that new valid frames continue to arrive. Press
+`Ctrl+C` to stop the diagnostic.
 
-Teleopit targets pico-bridge 0.2.1 and its `pico_native` tracking semantics.
-
-## 3. Download Assets
+If discovery chooses the wrong network address, pass the address that the
+headset can reach:
 
 ```bash
-pip install modelscope
-python scripts/setup/download_assets.py --only robots gmr ckpt bvh
+python scripts/dev/test_pico_bridge.py \
+    --no-video \
+    --bridge-advertise-ip=192.168.1.20
 ```
 
-## 4. Run Pico Sim2Sim
+## 3. Start the Simulation
 
 ```bash
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx
+    controller.policy_path=ckpt/track_g1.onnx
 ```
 
-The simulation starts in `STANDING`. Wait until Pico tracking is active, then
-enter `MOCAP`.
+The robot intentionally starts in `STANDING`; live body tracking does not take
+control until you ask for it.
 
-| Keyboard | Action |
-|----------|--------|
-| `Y` | Enter `MOCAP` |
-| `A` | Pause / resume live mocap |
-| `B` | Toggle `MOCAP` / `ARMS` |
-| `X` | Return to `STANDING` |
-| `Q` | Quit |
+## 4. Use the Simulation State Machine
 
-`pico4_sim.yaml` defaults to `viewers=all`, which opens mocap, retarget, and
-sim2sim viewers. Use `viewers=sim2sim` or `viewers=none` when you want fewer
-windows.
+![Pico simulation control state machine](/img/diagrams/pico-sim-state-machine.svg)
 
-## Pause / Resume
+Labels beginning with **Keyboard** refer to the computer keyboard. Labels
+beginning with **Pico controller** refer to the VR controllers. The Unitree G1
+remote is not used in simulation.
 
-Pico pause/resume freezes the mocap session; it is not a switch back to
-`STANDING`.
+Stand in a comfortable neutral pose and wait for stable tracking before using
+**Keyboard** `Y` to enter `MOCAP`. Move slowly at first. Use **Keyboard** `X` to
+end the VR session and return to `STANDING`; **Keyboard** `Q` quits the
+simulation from any state.
 
-- Press keyboard `A` or the Pico/controller pause button to freeze the current
-  reference pose.
-- Press it again to rebuild the realtime reference path, re-center yaw and
-  ground-plane position, and continue from the current live tracking stream.
+`MOCAP` follows the whole body. `ARMS` keeps the body, waist and legs in the
+standing pose while both arms continue to follow. `PAUSED` holds the current
+reference and returns to the previous `MOCAP` or `ARMS` state when resumed.
 
-The default Pico pause button is `A`. Supported overrides include `B`, `X`, `Y`,
-`left_axis_click`, `right_axis_click`, `left_menu_button`, and
-`right_menu_button`.
+Each new `STANDING -> MOCAP` session recalibrates the live root pose. You may
+turn to a new heading while standing, then enter `MOCAP` again.
 
-The default Pico arms-mode button is `B`. `ARMS` keeps body, waist, and legs at
-the standing pose while both arms follow the live retargeted result.
+:::tip Pausing is not the same as stopping VR control
+Keyboard or Pico controller `A` freezes and resumes the current mocap pose.
+Use Keyboard `X` when you want to end the session and return to `STANDING`.
+:::
 
-## Optional Headset Video Preview
+## Choose the Viewer Layout
 
-pico-bridge 0.2.1 can show a host-side camera stream in the headset. In
-simulation, Teleopit can stream the MuJoCo `d435i_rgb` camera:
+Pico simulation opens the mocap, retarget and physics views by default. Use a
+smaller layout when you no longer need all three:
+
+```bash
+# Physics result only
+python scripts/run/run_sim.py \
+    --config-name pico4_sim \
+    controller.policy_path=ckpt/track_g1.onnx \
+    viewers=sim2sim
+
+# Headless
+python scripts/run/run_sim.py \
+    --config-name pico4_sim \
+    controller.policy_path=ckpt/track_g1.onnx \
+    viewers=none
+```
+
+## Optional Headset Video
+
+To send the simulated `d435i_rgb` camera view back to the headset:
 
 ```bash
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.video.enabled=true
 ```
 
-Use `input.video.source=test-pattern` for a receiver-side video sanity check. If
-video startup fails, Teleopit logs the error, disables video, and keeps tracking
-and control running. Set `input.video.fail_on_error=true` to fail startup
-instead.
+Use `input.video.source=test-pattern` to check only the video connection.
+Video failure disables the preview but does not stop tracking or control.
 
-## Common Parameters
+## Network Overrides
+
+Most setups only need automatic discovery. Use these overrides when the
+diagnostic shows a network problem:
 
 ```bash
-# Pico wait timeout for the first body frame
-input.pico4_timeout=30
-
-# Override the IP advertised to the headset during discovery
+# Advertise a specific host address to the headset
 input.bridge_advertise_ip=192.168.1.20
 
 # Disable discovery and bind explicitly
-input.bridge_discovery=false input.bridge_host=0.0.0.0 input.bridge_port=63901
+input.bridge_discovery=false
+input.bridge_host=0.0.0.0
+input.bridge_port=63901
 
-# Change the Pico pause button
-input.pause_button=right_axis_click
-
-# Disable keyboard mode control
-keyboard.enabled=false
-
-# Change policy frequency
-policy_hz=30
-
-# Enable headset video preview
-input.video.enabled=true
+# Wait longer for the first body frame
+input.pico4_timeout=30
 ```
 
-## Troubleshooting
+## Common Problems
 
-| Symptom | Likely Cause | Fix |
-|---------|--------------|-----|
-| `ImportError: pico_bridge` | Pico extra not installed | Run `pip install -e '.[pico4]'` |
-| Startup says pico-bridge is too old | Installed receiver does not support the required API or tracking semantics | Reinstall the Pico extra so pico-bridge 0.2.1 is used |
-| `TimeoutError: No Pico4 body data` | Headset is not connected or body tracking is inactive | Check the headset app, network, and `input.pico4_timeout` |
-| Discovery cannot find the host | Wrong advertised IP or blocked UDP | Set `input.bridge_advertise_ip=<host-ip>` and confirm UDP port `63901` is reachable |
-| Sim robot does not follow | Loop is still in `STANDING` | Press `Y` after tracking is ready |
-| Pico video is black or disabled | Video source failed or camera access is unavailable | Check `input.video.source` and logs |
+| Problem | Solution |
+|---------|----------|
+| No body frames arrive | Upgrade the Pico headset to the latest available system version, restart it, enable full-body tracking again, and rerun `scripts/dev/test_pico_bridge.py --no-video` |
+
+Once this workflow is reliable, continue with
+[VR Teleoperation on Unitree G1](pico-sim2real).

@@ -1,316 +1,244 @@
 ---
-sidebar_position: 4
+sidebar_position: 3
 ---
 
-# Pico 4 VR Teleoperation on Unitree G1
+# VR Teleoperation on Unitree G1
 
-Use this tutorial after [Pico Sim2Sim](pico-sim2sim) is working. It deploys the
-same realtime Pico input path to a physical Unitree G1.
+This guide moves the Pico workflow from MuJoCo to a physical Unitree G1. First
+choose where Teleopit will run, then verify standing control before handing the
+robot over to live body tracking.
 
-```text
-Pico headset -> Teleopit host -> retarget -> RL policy -> g1_bridge_sdk -> G1
-```
+:::danger Keep the Unitree remote in your hand
+Use `L1+R1` to enter `DAMPING` whenever motion is unexpected. Keep clear space
+around the robot and have another person ready to support or stop it.
+:::
 
-There are two deployment styles:
+## Choose a Deployment
 
-| Deployment | Where Teleopit Runs | Main Difference |
-|------------|---------------------|-----------------|
-| Wired PC-to-G1 | External workstation or laptop | Set `real_robot.network_interface` to the PC Ethernet interface connected to G1 |
-| Onboard | G1 onboard computer | Install Teleopit on the onboard computer; `eth0` is usually correct |
+### External host: whole-body tracking only
 
-Both styles use `Pico4InputProvider` and the in-process pico-bridge receiver.
-There is no separate onboard Pico input mode.
+Run Teleopit on a workstation or laptop connected to G1 by Ethernet. The Pico
+headset must be able to reach this computer over the network.
 
-Teleopit targets pico-bridge 0.2.1 and its `pico_native` tracking semantics.
-
-## 1. Install Runtime Dependencies
-
-Install Pico and sim2real dependencies on the machine that will run Teleopit:
+This deployment is for G1 whole-body control only. Keep LinkerHand, OpenNeck,
+RealSense preview and recording disabled. Find the wired interface connected
+to G1:
 
 ```bash
-pip install -e '.[pico4]'
-git submodule update --init --recursive
-bash scripts/setup/setup_g1_bridge.sh
+ifconfig
 ```
 
-Verify Pico receiver import:
+Use that interface name in the commands below. The examples use `enp130s0`.
+
+### Onboard computer: full embodiment
+
+Run Teleopit directly on the G1 onboard computer when you also need LinkerHand,
+OpenNeck, RealSense preview or data collection. The Pico headset must be able to
+reach the onboard computer.
+
+When the onboard setup includes both O6 hands and OpenNeck, set the low-level
+tracking policy to
+`controller.policy_path=ckpt/track_g1_neck_o6.onnx`.
+
+The G1 DDS interface is `eth0` by default. Apart from the network interface and
+the optional onboard hardware settings, the body-control configuration and
+launch command are the same as for an external host.
+
+## Before You Start
+
+Do not continue until all of these are true:
+
+- [VR Teleoperation in Simulation](pico-sim2sim) works reliably.
+- You installed the `pico4` profile and built `g1_bridge_sdk` as described in
+  [Installation](../getting-started/installation).
+- `ckpt/track_g1.onnx`, the robot files and GMR assets are present.
+- The machine running Teleopit has a wired DDS connection to G1.
+- No other program is commanding the robot.
+
+## 1. Check Standing Control
+
+Check state reception and policy timing without sending motor commands. On an
+external host, replace `enp130s0` with the interface reported by `ifconfig`:
 
 ```bash
-python -c "from pico_bridge import PicoBridge; print('OK')"
+python scripts/run/standalone_standing.py \
+    --policy ckpt/track_g1.onnx \
+    --network-interface enp130s0 \
+    --dry-run
 ```
 
-## 2. Choose The Network Interface
+On the onboard computer, use `--network-interface eth0`.
 
-`real_robot.network_interface` is the Linux interface used for Unitree DDS
-communication.
-
-For wired PC-to-G1 deployment:
-
-1. Connect the PC to the G1 by Ethernet.
-2. Run `ifconfig` on the PC.
-3. Use the Ethernet interface connected to the robot, for example `enp130s0`.
-4. Keep the Pico headset on a network that can reach the PC running Teleopit.
-
-For onboard deployment:
-
-1. Run Teleopit on the robot onboard computer.
-2. Keep the Pico headset on a network that can reach the onboard computer.
-3. Use `real_robot.network_interface=eth0` unless your robot network differs.
-4. Set `input.bridge_advertise_ip=<host-ip>` if Pico discovery advertises the
-   wrong address.
-
-### Onboard RealSense On Arm
-
-The pico-bridge PC receiver supports Arm machines when the required Python
-dependencies are available. On Arm onboard computers that need RealSense preview,
-install `pyrealsense2` from conda-forge in the active Conda environment instead
-of relying on the pip package:
+If the dry run succeeds, repeat the command without `--dry-run` in a safe
+hardware setup:
 
 ```bash
-pip uninstall pyrealsense2
-conda install -c conda-forge pyrealsense2
+python scripts/run/standalone_standing.py \
+    --policy ckpt/track_g1.onnx \
+    --network-interface enp130s0
 ```
 
-This only matters when using the optional RealSense preview path
-(`input.video.enabled=true`). Pico tracking and robot control do not require
-RealSense.
+Stop here if standing control is not stable. Follow the
+[Standalone Standing Test](standalone-standing) before adding Pico input.
 
-## 3. Run The Controller
+## 2. Start Pico Sim2Real
 
-Wired PC example:
+External-host example:
 
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=enp130s0
 ```
 
-Onboard example:
+Onboard-computer example:
 
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=eth0
 ```
 
-## Optional HDF5 Recording
+Starting the program does not immediately give Pico control of the robot.
 
-Install the recording extra on the machine that owns Pico input and RealSense:
+## 3. Use the G1 State Machine
 
-```bash
-pip install -e '.[recording]'
-```
+![Pico G1 control state machine](/img/diagrams/pico-g1-state-machine.svg)
 
-Run the recording config:
+Labels beginning with **G1 remote** refer to the Unitree remote. Labels
+beginning with **Pico controller** refer to the VR controllers. The computer
+keyboard does not switch robot modes.
 
-```bash
-python scripts/run/run_sim2real.py \
-    --config-name sim2real_record \
-    controller.policy_path=track.onnx \
-    real_robot.network_interface=enp130s0 \
-    recording.task="walk forward"
-```
+Press **G1 remote** `Start` to enter `STANDING`. Wait until the robot is stable,
+stand in a neutral pose and make sure Pico tracking is valid. Then press
+**G1 remote** `Y` to enter `MOCAP`, and begin with small, slow movements. Press
+**G1 remote** `X` when you want to end the VR session and return to `STANDING`.
 
-Terminal controls are `R` start episode, `S` save, `D` discard, and `Q`
-shutdown. `STANDING`, `MOCAP`, `ARMS`, and paused mocap can be recorded;
-saved episodes cannot be discarded afterward. Episodes are saved as `.h5` files
-under `data/recordings/sim2real_hdf5/episodes/`, with compressed MP4 sidecar
-videos under `data/recordings/sim2real_hdf5/videos/`. The HDF5 episode stores
-`frame_index` and `timestamp` sync arrays plus `observation.state(68)`,
-`observation.mode(1)`, `action(36)`, and `action.hand(12)` at 30 Hz.
+`MOCAP` follows the whole body. `ARMS` keeps the body, waist and legs in the
+standing pose while both arms continue to follow. `PAUSED` holds the current
+reference; resuming returns to the previous `MOCAP` or `ARMS` state.
 
-## Operator Flow
+Teleopit checks several consecutive Pico frames before entering `MOCAP`. If
+that check fails, the robot stays in `STANDING`.
 
-Keep the Unitree remote in hand. `L1+R1` is the emergency stop path into
-`DAMPING`.
-
-| Control | Action |
-|---------|--------|
-| Unitree remote `Start` | Enter `STANDING` |
-| Unitree remote `Y` | Enter `MOCAP` |
-| Pico/controller `A` | Pause / resume live mocap |
-| Pico/controller `B` | Toggle `MOCAP` / `ARMS` |
-| Unitree remote `X` | Return to `STANDING` |
-| Unitree remote `L1+R1` | Emergency stop (`DAMPING`) |
-
-Enter `MOCAP` only after Pico tracking is stable. Teleopit validates consecutive
-mocap frames before switching; if validation fails, the robot stays in
-`STANDING`.
-
-## Runtime Behavior
-
-Pico sim2real uses the shared realtime reference timeline:
-
-```text
-Pico body frames -> retarget -> reference buffer -> observation -> policy -> G1 joints
-```
-
-When entering `STANDING`, Teleopit releases active Unitree modes, enters
-debug/low-level control, locks the current joints briefly, resets policy state,
-and ramps Kp without changing policy targets.
-
-When entering `MOCAP`, Teleopit rearms the process-isolated reference worker,
-resets its GMR state and realtime reference buffer, then waits for fresh
-validated references before tracking the live mocap command. `STANDING` and
-`DAMPING` keep the reference worker disarmed so cold startup frames cannot
-warm-start retargeting before mocap entry.
-
-`ARMS` keeps the same live retargeting timeline running, but sends the motion
-tracker a composed reference: body, waist, and legs stay at the standing pose
-while both arms follow the live retargeted result. Entering or leaving `ARMS`
-resets policy/reference alignment and uses the same Kp ramp safety path.
-
-## Pause / Resume
-
-Pico pause/resume is a mocap-session control event.
-
-- `ACTIVE`: the pause button freezes the current reference pose.
-- `PAUSED`: pressing it again clears policy/reference state, warms the realtime
-  buffer, re-centers yaw/XY alignment, and resumes from live mocap.
-
-:::warning
-Resume while standing still and close to the paused pose. This reduces sudden
-reference changes when live tracking resumes.
+:::tip Pause and resume
+G1 remote `B` or Pico controller `A` pauses and resumes the current session.
+Resume while standing still and close to the held pose. Use G1 remote `X`
+instead when you want to end the session.
 :::
 
-## Optional LinkerHand Control
+If Pico input stops, body control holds the last reference and the G1 remote
+remains available. Use `X` to return to `STANDING`, or `L1+R1` to enter
+`DAMPING`; do not wait for an automatic mode change.
 
-Pico sim2real can drive LinkerHand hands from Pico input:
+## Onboard Only: LinkerHand
 
-- `gripper`: hold the matching side grip as a deadman switch; the matching
-  trigger closes that hand. This mode supports `hands.driver=linkerhand_l6` and
-  `hands.driver=linkerhand_o6`; speed and open/close poses come from the matching
-  driver config.
-- `vr_hand_pose`: L6-only mode that retargets Pico hand pose through somehand and
-  commands the continuous L6 hand target. If a hand pose disappears, that side
-  keeps its last commanded pose. This mode uses Teleopit's Pico landmark adapter
-  and the public `somehand.api` from somehand 0.2.0. It always sets L6 speed to
-  the maximum.
-
-When `hands.enabled=true`, hand control remains active in all sim2real modes.
-Shutdown and hand-runtime failure send the configured open pose.
-
-Install the local hand-control packages first if they were not installed with
-the main Pico profile:
-
-```bash
-git submodule update --init --recursive
-pip install -e third_party/linkerhand-python-sdk
-pip install -e third_party/somehand
-scripts/setup/download_somehand_l6_assets.sh
-```
-
-Bring up the CAN interfaces before testing or running hand control:
+Skip this section unless LinkerHand hardware is connected to the onboard
+computer. Install the hand packages from
+[Installation](../getting-started/installation), then bring up both CAN
+interfaces:
 
 ```bash
 sudo /usr/sbin/ip link set can0 up type can bitrate 1000000
 sudo /usr/sbin/ip link set can1 up type can bitrate 1000000
 ```
 
-Before enabling full sim2real, verify the hand connection with a standalone
-open/close test. The test runs until Ctrl-C:
+Test both hands before starting G1 control:
 
 ```bash
-python scripts/dev/test_linkerhand_l6.py \
-    --hand-type both \
-    --left-can can0 \
-    --right-can can1
-```
-
-For an O6 standalone open/close test, add the O6 driver:
-
-```bash
-python scripts/dev/test_linkerhand_l6.py \
+python scripts/dev/test_linkerhand.py \
     --driver linkerhand_o6 \
     --hand-type both \
     --left-can can0 \
     --right-can can1
 ```
 
-To test O6 with live Pico gripper input, add `--mode gripper`.
+Enable O6 hand-pose control by adding these overrides to the sim2real command:
 
-Then enable L6 gripper control in Pico sim2real:
-
-```bash
-hands.enabled=true
-hands.driver=linkerhand_l6
-hands.mode=gripper
-hands.linkerhand_l6.left_can=can0
-hands.linkerhand_l6.right_can=can1
-```
-
-For O6 gripper control, use:
-
-```bash
+```text
 hands.enabled=true
 hands.driver=linkerhand_o6
-hands.mode=gripper
+hands.mode=vr_hand_pose
 hands.linkerhand_o6.left_can=can0
 hands.linkerhand_o6.right_can=can1
 ```
 
-For continuous VR hand-pose control, use:
+With `hands.mode=gripper`, hold the controller's side grip trigger to enable
+that hand, then use the index trigger to control how far it closes. Releasing
+the side grip trigger commands that hand to open. LinkerHand L6 is also
+supported through the matching `hands.linkerhand_l6.*` settings.
+
+## Onboard Only: OpenNeck
+
+Install and calibrate OpenNeck:
 
 ```bash
-hands.enabled=true
-hands.driver=linkerhand_l6
-hands.mode=vr_hand_pose
-hands.linkerhand_l6.left_can=can0
-hands.linkerhand_l6.right_can=can1
+pip install -e '.[openneck]'
+openneck calibrate
 ```
 
-## Optional RealSense Preview
+Then add these overrides to the sim2real command:
 
-Stream the G1 RealSense color camera back to the Pico headset:
+```text
+neck.enabled=true
+neck.port=/dev/ttyACM0
+```
+
+OpenNeck follows the Pico HMD relative to the operator's upper body. It reuses
+the existing Pico receiver.
+
+## Onboard Only: RealSense Preview
+
+Install `pyrealsense2`, then add:
+
+```text
+input.video.enabled=true
+input.video.device=<optional-realsense-serial>
+```
+
+The camera view is sent to the headset. A timeout restarts the camera in the
+background without stopping Pico tracking or G1 control.
+
+## Onboard Only: Record and Review Data
+
+Recording requires a fresh RealSense RGB frame:
 
 ```bash
 python scripts/run/run_sim2real.py \
-    --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
-    real_robot.network_interface=enp130s0 \
-    input.video.enabled=true \
-    input.video.device=<optional-realsense-serial>
+    --config-name sim2real_record \
+    controller.policy_path=ckpt/track_g1.onnx \
+    real_robot.network_interface=eth0 \
+    recording.task="walk forward"
 ```
 
-If video fails, control continues unless `input.video.fail_on_error=true`.
+Use terminal `R` to start an episode, `S` to save it, `D` to discard it and
+`Q` to shut down. If no fresh camera frame arrives for one second, the active
+episode is discarded while robot control continues. Start a new episode
+manually after video recovers.
 
-## Common Parameters
+Review the saved recording with:
 
 ```bash
-# Real G1 DDS interface
-real_robot.network_interface=enp130s0
-
-# Pico timeout
-input.pico4_timeout=30
-
-# Override advertised Pico discovery IP
-input.bridge_advertise_ip=192.168.1.20
-
-# Consecutive valid mocap frames required before MOCAP
-mocap_switch.check_frames=10
-
-# Change Pico pause button
-input.pause_button=right_axis_click
-
-# Enable LinkerHand gripper control
-hands.enabled=true
-hands.driver=linkerhand_l6
-hands.mode=gripper
-
-# Enable headset video preview
-input.video.enabled=true
+pip install -e '.[review]'
+python scripts/view/view_recording.py \
+    --recording data/recordings/sim2real_hdf5
 ```
 
-## Troubleshooting
+The viewer synchronizes camera video, measured and reference G1 poses, and
+optional hand and neck signals. See
+[Teleoperation Datasets](../reference/resources/teleoperation-datasets)
+for the stored fields.
 
-| Symptom | Likely Cause | Fix |
-|---------|--------------|-----|
-| No LowState received | Wrong interface or G1 network not connected | Check Ethernet wiring and `real_robot.network_interface` |
-| `TimeoutError: No Pico4 body data` | Headset is not connected or tracking is inactive | Check headset app, network, and `input.pico4_timeout` |
-| Cannot enter debug mode | Unitree mode release failed | Stop other robot modes and press `Start` again |
-| Robot enters `STANDING` but not `MOCAP` | Mocap validation failed | Keep tracking active and stable; check `mocap_switch.check_frames` logs |
-| Pico pause does not return to `STANDING` | Expected behavior | Pico pause freezes mocap; press remote `X` for `STANDING` |
-| LinkerHand does not move | `hands.enabled=false`, gripper deadman released, SDK/assets not installed, or CAN channel wrong | Enable `hands.enabled`, set `hands.mode`, run `scripts/dev/test_linkerhand_l6.py`, and check the selected driver's `left_can` / `right_can` |
-| Video preview is unavailable | RealSense or video source failed | Check camera permissions, `input.video.source`, and logs |
+## Common Problems
+
+| Problem | Solution |
+|---------|----------|
+| RealSense does not work on Arm | Remove the PyPI wheel with `pip uninstall pyrealsense2`, then install the conda-forge Arm build with `conda install -c conda-forge pyrealsense2` |
+
+## Other G1 Workflows
+
+- [Standalone Standing Test](standalone-standing)
+- [BVH Playback on Unitree G1](bvh-sim2real)
+- [From Teleoperation Data to Imitation Learning / VLA Deployment](high-level-policy-sim2real)

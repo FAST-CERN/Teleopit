@@ -39,7 +39,7 @@ def test_pico_video_config_rejects_enabled_unknown_source() -> None:
         parse_pico_video_config({"video": {"enabled": True, "source": "webcam"}})
 
 
-def test_realsense_video_runtime_pushes_rgb_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_realsense_video_runtime_reconnects_after_frame_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_rs = ModuleType("pyrealsense2")
     fake_rs.stream = SimpleNamespace(color="color")
     fake_rs.format = SimpleNamespace(rgb8="rgb8")
@@ -59,12 +59,23 @@ def test_realsense_video_runtime_pushes_rgb_frames(monkeypatch: pytest.MonkeyPat
         def get_color_frame(self) -> FakeColorFrame:
             return FakeColorFrame()
 
+    pipeline_instances = 0
+    wait_calls = 0
+
     class FakePipeline:
+        def __init__(self) -> None:
+            nonlocal pipeline_instances
+            pipeline_instances += 1
+
         def start(self, _config: object) -> None:
             pass
 
-        def wait_for_frames(self) -> FakeFrames:
+        def wait_for_frames(self, _timeout_ms: int) -> FakeFrames:
+            nonlocal wait_calls
+            wait_calls += 1
             time.sleep(0.005)
+            if wait_calls == 1:
+                raise RuntimeError("Frame didn't arrive within 5000")
             return FakeFrames()
 
         def stop(self) -> None:
@@ -73,18 +84,31 @@ def test_realsense_video_runtime_pushes_rgb_frames(monkeypatch: pytest.MonkeyPat
     fake_rs.config = FakeConfig
     fake_rs.pipeline = FakePipeline
     monkeypatch.setitem(sys.modules, "pyrealsense2", fake_rs)
+    monkeypatch.setattr(pico_video._RealSenseVideoProducer, "_RECONNECT_DELAY_S", 0.005)
 
     sink = _FrameSink()
-    config = parse_pico_video_config({"video": {"enabled": True, "source": "realsense", "width": 3, "height": 2}})
-    runtime = PicoVideoRuntime(provider=sink, config=config, mode="sim2real")
+    config = parse_pico_video_config(
+        {
+            "video": {
+                "enabled": True,
+                "source": "realsense",
+                "width": 3,
+                "height": 2,
+            }
+        }
+    )
+    runtime = PicoVideoRuntime(provider=sink, config=config)
 
     runtime.start()
-    time.sleep(0.03)
+    deadline = time.monotonic() + 0.5
+    while not sink.frames and time.monotonic() < deadline:
+        time.sleep(0.005)
     runtime.stop()
 
     assert sink.frames
     assert sink.frames[-1].shape == (2, 3, 3)
     assert sink.frames[-1].dtype == np.uint8
+    assert pipeline_instances >= 2
 
 
 def test_realsense_video_runtime_invokes_frame_callback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,7 +132,7 @@ def test_realsense_video_runtime_invokes_frame_callback(monkeypatch: pytest.Monk
         def start(self, _config: object) -> None:
             pass
 
-        def wait_for_frames(self) -> FakeFrames:
+        def wait_for_frames(self, _timeout_ms: int) -> FakeFrames:
             time.sleep(0.005)
             return FakeFrames()
 
@@ -125,7 +149,6 @@ def test_realsense_video_runtime_invokes_frame_callback(monkeypatch: pytest.Monk
     runtime = PicoVideoRuntime(
         provider=sink,
         config=config,
-        mode="sim2real",
         frame_callback=lambda frame, _timestamp_s: callback_frames.append(frame.copy()),
     )
 
@@ -159,7 +182,7 @@ def test_video_runtime_stops_producer_after_startup_error(monkeypatch: pytest.Mo
 
     sink = _FrameSink()
     config = parse_pico_video_config({"video": {"enabled": True, "source": "realsense"}})
-    runtime = PicoVideoRuntime(provider=sink, config=config, mode="sim2real")
+    runtime = PicoVideoRuntime(provider=sink, config=config)
 
     runtime.start()
 
@@ -167,7 +190,7 @@ def test_video_runtime_stops_producer_after_startup_error(monkeypatch: pytest.Mo
     assert sink.frames == []
 
 
-def test_video_runtime_stops_producer_before_reraising_tick_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_video_runtime_stops_producer_and_isolates_tick_error(monkeypatch: pytest.MonkeyPatch) -> None:
     stopped = False
 
     class FailingProducer:
@@ -187,16 +210,47 @@ def test_video_runtime_stops_producer_before_reraising_tick_error(monkeypatch: p
     monkeypatch.setattr(pico_video, "_RealSenseVideoProducer", FailingProducer)
 
     sink = _FrameSink()
-    config = parse_pico_video_config(
-        {"video": {"enabled": True, "source": "realsense", "fail_on_error": True}}
-    )
-    runtime = PicoVideoRuntime(provider=sink, config=config, mode="sim2real")
+    config = parse_pico_video_config({"video": {"enabled": True, "source": "realsense"}})
+    runtime = PicoVideoRuntime(provider=sink, config=config)
 
     runtime.start()
-    with pytest.raises(RuntimeError, match="Pico video pipeline failed"):
-        runtime.tick()
+    runtime.tick()
 
     assert stopped is True
+
+
+def test_realsense_video_start_failure_does_not_stop_unstarted_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_rs = ModuleType("pyrealsense2")
+    fake_rs.stream = SimpleNamespace(color="color")
+    fake_rs.format = SimpleNamespace(rgb8="rgb8")
+    stop_calls = 0
+
+    class FakeConfig:
+        def enable_stream(self, *_args: object) -> None:
+            pass
+
+    class FakePipeline:
+        def start(self, _config: object) -> None:
+            raise RuntimeError("no device connected")
+
+        def stop(self) -> None:
+            nonlocal stop_calls
+            stop_calls += 1
+
+    fake_rs.config = FakeConfig
+    fake_rs.pipeline = FakePipeline
+    monkeypatch.setitem(sys.modules, "pyrealsense2", fake_rs)
+    monkeypatch.setattr(pico_video._RealSenseVideoProducer, "_STARTUP_WAIT_S", 0.02)
+    monkeypatch.setattr(pico_video._RealSenseVideoProducer, "_RECONNECT_DELAY_S", 0.005)
+
+    sink = _FrameSink()
+    config = parse_pico_video_config({"video": {"enabled": True, "source": "realsense"}})
+    runtime = PicoVideoRuntime(provider=sink, config=config)
+
+    runtime.start()
+    runtime.stop()
+
+    assert stop_calls == 0
 
 
 def test_mujoco_video_runtime_renders_camera_frame(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -223,7 +277,7 @@ def test_mujoco_video_runtime_renders_camera_frame(monkeypatch: pytest.MonkeyPat
     sink = _FrameSink()
     robot = SimpleNamespace(model=object(), data=object())
     config = parse_pico_video_config({"video": {"enabled": True, "source": "mujoco", "width": 4, "height": 3}})
-    runtime = PicoVideoRuntime(provider=sink, config=config, mode="sim2sim", robot=robot)
+    runtime = PicoVideoRuntime(provider=sink, config=config, robot=robot)
 
     runtime.start()
     runtime.tick()

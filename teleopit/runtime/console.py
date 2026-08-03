@@ -200,6 +200,7 @@ class PlainConsole:
             "MOCAP": GREEN + BOLD,
             "STANDING": GREEN + BOLD,
             "ARMS": MAGENTA + BOLD,
+            "POLICY": CYAN + BOLD,
         }
         for word, code in replacements.items():
             highlighted = highlighted.replace(word, f"{code}{word}{RESET}")
@@ -256,6 +257,7 @@ def sim2real_operator_controls(cfg: Any) -> tuple[KeyboardControl, ...]:
     if provider == "pico4":
         controls.extend(
             [
+                KeyboardControl("Remote B", "pause/resume"),
                 KeyboardControl("Pico/Controller A", "pause/resume"),
                 KeyboardControl("Pico/Controller B", "arms"),
             ]
@@ -269,3 +271,13 @@ def sim2real_operator_controls(cfg: Any) -> tuple[KeyboardControl, ...]:
         )
     controls.extend(sim2real_keyboard_controls(cfg))
     return tuple(controls)
+
+
+def high_level_policy_operator_controls() -> tuple[KeyboardControl, ...]:
+    return (
+        KeyboardControl("Remote Start", "standing"),
+        KeyboardControl("Remote Y", "policy takeover"),
+        KeyboardControl("Remote B", "pause/resume"),
+        KeyboardControl("Remote X", "standing"),
+        KeyboardControl("Remote L1+R1", "damping / estop"),
+    )

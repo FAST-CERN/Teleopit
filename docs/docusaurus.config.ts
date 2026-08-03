@@ -4,7 +4,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Teleopit',
-  tagline: 'Lightweight, extensible whole-body teleoperation framework for humanoid robots',
+  tagline: 'Full-embodiment teleoperation for humanoid robots',
   favicon: 'img/favicon.ico',
 
   url: 'https://BotRunner64.github.io',
@@ -72,7 +72,7 @@ const config: Config = {
           items: [
             {label: 'Getting Started', to: '/getting-started/installation'},
             {label: 'Tutorials', to: '/tutorials/offline-sim2sim'},
-            {label: 'Configuration', to: '/configuration/overview'},
+            {label: 'Reference', to: '/reference/configuration/overview'},
           ],
         },
         {

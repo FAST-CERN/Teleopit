@@ -1,302 +1,226 @@
 ---
-sidebar_position: 4
+sidebar_position: 3
 ---
 
-# Pico 4 VR 真机遥操作
+# 用 VR 遥操真实 G1
 
-在 [Pico Sim2Sim](pico-sim2sim) 跑通后，使用本教程把同一条实时 Pico 输入路径部署到
-真实 Unitree G1。
+本教程会把已经在 MuJoCo 中验证过的 Pico 流程迁移到真实 Unitree G1。先确定 Teleopit
+运行在哪里，再验证站立运控，最后才把机器人交给实时身体追踪。
 
-```text
-Pico 头显 -> Teleopit host -> retarget -> RL policy -> g1_bridge_sdk -> G1
-```
+:::danger 始终把 Unitree 遥控器拿在手里
+动作异常时立即按 `L1+R1` 进入 `DAMPING`。清空机器人周围空间，并安排另一名人员
+随时扶住或停止机器人。
+:::
 
-有两种部署方式：
+## 选择部署方式
 
-| 部署方式 | Teleopit 运行位置 | 主要区别 |
-|----------|-------------------|----------|
-| Wired PC-to-G1 | 外部工作站或笔记本 | 将 `real_robot.network_interface` 设置为 PC 上连接 G1 的以太网接口 |
-| Onboard | G1 onboard 计算机 | 在 onboard 计算机安装 Teleopit；通常使用 `eth0` |
+### 外部主机部署：仅全身追踪
 
-两种方式都使用 `Pico4InputProvider` 和进程内 pico-bridge receiver。不存在单独的
-onboard Pico 输入模式。
+Teleopit 运行在工作站或笔记本电脑上，电脑通过网线连接 G1；Pico 头显需要能够通过
+网络访问这台电脑。
 
-Teleopit 面向 pico-bridge 0.2.1 及其 `pico_native` tracking 语义。
-
-## 1. 安装运行时依赖
-
-在运行 Teleopit 的机器上安装 Pico 和 sim2real 依赖：
+这种部署方式只用于 G1 全身控制，请保持 LinkerHand、OpenNeck、RealSense 画面和
+数据录制关闭。先查看连接 G1 的有线网卡：
 
 ```bash
-pip install -e '.[pico4]'
-git submodule update --init --recursive
-bash scripts/setup/setup_g1_bridge.sh
+ifconfig
 ```
 
-验证 Pico receiver 导入：
+在后面的命令中填写这块网卡的名称。本文以 `enp130s0` 为例。
+
+### 机载电脑部署：完整具身能力
+
+如果还需要 LinkerHand、OpenNeck、RealSense 画面或数据采集，请直接在 G1 机载电脑
+上运行 Teleopit。Pico 头显需要能够访问机载电脑。
+
+机载配置同时使用 O6 双手和 OpenNeck 时，请将底层运控策略设为
+`controller.policy_path=ckpt/track_g1_neck_o6.onnx`。
+
+G1 DDS 默认使用 `eth0`。除了网络接口和可选机载硬件配置之外，全身控制的配置和启动
+命令与外部主机部署相同。
+
+## 开始之前
+
+请确认以下条件全部满足：
+
+- [在仿真中进行 VR 遥操](pico-sim2sim)已经稳定运行；
+- 已按照[安装](../getting-started/installation)安装 `pico4` 依赖并编译
+  `g1_bridge_sdk`；
+- 已准备好 `ckpt/track_g1.onnx`、机器人文件和 GMR 资源；
+- 运行 Teleopit 的设备已经通过有线 DDS 网络连接 G1；
+- 没有其他程序正在控制机器人。
+
+## 1. 检查站立运控
+
+先只检查机器人状态接收和策略频率，不发送电机命令。外部主机需要把 `enp130s0`
+替换为 `ifconfig` 查到的有线网卡：
 
 ```bash
-python -c "from pico_bridge import PicoBridge; print('OK')"
+python scripts/run/standalone_standing.py \
+    --policy ckpt/track_g1.onnx \
+    --network-interface enp130s0 \
+    --dry-run
 ```
 
-## 2. 选择网络接口
+在机载电脑上运行时，使用 `--network-interface eth0`。
 
-`real_robot.network_interface` 是用于 Unitree DDS 通信的 Linux 网卡接口。
-
-对于 wired PC-to-G1 部署：
-
-1. 用网线连接 PC 和 G1。
-2. 在 PC 上运行 `ifconfig`。
-3. 使用连接到机器人的以太网接口，例如 `enp130s0`。
-4. 确保 Pico 头显所在网络可以访问运行 Teleopit 的 PC。
-
-对于 onboard 部署：
-
-1. 在机器人 onboard 计算机上运行 Teleopit。
-2. 确保 Pico 头显所在网络可以访问 onboard 计算机。
-3. 除非机器人网络不同，否则使用 `real_robot.network_interface=eth0`。
-4. 如果 Pico discovery 广播了错误地址，设置 `input.bridge_advertise_ip=<host-ip>`。
-
-### Arm Onboard 的 RealSense 配置
-
-pico-bridge PC receiver 在所需 Python 依赖可用时支持 Arm 机器。对于需要 RealSense
-预览的 Arm onboard 计算机，应在当前 Conda 环境中从 conda-forge 安装 `pyrealsense2`，
-不要依赖 pip 包：
+Dry run 成功后，在确保硬件安全的情况下去掉 `--dry-run` 再运行一次：
 
 ```bash
-pip uninstall pyrealsense2
-conda install -c conda-forge pyrealsense2
+python scripts/run/standalone_standing.py \
+    --policy ckpt/track_g1.onnx \
+    --network-interface enp130s0
 ```
 
-这只影响可选的 RealSense 预览路径（`input.video.enabled=true`）。Pico 追踪和机器人控制
-本身不需要 RealSense。
+站立运控不稳定时不要继续接入 Pico，请先按照
+[单独测试站立运控](standalone-standing)排查。
 
-## 3. 运行控制器
+## 2. 启动 Pico 真机遥操
 
-Wired PC 示例：
+外部主机示例：
 
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=enp130s0
 ```
 
-Onboard 示例：
+机载电脑示例：
 
 ```bash
 python scripts/run/run_sim2real.py \
     --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     real_robot.network_interface=eth0
 ```
 
-## 可选 HDF5 录制
+程序启动后不会立即让 Pico 接管机器人。
 
-在负责 Pico 输入和 RealSense 的机器上安装 recording extra：
+## 3. 按 G1 状态机操作
 
-```bash
-pip install -e '.[recording]'
-```
+![Pico G1 控制状态机](/img/diagrams/pico-g1-state-machine-zh.svg)
 
-运行录制配置：
+图中的 **G1 遥控器**表示 Unitree 遥控器，**Pico 手柄**表示 VR 手柄。电脑键盘不负责
+切换真机状态。
 
-```bash
-python scripts/run/run_sim2real.py \
-    --config-name sim2real_record \
-    controller.policy_path=track.onnx \
-    real_robot.network_interface=enp130s0 \
-    recording.task="walk forward"
-```
+先按 **G1 遥控器** `Start` 进入 `STANDING`。等机器人站稳，以中立姿态站好，并确认
+Pico 追踪有效。然后按 **G1 遥控器** `Y` 进入 `MOCAP`，从缓慢的小幅动作开始。需要
+结束 VR 会话时，按 **G1 遥控器** `X` 返回 `STANDING`。
 
-终端控制为：`R` 开始 episode，`S` 保存，`D` 丢弃，`Q` 关闭。可以录制
-`STANDING`、`MOCAP`、`ARMS` 和暂停状态的 mocap；已经保存的 episode 不支持再丢弃。
-episode 会保存为 `data/recordings/sim2real_hdf5/episodes/` 下的 `.h5` 文件，
-压缩 MP4 sidecar 视频保存在 `data/recordings/sim2real_hdf5/videos/` 下。
-HDF5 episode 以 30 Hz 保存 `frame_index` 和 `timestamp` 同步数组，以及
-`observation.state(68)`、`observation.mode(1)`、`action(36)` 和
-`action.hand(12)`。
+`MOCAP` 控制全身。`ARMS` 会让身体、腰和腿保持站立，只有双臂继续跟随。
+`PAUSED` 保持当前参考姿态，恢复后回到暂停前的 `MOCAP` 或 `ARMS`。
 
-## 操作流程
+进入 `MOCAP` 前，Teleopit 会连续检查多帧 Pico 数据。检查没有通过时，机器人会继续
+停留在 `STANDING`。
 
-始终把 Unitree 遥控器拿在手里。`L1+R1` 是进入 `DAMPING` 的急停路径。
-
-| 控制 | 动作 |
-|------|------|
-| Unitree remote `Start` | 进入 `STANDING` |
-| Unitree remote `Y` | 进入 `MOCAP` |
-| Pico/controller `A` | 暂停 / 恢复实时动捕 |
-| Pico/controller `B` | 在 `MOCAP` / `ARMS` 之间切换 |
-| Unitree remote `X` | 返回 `STANDING` |
-| Unitree remote `L1+R1` | 急停（`DAMPING`） |
-
-只在 Pico 追踪稳定后进入 `MOCAP`。Teleopit 会在切换前验证连续动捕帧；验证失败时，
-机器人会保持在 `STANDING`。
-
-## 运行时行为
-
-Pico sim2real 使用共享的实时参考时间线：
-
-```text
-Pico body frames -> retarget -> reference buffer -> observation -> policy -> G1 joints
-```
-
-进入 `STANDING` 时，Teleopit 会释放当前 Unitree 模式，进入 debug/low-level 控制，
-短暂锁住当前关节，重置 policy 状态，并在不改变 policy target 的情况下执行 Kp ramp。
-
-进入 `MOCAP` 时，Teleopit 会重新 arm 进程隔离的 reference worker，重置其中的 GMR 状态
-和实时 reference buffer，然后等待新的已验证 reference，再开始跟踪实时 mocap 命令。
-`STANDING` 和 `DAMPING` 会让 reference worker 保持 disarmed，避免冷启动帧在进入 mocap
-之前 warm-start retargeting。
-
-`ARMS` 会保持同一条实时 retargeting 时间线继续运行，但发送给 motion tracker 的参考会被组合：
-身体、腰部和腿部保持站立姿态，双臂跟随实时 retarget 结果。进入或离开 `ARMS` 时会重置
-policy/reference 对齐，并使用同一套 Kp ramp 安全路径。
-
-## 暂停 / 恢复
-
-Pico 暂停/恢复是 mocap-session control event。
-
-- `ACTIVE`：暂停键冻结当前参考姿态。
-- `PAUSED`：再次按下会清空 policy/reference 状态，预热实时 buffer，重新居中 yaw/XY 对齐，
-  并从实时 mocap 恢复。
-
-:::warning
-恢复时请保持静止，并尽量接近暂停时的姿态。这样可以减少实时追踪恢复时的参考突变。
+:::tip 暂停和恢复
+G1 遥控器 `B` 或 Pico 手柄 `A` 会暂停、恢复当前会话。恢复时请保持静止，并尽量接近
+暂停时的姿态。需要结束会话时，请使用 G1 遥控器 `X`。
 :::
 
-## 可选 LinkerHand 控制
+如果 Pico 输入中断，全身运控会保持最后一个参考，G1 遥控器仍然可用。按 `X` 返回
+`STANDING`，或按 `L1+R1` 进入 `DAMPING`；不要等待系统自动切换状态。
 
-Pico sim2real 可以用 Pico 输入控制 LinkerHand：
+## 仅机载：LinkerHand
 
-- `gripper`：按住同侧 grip 作为 deadman，同侧 trigger 控制对应手闭合。
-  该模式支持 `hands.driver=linkerhand_l6` 和 `hands.driver=linkerhand_o6`；
-  速度和张开/闭合姿态来自对应 driver 配置。
-- `vr_hand_pose`：只支持 L6，通过 somehand 重定向 Pico 手部 pose，并下发连续 L6 手部目标。
-  如果某侧手部 pose 消失，该侧会保持上一条手势命令。这个模式使用 Teleopit 的
-  Pico landmark 适配器和 somehand 0.2.0 公开的 `somehand.api`，并始终将 L6
-  速度设为最大值。默认配置使用 60 Hz 的低延时 somehand 路径并减少平滑，所以响应会更快，
-  但可能比标准 somehand 设置更抖。
-
-`hands.enabled=true` 时，手控会在所有 sim2real 模式中保持生效。退出和手控运行时失败会发送配置的张开姿态。
-
-如果主 Pico profile 没有包含手控支持，先安装本地手控包：
-
-```bash
-git submodule update --init --recursive
-pip install -e third_party/linkerhand-python-sdk
-pip install -e third_party/somehand
-scripts/setup/download_somehand_l6_assets.sh
-```
-
-测试或运行手控前，先开启 CAN 接口：
+只有 LinkerHand 已连接到机载电脑时才需要本节。先按照
+[安装](../getting-started/installation)安装手部依赖，再启用两路 CAN：
 
 ```bash
 sudo /usr/sbin/ip link set can0 up type can bitrate 1000000
 sudo /usr/sbin/ip link set can1 up type can bitrate 1000000
 ```
 
-启用完整 sim2real 前，先用独立开合测试验证灵巧手连接。测试默认一直运行到 Ctrl-C：
+启动 G1 运控前，先单独测试双手：
 
 ```bash
-python scripts/dev/test_linkerhand_l6.py \
-    --hand-type both \
-    --left-can can0 \
-    --right-can can1
-```
-
-O6 独立开合测试需要加上 O6 driver：
-
-```bash
-python scripts/dev/test_linkerhand_l6.py \
+python scripts/dev/test_linkerhand.py \
     --driver linkerhand_o6 \
     --hand-type both \
     --left-can can0 \
     --right-can can1
 ```
 
-如果要用实时 Pico gripper 输入测试 O6，再加 `--mode gripper`。
+在真机启动命令后追加以下参数，即可启用 O6 手部姿态控制：
 
-然后在 Pico sim2real 中启用 L6 gripper 控制：
-
-```bash
-hands.enabled=true
-hands.driver=linkerhand_l6
-hands.mode=gripper
-hands.linkerhand_l6.left_can=can0
-hands.linkerhand_l6.right_can=can1
-```
-
-O6 gripper 控制使用：
-
-```bash
+```text
 hands.enabled=true
 hands.driver=linkerhand_o6
-hands.mode=gripper
+hands.mode=vr_hand_pose
 hands.linkerhand_o6.left_can=can0
 hands.linkerhand_o6.right_can=can1
 ```
 
-连续 VR 手部 pose 控制使用：
+使用 `hands.mode=gripper` 时，需要按住对应手柄侧面的握持扳机键（grip）才会启用
+该侧手部控制；保持按住后，再用食指扳机键（trigger）控制闭合程度。松开侧面握持
+扳机键会让该侧手张开。LinkerHand L6 也受支持，对应参数为
+`hands.linkerhand_l6.*`。
+
+## 仅机载：OpenNeck
+
+安装并校准 OpenNeck：
 
 ```bash
-hands.enabled=true
-hands.driver=linkerhand_l6
-hands.mode=vr_hand_pose
-hands.linkerhand_l6.left_can=can0
-hands.linkerhand_l6.right_can=can1
+pip install -e '.[openneck]'
+openneck calibrate
 ```
 
-## 可选 RealSense 预览
+然后在真机启动命令后追加：
 
-将 G1 RealSense 彩色相机推送回 Pico 头显：
+```text
+neck.enabled=true
+neck.port=/dev/ttyACM0
+```
+
+OpenNeck 会根据 Pico 头显相对操作者上身的运动转动，并复用已有的 Pico 接收程序。
+
+## 仅机载：RealSense 画面
+
+安装 `pyrealsense2`，再追加：
+
+```text
+input.video.enabled=true
+input.video.device=<可选的-realsense-序列号>
+```
+
+相机画面会发送到头显。相机超时后会在后台重连，不会停止 Pico 追踪或 G1 运控。
+
+## 仅机载：录制和查看数据
+
+录制前必须能够收到新的 RealSense RGB 帧：
 
 ```bash
 python scripts/run/run_sim2real.py \
-    --config-name pico4_sim2real \
-    controller.policy_path=track.onnx \
-    real_robot.network_interface=enp130s0 \
-    input.video.enabled=true \
-    input.video.device=<optional-realsense-serial>
+    --config-name sim2real_record \
+    controller.policy_path=ckpt/track_g1.onnx \
+    real_robot.network_interface=eth0 \
+    recording.task="向前走"
 ```
 
-如果视频失败，控制会继续运行，除非设置了 `input.video.fail_on_error=true`。
+在终端按 `R` 开始一个 episode，按 `S` 保存，按 `D` 丢弃，按 `Q` 关闭程序。如果
+一秒内没有收到新的相机帧，当前 episode 会被丢弃，但机器人运控会继续。视频恢复后
+需要手动重新开始录制。
 
-## 常用参数
+查看已保存的数据：
 
 ```bash
-# G1 DDS 网卡接口
-real_robot.network_interface=enp130s0
-
-# Pico 超时时间
-input.pico4_timeout=30
-
-# 覆盖 Pico discovery 广播 IP
-input.bridge_advertise_ip=192.168.1.20
-
-# 进入 MOCAP 前要求的连续有效动捕帧数
-mocap_switch.check_frames=10
-
-# 更换 Pico 暂停键
-input.pause_button=right_axis_click
-
-# 开启 LinkerHand gripper 控制
-hands.enabled=true
-hands.driver=linkerhand_l6
-hands.mode=gripper
-
-# 开启头显视频预览
-input.video.enabled=true
+pip install -e '.[review]'
+python scripts/view/view_recording.py \
+    --recording data/recordings/sim2real_hdf5
 ```
 
-## 故障排查
+查看器会同步显示相机视频、G1 实测与参考姿态，以及可选的手部和头部信号。字段说明
+见[遥操数据集](../reference/resources/teleoperation-datasets)。
 
-| 现象 | 可能原因 | 解决方法 |
-|------|----------|----------|
-| 没有收到 LowState | 网卡错误或 G1 网络未连接 | 检查网线和 `real_robot.network_interface` |
-| `TimeoutError: No Pico4 body data` | 头显未连接或追踪未激活 | 检查头显 app、网络和 `input.pico4_timeout` |
-| 无法进入 debug mode | Unitree mode 释放失败 | 停止其他机器人模式后再次按 `Start` |
-| 机器人进入 `STANDING` 但不进入 `MOCAP` | 动捕验证失败 | 保持追踪稳定，查看 `mocap_switch.check_frames` 日志 |
-| Pico 暂停没有返回 `STANDING` | 这是预期行为 | Pico 暂停只冻结 mocap；按遥控器 `X` 返回 `STANDING` |
-| LinkerHand 不动 | `hands.enabled=false`、gripper deadman 未按住、SDK/资产未安装，或 CAN 通道错误 | 设置 `hands.enabled=true` 和 `hands.mode`，运行 `scripts/dev/test_linkerhand_l6.py`，并检查所选 driver 的 `left_can` / `right_can` |
-| 视频预览不可用 | RealSense 或视频源失败 | 检查相机权限、`input.video.source` 和日志 |
+## 常见问题
+
+| 问题 | 解决方法 |
+|------|----------|
+| Arm 设备上 RealSense 无法使用 | 先运行 `pip uninstall pyrealsense2` 删除 PyPI wheel，再运行 `conda install -c conda-forge pyrealsense2` 安装 conda-forge 提供的 Arm 构建 |
+
+## 其他 G1 工作流
+
+- [单独测试站立运控](standalone-standing)
+- [在 Unitree G1 上回放 BVH](bvh-sim2real)
+- [从遥操数据到模仿学习 / VLA 真机部署](high-level-policy-sim2real)

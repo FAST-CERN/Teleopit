@@ -1,39 +1,72 @@
 ---
-sidebar_position: 5
+sidebar_position: 4
 ---
 
-# 训练
+# 训练运控策略
 
-训练全身追踪策略，并导出为 ONNX 格式用于推理部署。
+本教程从已下载的动作数据开始，最终得到可以在 Teleopit 仿真和真实 G1 上运行的
+ONNX 运控模型。
 
-:::info
-数据准备请参阅 [数据集参考](../reference/dataset)。常见训练问题请参阅 [训练故障排查](../reference/training-troubleshooting)。
-:::
+常规训练流程默认使用 NVIDIA GPU。动作数据会在启动时全部加载到内存，因此合并数据集
+越大，需要的内存和显存也越多。
 
-## 环境安装
+## 开始之前
 
-```bash
-conda create -n teleopit python=3.10
-conda activate teleopit
-pip install -e '.[train]'
-```
+按照[安装说明](../getting-started/installation)完成：
 
-验证安装：
+- `train` 依赖；
+- `robots data` 资源包。
+
+检查训练包：
+
 ```bash
 python -c "import train_mimic.tasks; print('training OK')"
 ```
 
-下载分发的最小数据集，并生成合并后的预计算训练数据集：
+## 1. 预处理已下载的数据集
+
+下载的数据是便于分发的精简版本。训练需要另一个目录，其中提前计算好了关节速度和
+身体运动学信息：
 
 ```bash
-python scripts/setup/download_assets.py --only robots data
 python train_mimic/scripts/data/precompute_dataset.py \
-    data/datasets --outdir data/datasets_precomputed --jobs 8
+    data/datasets \
+    --outdir data/datasets_precomputed \
+    --jobs 8
 ```
 
-## 训练
+下面所有训练、回放和 benchmark 命令都使用 `data/datasets_precomputed`。把原始
+`data/datasets` 直接传给训练会报错，这不是支持的快捷方式。
 
-### 冒烟测试
+自定义 BVH、PKL、NPZ 或 Pico 录制数据的处理方法见
+[动作数据集](../reference/resources/motion-datasets)。
+
+## 2. 选择机器人模型
+
+使用 `--robot_xml` 指定训练所用的 MuJoCo 模型。如果省略该参数，默认使用：
+
+```text
+assets/robots/unitree_g1/g1_29dof.xml
+```
+
+当前 `robots` 资源包提供了以下可以直接使用的示例：
+
+| 模型 XML | 配置 |
+|----------|------|
+| `assets/robots/unitree_g1/g1_29dof.xml` | 基础 G1 模型，也是默认值 |
+| `assets/robots/unitree_g1/g1_29dof_dex3.xml` | 带 Dex3 手部几何和惯性参数的 G1 |
+| `assets/robots/unitree_g1/g1_29dof_neck_o6.xml` | 带颈部主动视觉和 O6 手部模型的 G1 |
+
+这个表只是当前资源包随附的模型示例，不是写死的模型白名单。只要关节和刚体定义与所选
+训练任务配置及数据集兼容，也可以传入其他模型 XML。
+
+下面“开始完整训练”的主命令会显式选择基础模型，便于直接复制。训练其他模型时，
+替换 `--robot_xml` 后的路径即可。其他命令不再重复该参数；回放和 benchmark 会从
+所选任务配置中加载机器人。
+
+## 3. 先做短时间冒烟测试
+
+开始长时间训练前，先确认数据集、仿真器和日志工具能够一起工作：
 
 ```bash
 python train_mimic/scripts/train.py \
@@ -42,16 +75,75 @@ python train_mimic/scripts/train.py \
     --motion_file data/datasets_precomputed
 ```
 
-### 完整训练
+只要环境能够持续 step、终端输出 loss，并且
+`logs/rsl_rl/g1_general_tracking/` 下生成新的运行目录，这项检查就通过了。
+
+## 4. 开始完整训练
 
 ```bash
 python train_mimic/scripts/train.py \
+    --robot_xml assets/robots/unitree_g1/g1_29dof.xml \
     --num_envs 4096 \
     --max_iterations 30000 \
     --motion_file data/datasets_precomputed
 ```
 
-### 多卡训练
+显存不足时降低 `--num_envs`。默认日志工具是 TensorBoard；需要时可使用
+`--logger wandb` 或 `--logger swanlab`。
+
+`--max_iterations` 表示继续训练多少次。例如从 `model_12000.pt` 恢复并设置
+`--max_iterations 18000`，最终会训练到第 30000 次。
+
+## 5. 在仿真中查看 checkpoint
+
+```bash
+python train_mimic/scripts/play.py \
+    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
+    --motion_file data/datasets_precomputed
+```
+
+回放会从每段动作开头开始，并关闭训练噪声。导出前先用它排除明显不稳定的模型。
+
+## 6. 运行 Benchmark
+
+```bash
+python train_mimic/scripts/benchmark.py \
+    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
+    --motion_file data/datasets_precomputed \
+    --num_envs 32
+```
+
+Benchmark 会对每个长度足够的 clip 执行一次确定性的 10 秒 rollout，并报告：
+
+- 平均关节位置误差（`MPJPE`）；
+- 根部位置、旋转和速度误差；
+- rollout 成功率。
+
+结果会保存为文本摘要、JSON、逐 clip CSV 和逐 rollout CSV。
+
+## 7. 导出 ONNX
+
+```bash
+python train_mimic/scripts/save_onnx.py \
+    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
+    --output ckpt/track_g1.onnx \
+    --history_length 10
+```
+
+输出必须是包含 `obs` 和 `obs_history` 的双输入 TemporalCNN。Teleopit 会在启动时
+检查 167D 观测签名，不兼容的导出文件会直接报错。
+
+使用正常运行入口检查导出结果：
+
+```bash
+python scripts/run/run_sim.py \
+    controller.policy_path=ckpt/track_g1.onnx \
+    input.bvh_file=data/sample_bvh/aiming1_subject1.bvh
+```
+
+## 扩展到多张 GPU
+
+单机多卡：
 
 ```bash
 python train_mimic/scripts/train.py \
@@ -61,9 +153,9 @@ python train_mimic/scripts/train.py \
     --motion_file data/datasets_precomputed
 ```
 
-### 多机多卡训练
+这里的 `--num_envs` 是每张 GPU 的环境数量。
 
-跨多台机器训练时，直接使用 `torchrun`：
+多机训练使用 `torchrun`：
 
 ```bash
 torchrun \
@@ -78,67 +170,15 @@ torchrun \
     --motion_file data/datasets_precomputed
 ```
 
-**注意事项：**
-- 多卡模式下 `--num_envs` 为每张 GPU 的环境数量
-- 多机模式下 `--num_envs` 也按每个进程计算，因此总环境数会随 `world_size` 线性增长
-- 默认日志工具为 TensorBoard。使用 `--logger wandb` 或 `--logger swanlab` 可选择 W&B 或 SwanLab；项目名默认使用 `experiment_name`
-- `--motion_file` 接受预计算训练数据集根目录或单个预计算 `.h5` shard；shard 会递归发现
-- 如果只有最小分发 shard，先运行 `python train_mimic/scripts/data/precompute_dataset.py <minimal_dataset> --outdir <precomputed_dataset>`，再把预计算输出传给训练。
-- 训练会在启动时把所有发现的预计算 motion window 全量加载到内存中。
-- `--max_iterations` 表示追加迭代次数；例如从 `model_12000.pt` 恢复训练并设置 `--max_iterations 18000`，最终将训练到 `model_30000.pt`
+这里的 `--num_envs` 是每个进程的环境数量，总数会随 world size 增长。
 
-## 导出 ONNX
+## 常见问题
 
-```bash
-python train_mimic/scripts/save_onnx.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --output track.onnx \
-    --history_length 10
-```
+| 现象 | 检查内容 |
+|------|----------|
+| Loader 提示数据集是 minimal 格式 | 运行 `precompute_dataset.py`，并使用它的输出目录 |
+| 显存不足 | 降低 `--num_envs`，或使用更少的预计算数据 shard |
+| 启动加载时内存不足 | 减少参与训练的 precomputed shard，或增加内存 |
+| 训练速度异常缓慢 | 检查 PyTorch 是否识别 CUDA，并确认训练设备实际使用 CUDA GPU |
 
-导出的模型为双输入 ONNX（`obs` + `obs_history`）。推理端需要与当前 `velcmd_history` 观测匹配的 167D 双输入 ONNX 策略。
-
-## 评估
-
-### 播放验证
-
-```bash
-python train_mimic/scripts/play.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets_precomputed
-```
-
-### 定量评估
-
-```bash
-python train_mimic/scripts/benchmark.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets_precomputed \
-    --num_envs 1
-```
-
-### 带视频的定量评估
-
-```bash
-python train_mimic/scripts/benchmark.py \
-    --checkpoint logs/rsl_rl/g1_general_tracking/<run>/model_30000.pt \
-    --motion_file data/datasets_precomputed \
-    --num_envs 1 \
-    --video \
-    --video_length 600
-```
-
-## 训练架构
-
-```text
-train_mimic/scripts
-    -> train_mimic/app.py
-    -> single task registry / env builder / runner cfg
-    -> mjlab + rsl_rl
-```
-
-关键文件：
-- `train_mimic/app.py` - 训练/播放/评估的统一入口
-- `train_mimic/tasks/tracking/config/env.py` - General-Tracking-G1 环境构建器
-- `train_mimic/tasks/tracking/config/rl.py` - TemporalCNN PPO 配置
-- `train_mimic/tasks/tracking/mdp/commands.py` - 支持 `uniform`、`start` 和 `rewind` 采样模式。训练默认使用 `rewind`；播放/评估使用 `start`。
+任务内部结构和模型维度见[系统架构](../reference/architecture)。

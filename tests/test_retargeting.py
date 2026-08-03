@@ -7,6 +7,7 @@ extract_mimic_obs helper.
 """
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -170,3 +171,61 @@ class TestRetargetingModuleInit:
             assert ik_config[table_name]["left_foot"][0] == "Left_Foot"
             assert ik_config[table_name]["right_foot"][-1] == "site"
             assert ik_config[table_name]["right_foot"][0] == "Right_Foot"
+
+
+@requires_mujoco
+@requires_mink
+class TestGmrResetWarmup:
+    def test_warmup_seeds_floating_root_from_current_target(self, monkeypatch):
+        import mujoco
+
+        from teleopit.retargeting.gmr.motion_retarget import GeneralMotionRetargeting
+
+        gmr = object.__new__(GeneralMotionRetargeting)
+        gmr.robot_root_name = "pelvis"
+        gmr.human_root_name = "Pelvis"
+        gmr.scaled_human_data = {
+            "Pelvis": (
+                np.array([1.0, -2.0, 0.83], dtype=np.float64),
+                np.array([0.0, 0.0, 0.0, 2.0], dtype=np.float64),
+            )
+        }
+        gmr.model = SimpleNamespace(
+            qpos0=np.arange(36, dtype=np.float64),
+            body_jntadr=np.array([0, 0], dtype=np.int32),
+            body_jntnum=np.array([0, 1], dtype=np.int32),
+            jnt_type=np.array([mujoco.mjtJoint.mjJNT_FREE], dtype=np.int32),
+            jnt_qposadr=np.array([0], dtype=np.int32),
+        )
+        gmr.configuration = SimpleNamespace(update=MagicMock())
+        monkeypatch.setattr(mujoco, "mj_name2id", lambda *_args: 1)
+
+        gmr._seed_warmup_root_from_target()
+
+        seeded = gmr.configuration.update.call_args.kwargs["q"]
+        np.testing.assert_allclose(seeded[:3], [1.0, -2.0, 0.83])
+        np.testing.assert_allclose(seeded[3:7], [0.0, 0.0, 0.0, 1.0])
+        np.testing.assert_allclose(seeded[7:], gmr.model.qpos0[7:])
+
+    def test_retarget_applies_root_seed_only_on_reset_warmup(self):
+        from teleopit.retargeting.gmr.motion_retarget import GeneralMotionRetargeting
+
+        gmr = object.__new__(GeneralMotionRetargeting)
+        gmr.update_targets = MagicMock()
+        gmr._seed_warmup_root_from_target = MagicMock()
+        gmr._warmup_needed = True
+        gmr._warmup_max_iter = 200
+        gmr._warmup_dt = 0.1
+        gmr.max_iter = 10
+        gmr.use_ik_match_table1 = False
+        gmr.use_ik_match_table2 = False
+        gmr.configuration = SimpleNamespace(
+            data=SimpleNamespace(qpos=np.zeros(36, dtype=np.float64)),
+            model=SimpleNamespace(opt=SimpleNamespace(timestep=0.005)),
+        )
+
+        gmr.retarget({})
+        gmr.retarget({})
+
+        gmr._seed_warmup_root_from_target.assert_called_once_with()
+        assert gmr._warmup_needed is False

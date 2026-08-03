@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 from pathlib import Path
+import shutil
+import time
 from types import SimpleNamespace
 
 import h5py
@@ -16,9 +19,13 @@ from teleopit.recording.hdf5 import (
     ACTION_KEY,
     FRAME_INDEX_KEY,
     HAND_ACTION_KEY,
+    HAND_STATE_KEY,
     HDF5_RECORDING_FORMAT,
+    HDF5_RECORDING_VERSION,
     IMAGE_KEY,
     MODE_KEY,
+    NECK_ACTION_KEY,
+    NECK_STATE_KEY,
     STATE_KEY,
     TIMESTAMP_KEY,
     build_mode_observation,
@@ -26,8 +33,15 @@ from teleopit.recording.hdf5 import (
     build_recording_schema,
     hdf5_schema,
 )
-from teleopit.sim2real.mp.ipc import HEALTH_TOPIC, LatestSubscriber, ZmqPublisher
-from teleopit.sim2real.mp.messages import HandCommandPacket, ModeStatePacket, RecordStepPacket, ReferencePacket, SharedFrameDescriptor
+from teleopit.sim2real.mp.ipc import HEALTH_TOPIC, LatestSubscriber, ZmqPublisher, default_endpoints
+from teleopit.sim2real.mp.messages import (
+    HandCommandPacket,
+    ModeStatePacket,
+    NeckCommandPacket,
+    RecordStepPacket,
+    ReferencePacket,
+    SharedFrameDescriptor,
+)
 from teleopit.sim.reference_timeline import ReferenceSample, ReferenceWindow
 from teleopit.sim2real.mp.runtime import (
     ARM_MOCAP_REFERENCE_COMMAND,
@@ -41,6 +55,9 @@ from teleopit.sim2real.mp.runtime import (
     _configured_open_hand_pose,
     _hand_worker_active_for_mode,
     _human_frame_is_valid,
+    _recording_hardware_types,
+    _run_neck_worker,
+    _run_pico_io_worker,
 )
 from teleopit.sim2real.mp.shm import SharedFrameRingReader, SharedFrameRingWriter
 
@@ -81,6 +98,16 @@ def test_sim2real_runtime_rejects_hands_without_pico_provider() -> None:
         Sim2RealRuntime(cfg)
 
 
+def test_sim2real_runtime_rejects_neck_without_pico_provider() -> None:
+    cfg = {
+        "input": {"provider": "bvh"},
+        "runtime": {"shutdown_timeout_s": 0.01},
+        "neck": {"enabled": True, "driver": "openneck"},
+    }
+    with pytest.raises(ValueError, match="neck.enabled=true requires input.provider=pico4"):
+        Sim2RealRuntime(cfg)
+
+
 def test_sim2real_runtime_rejects_recording_without_pico_provider() -> None:
     cfg = {
         "input": {"provider": "bvh"},
@@ -98,6 +125,26 @@ def test_sim2real_runtime_rejects_recording_without_input_video() -> None:
         "recording": {"enabled": True},
     }
     with pytest.raises(ValueError, match="recording.enabled=true requires input.video.enabled=true"):
+        Sim2RealRuntime(cfg)
+
+
+@pytest.mark.parametrize(
+    ("device_cfg", "message"),
+    [
+        ({"hands": {"enabled": True, "sides": ["left"]}}, "hands.sides"),
+        ({"neck": {"enabled": True, "dry_run": True}}, "neck.dry_run"),
+    ],
+)
+def test_sim2real_runtime_rejects_recording_without_device_readback(
+    device_cfg: dict[str, object],
+    message: str,
+) -> None:
+    cfg = {
+        "input": {"provider": "pico4"},
+        "recording": {"enabled": True},
+        **device_cfg,
+    }
+    with pytest.raises(ValueError, match=message):
         Sim2RealRuntime(cfg)
 
 
@@ -291,6 +338,257 @@ def test_recording_enabled_adds_recording_worker(monkeypatch) -> None:
     assert started_names == ["pico_input", "reference", "robot_control", "recording_worker"]
 
 
+def test_neck_enabled_adds_neck_worker() -> None:
+    started_names: list[str] = []
+
+    class FakeProcess:
+        def __init__(self, *, name: str, target: object, args: tuple[object, ...]) -> None:
+            del target, args
+            self.name = name
+            self.exitcode = 0
+
+        def start(self) -> None:
+            started_names.append(self.name)
+
+    class FakeContext:
+        def Event(self) -> object:
+            return SimpleNamespace(set=lambda: None, is_set=lambda: False)
+
+        def Process(self, *, name: str, target: object, args: tuple[object, ...]) -> FakeProcess:
+            return FakeProcess(name=name, target=target, args=args)
+
+    cfg = {
+        "input": {"provider": "pico4"},
+        "runtime": {"shutdown_timeout_s": 0.01},
+        "neck": {"enabled": True, "driver": "openneck", "dry_run": True},
+    }
+    runtime = Sim2RealRuntime(cfg)
+    runtime._ctx = FakeContext()  # type: ignore[assignment]
+
+    runtime._start_processes()
+
+    assert started_names == ["pico_input", "reference", "robot_control", "neck_worker"]
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    ["setup", "snapshot", "publish", "close", "video_start", "video_tick", "video_stop"],
+)
+def test_pico_auxiliary_failure_does_not_stop_pico_input(monkeypatch, failure_stage: str) -> None:
+    endpoints = default_endpoints(base_port=39890)
+    closed_publishers: list[str] = []
+    provider_closed = False
+
+    class FakeStopEvent:
+        def __init__(self) -> None:
+            self.polls = 0
+
+        def is_set(self) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+        def set(self) -> None:
+            self.polls = 2
+
+    class FakeProvider:
+        fps = 0.0
+
+        def __init__(self, **_kwargs: object) -> None:
+            return None
+
+        def get_head_pose_snapshot(self) -> SimpleNamespace:
+            if failure_stage == "snapshot":
+                raise RuntimeError("head-pose snapshot failed")
+            return SimpleNamespace(
+                hmd_rotation_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+                spine3_rotation_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+                timestamp_s=1.0,
+                seq=1,
+            )
+
+        def has_frame(self) -> bool:
+            return False
+
+        def pop_control_events(self) -> tuple[object, ...]:
+            return ()
+
+        def get_controller_snapshot(self) -> None:
+            return None
+
+        def get_hand_snapshot(self) -> None:
+            return None
+
+        def close(self) -> None:
+            nonlocal provider_closed
+            provider_closed = True
+
+    class FakeVideoRuntime:
+        pushed_frames = 0
+
+        def __init__(self, **_kwargs: object) -> None:
+            return None
+
+        def start(self) -> None:
+            if failure_stage == "video_start":
+                raise RuntimeError("video startup failed")
+            return None
+
+        def tick(self) -> None:
+            if failure_stage == "video_tick":
+                raise RuntimeError("video tick failed")
+            return None
+
+        def stop(self) -> None:
+            if failure_stage == "video_stop":
+                raise RuntimeError("video stop failed")
+            return None
+
+    class FakeSubscriber:
+        def __init__(self, _endpoint: str, _topic: str) -> None:
+            return None
+
+        def recv_latest(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    class FakePublisher:
+        def __init__(self, endpoint: str) -> None:
+            self.endpoint = endpoint
+            if endpoint == endpoints.head_pose_pub and failure_stage == "setup":
+                raise RuntimeError("head-pose bind failed")
+
+        def publish(self, _topic: str, _payload: object) -> None:
+            if self.endpoint == endpoints.head_pose_pub and failure_stage == "publish":
+                raise RuntimeError("head-pose publish failed")
+
+        def close(self) -> None:
+            closed_publishers.append(self.endpoint)
+            if self.endpoint == endpoints.head_pose_pub and failure_stage == "close":
+                raise RuntimeError("head-pose close failed")
+
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.Pico4InputProvider", FakeProvider)
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.PicoVideoRuntime", FakeVideoRuntime)
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.LatestSubscriber", FakeSubscriber)
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.ZmqPublisher", FakePublisher)
+
+    _run_pico_io_worker(
+        {"input": {"provider": "pico4"}, "neck": {"enabled": True}},
+        endpoints,
+        FakeStopEvent(),  # type: ignore[arg-type]
+    )
+
+    assert provider_closed is True
+    assert endpoints.body_pub in closed_publishers
+    if failure_stage == "setup":
+        assert endpoints.head_pose_pub not in closed_publishers
+    else:
+        assert closed_publishers.count(endpoints.head_pose_pub) == 1
+
+
+@pytest.mark.parametrize("recording_enabled", [False, True])
+def test_neck_command_publisher_is_only_created_for_recording(monkeypatch, recording_enabled: bool) -> None:
+    publisher_endpoints: list[str] = []
+    published_topics: list[str] = []
+    published_packets: list[object] = []
+
+    class FakeRuntime:
+        def start(self) -> None:
+            return None
+
+        def read_deg(self) -> tuple[float, float]:
+            return 1.0, -2.0
+
+        def close(self) -> None:
+            return None
+
+    class FakeSubscriber:
+        def __init__(self, endpoint: str, topic: str) -> None:
+            del endpoint, topic
+
+        def close(self) -> None:
+            return None
+
+    class FakePublisher:
+        def __init__(self, endpoint: str) -> None:
+            publisher_endpoints.append(endpoint)
+
+        def publish(self, topic: str, payload: object) -> None:
+            published_topics.append(topic)
+            published_packets.append(payload)
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.build_neck_runtime", lambda _cfg: FakeRuntime())
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.LatestSubscriber", FakeSubscriber)
+    monkeypatch.setattr("teleopit.sim2real.mp.runtime.ZmqPublisher", FakePublisher)
+    endpoints = default_endpoints(base_port=39870)
+    stop_event = SimpleNamespace(is_set=lambda: True, set=lambda: None)
+
+    _run_neck_worker(
+        {
+            "neck": {"enabled": True, "driver": "openneck"},
+            "recording": {"enabled": recording_enabled},
+        },
+        endpoints,
+        stop_event,  # type: ignore[arg-type]
+    )
+
+    assert publisher_endpoints == ([endpoints.neck_command_pub] if recording_enabled else [])
+    assert published_topics == (["neck_command"] if recording_enabled else [])
+    if recording_enabled:
+        packet = published_packets[0]
+        assert isinstance(packet, NeckCommandPacket)
+        assert packet.state_yaw_deg == 1.0
+        assert packet.state_pitch_deg == -2.0
+
+
+@pytest.mark.parametrize("worker_name", ["neck_worker", "pico_input"])
+def test_noncritical_worker_exit_warning_is_not_repeated(monkeypatch, caplog, worker_name: str) -> None:
+    class FakeStopEvent:
+        def __init__(self) -> None:
+            self.polls = 0
+            self.stopped = False
+
+        def is_set(self) -> bool:
+            self.polls += 1
+            if self.polls >= 4:
+                self.stopped = True
+            return self.stopped
+
+        def set(self) -> None:
+            self.stopped = True
+
+    class FakeProcess:
+        exitcode = 1
+
+        def __init__(self) -> None:
+            self.name = worker_name
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+
+    cfg = {
+        "input": {"provider": "pico4"},
+        "runtime": {"shutdown_timeout_s": 0.01},
+        "neck": {"enabled": True, "driver": "openneck", "dry_run": True},
+    }
+    runtime = Sim2RealRuntime(cfg)
+    runtime._stop_event = FakeStopEvent()  # type: ignore[assignment]
+    monkeypatch.setattr(runtime, "_start_processes", lambda: runtime._processes.append(FakeProcess()))  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING, logger="teleopit.operator"):
+        runtime.run()
+
+    warnings = [message for message in caplog.messages if "non-critical worker exited" in message]
+    assert warnings == [f"non-critical worker exited: {worker_name}; G1 control remains active"]
+
+
 def test_recording_key_mapping() -> None:
     assert map_recording_key_to_command("R") == "record_start"
     assert map_recording_key_to_command("s") == "record_save"
@@ -299,37 +597,119 @@ def test_recording_key_mapping() -> None:
     assert map_recording_key_to_command("x") is None
 
 
+@pytest.mark.parametrize(
+    ("hands_enabled", "neck_enabled", "hand_type", "neck_type"),
+    [
+        (False, False, "none", "none"),
+        (True, False, "linkerhand_l6", "none"),
+        (False, True, "none", "openneck"),
+        (True, True, "linkerhand_l6", "openneck"),
+    ],
+)
+def test_recording_optional_hardware_types_follow_enabled_flags(
+    hands_enabled: bool,
+    neck_enabled: bool,
+    hand_type: str,
+    neck_type: str,
+) -> None:
+    assert _recording_hardware_types(
+        {
+            "robot": {"type": "unitree_g1_29dof"},
+            "hands": {"enabled": hands_enabled, "driver": "linkerhand_l6"},
+            "neck": {"enabled": neck_enabled, "driver": "openneck"},
+        }
+    ) == ("unitree_g1_29dof", hand_type, neck_type)
+
+
 def test_hdf5_recording_schema() -> None:
-    schema = build_recording_schema({"width": 640, "height": 480, "key": IMAGE_KEY})
+    schema = build_recording_schema(
+        {"width": 640, "height": 480, "key": IMAGE_KEY},
+        fps=30,
+        robot_type="unitree_g1_29dof",
+        hand_type="linkerhand_o6",
+        neck_type="openneck",
+    )
     sidecar = hdf5_schema(schema)
     features = sidecar["features"]
 
     assert sidecar["format"] == HDF5_RECORDING_FORMAT
-    assert features[IMAGE_KEY]["type"] == "video"
-    assert features[IMAGE_KEY]["format"] == "mp4"
+    assert sidecar["version"] == HDF5_RECORDING_VERSION == 4
+    assert sidecar["fps"] == 30
+    assert sidecar["robot_type"] == "unitree_g1_29dof"
+    assert sidecar["hand_type"] == "linkerhand_o6"
+    assert sidecar["neck_type"] == "openneck"
+    assert features[IMAGE_KEY]["dtype"] == "video"
     assert features[IMAGE_KEY]["shape"] == [480, 640, 3]
     assert features[FRAME_INDEX_KEY]["dtype"] == "int64"
     assert features[TIMESTAMP_KEY]["dtype"] == "float64"
     assert features[STATE_KEY]["shape"] == [68]
-    assert features[MODE_KEY]["shape"] == [1]
+    assert features[MODE_KEY]["shape"] == []
+    assert features[MODE_KEY]["dtype"] == "int8"
     assert features[ACTION_KEY]["shape"] == [36]
+    assert features[HAND_STATE_KEY]["shape"] == [12]
     assert features[HAND_ACTION_KEY]["shape"] == [12]
-    assert sidecar["features"][STATE_KEY]["slices"]["joint_pos"] == [0, 29]
-    assert sidecar["features"][STATE_KEY]["slices"]["projected_gravity"] == [65, 68]
-    assert sidecar["features"][MODE_KEY]["codes"]["pause"] == 3
-    assert sidecar["features"][ACTION_KEY]["slices"]["joint_pos"] == [7, 36]
-    assert sidecar["features"][HAND_ACTION_KEY]["slices"]["left_pose"] == [0, 6]
-    assert sidecar["features"][HAND_ACTION_KEY]["slices"]["right_pose"] == [6, 12]
+    assert features[NECK_STATE_KEY]["shape"] == [2]
+    assert features[NECK_ACTION_KEY]["shape"] == [2]
+    assert features[STATE_KEY]["groups"]["joint_pos"] == [0, 29]
+    assert features[STATE_KEY]["groups"]["projected_gravity"] == [65, 68]
+    assert features[MODE_KEY]["values"]["pause"] == 3
+    assert features[ACTION_KEY]["groups"]["reference_joint_pos"] == [7, 36]
+    assert features[HAND_STATE_KEY]["groups"]["left_hand_state"] == [0, 6]
+    assert features[HAND_STATE_KEY]["groups"]["right_hand_state"] == [6, 12]
+    assert features[HAND_ACTION_KEY]["groups"]["left_hand_target"] == [0, 6]
+    assert features[HAND_ACTION_KEY]["groups"]["right_hand_target"] == [6, 12]
+    assert features[NECK_ACTION_KEY]["names"] == ["yaw_deg", "pitch_deg"]
+    assert features[NECK_STATE_KEY]["names"] == ["yaw_deg", "pitch_deg"]
+    assert features[NECK_STATE_KEY]["units"] == "degrees"
+    assert features[NECK_ACTION_KEY]["units"] == "degrees"
+    assert "range" not in features[NECK_ACTION_KEY]
+    assert len(features[STATE_KEY]["names"]) == 68
+    assert len(features[ACTION_KEY]["names"]) == 36
+    assert len(features[HAND_STATE_KEY]["names"]) == 12
+    assert len(features[HAND_ACTION_KEY]["names"]) == 12
+
+
+@pytest.mark.parametrize(
+    ("hand_type", "neck_type", "has_hand_action", "has_neck_action"),
+    [
+        ("none", "none", False, False),
+        ("linkerhand_l6", "none", True, False),
+        ("none", "openneck", False, True),
+        ("linkerhand_o6", "openneck", True, True),
+    ],
+)
+def test_hdf5_recording_schema_optional_action_combinations(
+    hand_type: str,
+    neck_type: str,
+    has_hand_action: bool,
+    has_neck_action: bool,
+) -> None:
+    schema = build_recording_schema(
+        {"width": 640, "height": 480, "key": IMAGE_KEY},
+        hand_type=hand_type,
+        neck_type=neck_type,
+    )
+    features = hdf5_schema(schema)["features"]
+
+    assert schema.has_hand_action is has_hand_action
+    assert schema.has_neck_action is has_neck_action
+    assert (HAND_STATE_KEY in features) is has_hand_action
+    assert (HAND_ACTION_KEY in features) is has_hand_action
+    assert (NECK_STATE_KEY in features) is has_neck_action
+    assert (NECK_ACTION_KEY in features) is has_neck_action
 
 
 def test_hdf5_recorder_mp4_sidecar_writes_sync_metadata(tmp_path: Path) -> None:
     from teleopit.recording.hdf5 import MP4VideoConfig, TeleopitHDF5Recorder
 
-    schema = build_recording_schema({"width": 2, "height": 2, "key": IMAGE_KEY})
+    schema = build_recording_schema(
+        {"width": 2, "height": 2, "key": IMAGE_KEY},
+        hand_type="linkerhand_l6",
+        neck_type="openneck",
+    )
     recorder = TeleopitHDF5Recorder.create(
         output_dir=tmp_path,
         task="walk",
-        fps=30,
         schema=schema,
         video_config=MP4VideoConfig(quality=5),
     )
@@ -341,39 +721,156 @@ def test_hdf5_recorder_mp4_sidecar_writes_sync_metadata(tmp_path: Path) -> None:
             state=np.arange(68, dtype=np.float32),
             mode=build_mode_observation("mocap"),
             action=np.arange(36, dtype=np.float32),
+            hand_state=np.arange(12, dtype=np.float32) + 20.0,
             hand_action=np.arange(12, dtype=np.float32),
-            task="walk",
+            neck_state=np.array([11.5, -7.5], dtype=np.float32),
+            neck_action=np.array([12.5, -8.0], dtype=np.float32),
         )
     recorder.save_episode()
     recorder.finalize()
 
-    episodes = sorted((tmp_path / "episodes").glob("*.h5"))
-    videos = sorted((tmp_path / "videos" / "observation.images.d435i_rgb").glob("*.mp4"))
+    episodes = sorted((tmp_path / "data").glob("*.h5"))
+    videos = sorted((tmp_path / "videos" / "d435i_rgb").glob("*.mp4"))
     assert len(episodes) == 1
     assert len(videos) == 1
     assert videos[0].stat().st_size > 0
     assert (tmp_path / "schema.json").exists()
-    assert not list((tmp_path / ".tmp").glob("*.h5"))
+    assert (tmp_path / "episodes.jsonl").exists()
+    assert not list((tmp_path / ".tmp").rglob("*.h5"))
+
+    manifest = [json.loads(line) for line in (tmp_path / "episodes.jsonl").read_text().splitlines()]
+    assert manifest == [
+        {
+            "episode_index": 0,
+            "frames": 2,
+            "task": "walk",
+            "data": "data/episode_000000.h5",
+            "videos": {IMAGE_KEY: "videos/d435i_rgb/episode_000000.mp4"},
+        }
+    ]
 
     with h5py.File(episodes[0], "r") as h5:
-        assert h5.attrs["format"] == HDF5_RECORDING_FORMAT
-        assert h5.attrs["version"] == 1
-        assert h5.attrs["task"] == "walk"
-        assert h5.attrs["fps"] == 30
-        assert h5.attrs["frames"] == 2
-        assert h5.attrs["video_path"] == videos[0].relative_to(tmp_path).as_posix()
-        assert h5.attrs["video_key"] == IMAGE_KEY
-        assert h5.attrs["video_frames"] == 2
-        assert h5.attrs["video_fps"] == 30
+        assert dict(h5.attrs) == {}
         assert IMAGE_KEY not in h5
         assert h5[FRAME_INDEX_KEY].shape == (2,)
         assert h5[TIMESTAMP_KEY].shape == (2,)
         np.testing.assert_array_equal(h5[FRAME_INDEX_KEY][...], np.array([0, 1], dtype=np.int64))
         np.testing.assert_allclose(h5[TIMESTAMP_KEY][...], np.array([0.0, 1.0 / 30.0], dtype=np.float64))
         assert h5[STATE_KEY].shape == (2, 68)
-        assert h5[MODE_KEY].shape == (2, 1)
+        assert h5[MODE_KEY].shape == (2,)
+        assert h5[MODE_KEY].dtype == np.dtype(np.int8)
         assert h5[ACTION_KEY].shape == (2, 36)
+        assert h5[HAND_STATE_KEY].shape == (2, 12)
         assert h5[HAND_ACTION_KEY].shape == (2, 12)
+        assert h5[NECK_STATE_KEY].shape == (2, 2)
+        assert h5[NECK_ACTION_KEY].shape == (2, 2)
+        np.testing.assert_allclose(
+            h5[NECK_STATE_KEY][...],
+            np.array([[11.5, -7.5], [11.5, -7.5]], dtype=np.float32),
+        )
+        np.testing.assert_allclose(
+            h5[NECK_ACTION_KEY][...],
+            np.array([[12.5, -8.0], [12.5, -8.0]], dtype=np.float32),
+        )
+
+
+def test_hdf5_recorder_resumes_and_keeps_tasks_in_editable_manifest(tmp_path: Path) -> None:
+    from teleopit.recording.hdf5 import TeleopitHDF5Recorder
+
+    schema = build_recording_schema({"width": 2, "height": 2, "key": IMAGE_KEY})
+
+    def write_episode(task: str, value: int) -> None:
+        recorder = TeleopitHDF5Recorder.create(output_dir=tmp_path, task=task, schema=schema)
+        recorder.start_episode()
+        recorder.add_frame(
+            image=np.full((2, 2, 3), value, dtype=np.uint8),
+            state=np.full(68, value, dtype=np.float32),
+            mode=build_mode_observation("mocap"),
+            action=np.full(36, value, dtype=np.float32),
+        )
+        recorder.save_episode()
+        recorder.finalize()
+
+    write_episode("pick up the box", 1)
+    first_entry = json.loads((tmp_path / "episodes.jsonl").read_text().strip())
+    first_entry["task"] = "pick up the red box"
+    (tmp_path / "episodes.jsonl").write_text(
+        json.dumps(first_entry, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    write_episode("把盒子放到桌上", 2)
+
+    entries = [json.loads(line) for line in (tmp_path / "episodes.jsonl").read_text().splitlines()]
+    assert [entry["episode_index"] for entry in entries] == [0, 1]
+    assert [entry["task"] for entry in entries] == ["pick up the red box", "把盒子放到桌上"]
+    assert sorted(path.name for path in (tmp_path / "data").glob("*.h5")) == [
+        "episode_000000.h5",
+        "episode_000001.h5",
+    ]
+    with h5py.File(tmp_path / "data" / "episode_000001.h5", "r") as h5:
+        assert HAND_STATE_KEY not in h5
+        assert HAND_ACTION_KEY not in h5
+        assert NECK_STATE_KEY not in h5
+        assert NECK_ACTION_KEY not in h5
+
+
+def test_hdf5_recorder_discards_uncommitted_episode_files_on_resume(tmp_path: Path) -> None:
+    from teleopit.recording.hdf5 import TeleopitHDF5Recorder
+
+    schema = build_recording_schema({"width": 2, "height": 2, "key": IMAGE_KEY})
+    recorder = TeleopitHDF5Recorder.create(output_dir=tmp_path, task="first", schema=schema)
+    recorder.start_episode()
+    recorder.add_frame(
+        image=np.zeros((2, 2, 3), dtype=np.uint8),
+        state=np.zeros(68, dtype=np.float32),
+        mode=build_mode_observation("mocap"),
+        action=np.zeros(36, dtype=np.float32),
+    )
+    recorder.save_episode()
+
+    orphan_data = tmp_path / "data" / "episode_000001.h5"
+    orphan_video = tmp_path / "videos" / "d435i_rgb" / "episode_000001.mp4"
+    shutil.copyfile(tmp_path / "data" / "episode_000000.h5", orphan_data)
+    shutil.copyfile(tmp_path / "videos" / "d435i_rgb" / "episode_000000.mp4", orphan_video)
+    tmp_data = tmp_path / ".tmp" / "data" / "episode_000001.h5"
+    tmp_video = tmp_path / ".tmp" / "videos" / "d435i_rgb" / "episode_000001.mp4"
+    tmp_data.parent.mkdir(parents=True, exist_ok=True)
+    tmp_video.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(orphan_data, tmp_data)
+    shutil.copyfile(orphan_video, tmp_video)
+
+    resumed = TeleopitHDF5Recorder.create(output_dir=tmp_path, task="second", schema=schema)
+
+    assert not orphan_data.exists()
+    assert not orphan_video.exists()
+    assert not tmp_data.exists()
+    assert not tmp_video.exists()
+    resumed.start_episode()
+    resumed.add_frame(
+        image=np.ones((2, 2, 3), dtype=np.uint8),
+        state=np.ones(68, dtype=np.float32),
+        mode=build_mode_observation("mocap"),
+        action=np.ones(36, dtype=np.float32),
+    )
+    resumed.save_episode()
+
+    entries = [json.loads(line) for line in (tmp_path / "episodes.jsonl").read_text().splitlines()]
+    assert [entry["episode_index"] for entry in entries] == [0, 1]
+
+
+def test_hdf5_recorder_rejects_existing_incompatible_schema(tmp_path: Path) -> None:
+    from teleopit.recording.hdf5 import TeleopitHDF5Recorder
+
+    no_hands = build_recording_schema({"width": 2, "height": 2}, hand_type="none")
+    TeleopitHDF5Recorder.create(output_dir=tmp_path, task="demo", schema=no_hands).finalize()
+    with_hands = build_recording_schema(
+        {"width": 2, "height": 2},
+        hand_type="linkerhand_l6",
+    )
+
+    with pytest.raises(ValueError, match="schema mismatch"):
+        TeleopitHDF5Recorder.create(output_dir=tmp_path, task="demo", schema=with_hands)
 
 
 def test_hdf5_recorder_cleans_partial_episode_when_video_writer_fails(tmp_path: Path) -> None:
@@ -385,16 +882,16 @@ def test_hdf5_recorder_cleans_partial_episode_when_video_writer_fails(tmp_path: 
             raise RuntimeError("writer failed")
 
     schema = build_recording_schema({"width": 2, "height": 2, "key": IMAGE_KEY})
-    recorder = FailingVideoRecorder.create(output_dir=tmp_path, task="walk", fps=30, schema=schema)
+    recorder = FailingVideoRecorder.create(output_dir=tmp_path, task="walk", schema=schema)
 
     with pytest.raises(RuntimeError, match="writer failed"):
         recorder.start_episode()
 
     recorder.finalize()
-    assert not list((tmp_path / ".tmp").glob("*.h5"))
-    assert not list((tmp_path / ".tmp" / "videos" / "observation.images.d435i_rgb").glob("*.mp4"))
-    assert not list((tmp_path / "episodes").glob("*.h5"))
-    assert not list((tmp_path / "videos" / "observation.images.d435i_rgb").glob("*.mp4"))
+    assert not list((tmp_path / ".tmp").rglob("*.h5"))
+    assert not list((tmp_path / ".tmp" / "videos" / "d435i_rgb").glob("*.mp4"))
+    assert not list((tmp_path / "data").glob("*.h5"))
+    assert not list((tmp_path / "videos" / "d435i_rgb").glob("*.mp4"))
 
 
 def test_hdf5_recorder_keeps_startup_error_when_partial_cleanup_fails(tmp_path: Path) -> None:
@@ -412,13 +909,13 @@ def test_hdf5_recorder_keeps_startup_error_when_partial_cleanup_fails(tmp_path: 
             raise RuntimeError("startup failed")
 
     schema = build_recording_schema({"width": 2, "height": 2, "key": IMAGE_KEY})
-    recorder = FailingDatasetRecorder.create(output_dir=tmp_path, task="walk", fps=30, schema=schema)
+    recorder = FailingDatasetRecorder.create(output_dir=tmp_path, task="walk", schema=schema)
 
     with pytest.raises(RuntimeError, match="startup failed"):
         recorder.start_episode()
 
     recorder.finalize()
-    assert not list((tmp_path / ".tmp").glob("*.h5"))
+    assert not list((tmp_path / ".tmp").rglob("*.h5"))
 
 
 def test_configured_open_hand_pose_matches_linkerhand_l6_parser() -> None:
@@ -958,9 +1455,8 @@ def test_robot_worker_publish_record_step() -> None:
     assert packet.mocap_active is True
     assert packet.recordable is True
     assert packet.observation_state.shape == (68,)
-    assert packet.observation_mode.shape == (1,)
+    assert packet.observation_mode == int(build_mode_observation("arms"))
     assert packet.action_reference_qpos.shape == (36,)
-    np.testing.assert_allclose(packet.observation_mode, build_mode_observation("arms"))
     np.testing.assert_allclose(packet.action_reference_qpos, reference_qpos.astype(np.float32))
 
 
@@ -999,7 +1495,7 @@ def test_robot_worker_enter_damping_publishes_non_recordable_packet() -> None:
     assert packet.mode == "damping"
     assert packet.recordable is False
     assert packet.mocap_active is False
-    np.testing.assert_allclose(packet.observation_mode, np.array([-1.0], dtype=np.float32))
+    assert packet.observation_mode == -1
 
 
 def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
@@ -1017,19 +1513,28 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             *,
             image: np.ndarray,
             state: np.ndarray,
-            mode: np.ndarray,
+            mode: object,
             action: np.ndarray,
-            hand_action: np.ndarray,
-            task: str,
+            hand_state: np.ndarray | None = None,
+            neck_state: np.ndarray | None = None,
+            hand_action: np.ndarray | None = None,
+            neck_action: np.ndarray | None = None,
         ) -> None:
-            calls.append(f"frame:{task}")
+            calls.append("frame")
+            assert hand_state is not None
+            assert neck_state is not None
+            assert hand_action is not None
+            assert neck_action is not None
             frames.append(
                 {
                     "image": image.copy(),
                     "state": state.copy(),
-                    "mode": mode.copy(),
+                    "mode": np.asarray(mode).copy(),
                     "action": action.copy(),
+                    "hand_state": hand_state.copy(),
+                    "neck_state": neck_state.copy(),
                     "hand_action": hand_action.copy(),
+                    "neck_action": neck_action.copy(),
                 }
             )
 
@@ -1055,7 +1560,9 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
                 "fps": 30,
                 "min_episode_seconds": 0.0,
                 "camera": {"width": 2, "height": 2, "key": IMAGE_KEY},
-            }
+            },
+            "hands": {"enabled": True, "driver": "linkerhand_l6"},
+            "neck": {"enabled": True, "driver": "openneck"},
         },
         endpoints,
         stop_event,  # type: ignore[arg-type]
@@ -1069,7 +1576,7 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             mocap_active=False,
             recordable=False,
             observation_state=np.ones(68, dtype=np.float32),
-            observation_mode=build_mode_observation("standing"),
+            observation_mode=int(build_mode_observation("standing")),
             action_reference_qpos=np.ones(36, dtype=np.float32),
             seq=1,
         )
@@ -1082,15 +1589,19 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             mocap_active=False,
             recordable=True,
             observation_state=np.arange(68, dtype=np.float32),
-            observation_mode=build_mode_observation("standing"),
+            observation_mode=int(build_mode_observation("standing")),
             action_reference_qpos=np.arange(36, dtype=np.float32),
             seq=2,
         )
         worker._start_episode()
+        assert calls == []
+
+        ready_desc = writer.write(np.full((2, 2, 3), 4, dtype=np.uint8), timestamp_s=2.0)
+        worker._handle_video(ready_desc)
+        worker._start_episode()
         worker._save_episode()
         assert calls == ["start", "discard"]
 
-        worker._start_episode()
         worker._latest_hand_command = HandCommandPacket(
             timestamp_s=2.05,
             driver="linkerhand_l6",
@@ -1099,17 +1610,33 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             left_pose=np.arange(6, dtype=np.float32),
             right_pose=np.arange(6, 12, dtype=np.float32),
             seq=1,
+            left_state=np.arange(20, 26, dtype=np.float32),
+            right_state=np.arange(26, 32, dtype=np.float32),
         )
+        worker._latest_neck_command = NeckCommandPacket(
+            timestamp_s=2.06,
+            driver="openneck",
+            active=True,
+            yaw_deg=12.5,
+            pitch_deg=-8.0,
+            seq=1,
+            state_yaw_deg=11.5,
+            state_pitch_deg=-7.5,
+        )
+        worker._start_episode()
         desc = writer.write(np.full((2, 2, 3), 5, dtype=np.uint8), timestamp_s=2.1)
         worker._handle_video(desc)
         worker._save_episode()
 
-        assert calls == ["start", "discard", "start", "frame:walk", "save"]
+        assert calls == ["start", "discard", "start", "frame", "save"]
         assert frames[0]["image"].shape == (2, 2, 3)
         np.testing.assert_allclose(frames[0]["state"], np.arange(68, dtype=np.float32))
-        np.testing.assert_allclose(frames[0]["mode"], build_mode_observation("standing"))
+        assert int(frames[0]["mode"]) == int(build_mode_observation("standing"))
         np.testing.assert_allclose(frames[0]["action"], np.arange(36, dtype=np.float32))
+        np.testing.assert_allclose(frames[0]["hand_state"], np.arange(20, 32, dtype=np.float32))
         np.testing.assert_allclose(frames[0]["hand_action"], np.arange(12, dtype=np.float32))
+        np.testing.assert_allclose(frames[0]["neck_state"], np.array([11.5, -7.5], dtype=np.float32))
+        np.testing.assert_allclose(frames[0]["neck_action"], np.array([12.5, -8.0], dtype=np.float32))
 
         worker._latest_record = RecordStepPacket(
             timestamp_s=3.0,
@@ -1117,17 +1644,29 @@ def test_recording_worker_start_save_discard_with_fake_adapter() -> None:
             mocap_active=False,
             recordable=True,
             observation_state=np.zeros(68, dtype=np.float32),
-            observation_mode=build_mode_observation("pause"),
+            observation_mode=int(build_mode_observation("pause")),
             action_reference_qpos=np.zeros(36, dtype=np.float32),
             seq=3,
         )
         worker._start_episode()
         worker._discard_episode("test")
         assert calls[-2:] == ["start", "discard"]
+
+        worker._start_episode()
+        worker._latest_video_received_s = time.monotonic() - worker._CAMERA_TIMEOUT_S - 0.1
+        assert worker._discard_if_camera_stale() is True
+        assert calls[-2:] == ["start", "discard"]
+
+        worker._latest_video_received_s = time.monotonic()
+        worker._start_episode()
+        worker._latest_video_received_s = time.monotonic() - worker._CAMERA_TIMEOUT_S - 0.1
+        worker._save_episode()
+        assert calls[-2:] == ["start", "discard"]
     finally:
         writer.close(unlink=True)
         worker._record_sub.close()
         worker._video_sub.close()
         worker._hand_command_sub.close()
+        worker._neck_command_sub.close()
         worker._command_sub.close()
         worker._frame_reader.close()

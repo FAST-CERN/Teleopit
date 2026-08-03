@@ -2,141 +2,147 @@
 sidebar_position: 2
 ---
 
-# Pico 4 VR 仿真遥操作
+# 在仿真中进行 VR 遥操
 
-使用本教程在接入真实 Unitree G1 之前，先在 MuJoCo 中验证 Pico 4 / Pico 4 Ultra
-全身追踪。
+连接真实机器人之前，先用 Pico 控制仿真 G1。不要跳过这一步：头显、网络和身体追踪
+问题都可以在这里解决，不会给硬件带来风险。
 
-```text
-Pico 头显 -> pico-bridge receiver -> retarget -> RL policy -> MuJoCo G1
-```
-
-此流程跑通后，再继续阅读 [Pico Sim2Real](pico-sim2real)。
-
-## 支持设备
+## 支持的头显
 
 - Pico 4
 - Pico 4 Ultra
+- Pico 4 Ultra Enterprise
+- Pico 4 Pro
 
-## 1. 设置头显
+所有设备都需要开启全身追踪，并使用支持当前身体追踪接口的 Pico 系统版本。
 
-1. 从 [pico-bridge Releases](https://github.com/BotRunner64/pico-bridge/releases) 下载头显 APK。
-2. 使用 adb 安装：
+## 开始之前
+
+你需要：
+
+- 头显和运行 Teleopit 的电脑处于同一网络；
+- 已安装 `pico4` 依赖并下载 `robots gmr ckpt bvh` 资源；
+- [在仿真中运行运控](offline-sim2sim)已经正常。
+
+## 1. 准备头显
+
+1. 从 [pico-bridge Releases](https://github.com/BotRunner64/pico-bridge/releases)
+   下载头显 APK。
+2. 安装 APK：
+
    ```bash
    adb install pico-bridge.apk
    ```
-3. 启动 pico-bridge 头显 client。
+
+3. 在头显中打开 pico-bridge。
 4. 开启全身追踪。
-5. 确保头显和 Teleopit host 在同一网络。
 
-## 2. 安装 Pico Host Extra
+Teleopit 使用 pico-bridge 0.2.1。接收程序会直接运行在 Teleopit 进程中，不需要再
+启动一个单独的转发程序。
 
-在运行 Teleopit 的机器上执行：
+## 2. 检查电脑是否收到 Pico 数据
 
-```bash
-pip install -e '.[pico4]'
-```
-
-验证 receiver 包：
+下面的诊断只打印身体帧和连接状态，不会启动机器人运控：
 
 ```bash
-python -c "from pico_bridge import PicoBridge; print('OK')"
+python scripts/dev/test_pico_bridge.py --no-video
 ```
 
-Teleopit 会通过 `Pico4InputProvider` 在进程内启动 `pico_bridge.PicoBridge`。
-后续 wired 和 onboard sim2real 部署也使用同一条 Pico 输入路径。
+轻微移动身体，确认终端持续收到新的有效帧。按 `Ctrl+C` 结束诊断。
 
-Teleopit 面向 pico-bridge 0.2.1 及其 `pico_native` tracking 语义。
-
-## 3. 下载资源
+如果自动发现选择了错误的网卡地址，显式指定头显能够访问的地址：
 
 ```bash
-pip install modelscope
-python scripts/setup/download_assets.py --only robots gmr ckpt bvh
+python scripts/dev/test_pico_bridge.py \
+    --no-video \
+    --bridge-advertise-ip=192.168.1.20
 ```
 
-## 4. 运行 Pico Sim2Sim
+## 3. 启动仿真
 
 ```bash
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx
+    controller.policy_path=ckpt/track_g1.onnx
 ```
 
-仿真从 `STANDING` 开始。等待 Pico 追踪激活后，再进入 `MOCAP`。
+机器人会有意从 `STANDING` 开始；只有操作者主动切换后，实时身体追踪才会接管。
 
-| 键盘 | 动作 |
-|------|------|
-| `Y` | 进入 `MOCAP` |
-| `A` | 暂停 / 恢复实时动捕 |
-| `B` | 在 `MOCAP` / `ARMS` 之间切换 |
-| `X` | 返回 `STANDING` |
-| `Q` | 退出 |
+## 4. 按状态机操作
 
-`pico4_sim.yaml` 默认使用 `viewers=all`，会打开 mocap、retarget 和 sim2sim
-三个 viewer。需要更少窗口时，可使用 `viewers=sim2sim` 或 `viewers=none`。
+![Pico 仿真控制状态机](/img/diagrams/pico-sim-state-machine-zh.svg)
 
-## 暂停 / 恢复
+图中的**键盘**表示运行 Teleopit 的电脑键盘，**Pico 手柄**表示 VR 手柄。仿真过程
+不使用 Unitree G1 遥控器。
 
-Pico 暂停/恢复会冻结 mocap session；它不是切回 `STANDING`。
+以舒适的中立姿态站好，等待追踪稳定，再按**键盘** `Y` 进入 `MOCAP`。先从小幅慢动作
+开始。按**键盘** `X` 结束 VR 会话并返回 `STANDING`；在任意状态按**键盘** `Q`
+退出仿真。
 
-- 按键盘 `A` 或 Pico/controller 暂停键，冻结当前参考姿态。
-- 再按一次会重建实时参考路径，重新居中 yaw 和地面平面位置，然后从当前实时追踪流继续。
+`MOCAP` 控制全身。`ARMS` 会让身体、腰和腿保持站立，只有双臂继续跟随。
+`PAUSED` 保持当前参考姿态，恢复后返回之前的 `MOCAP` 或 `ARMS`。
 
-默认 Pico 暂停键是 `A`。支持的覆盖值包括 `B`、`X`、`Y`、`left_axis_click`、
-`right_axis_click`、`left_menu_button` 和 `right_menu_button`。
+每次重新从 `STANDING` 进入 `MOCAP` 时，系统都会重新对齐实时根部姿态。操作者可以
+在站立状态改变朝向，再重新进入 `MOCAP`。
 
-默认 Pico 双臂模式按钮是 `B`。`ARMS` 会让身体、腰部和腿部保持站立姿态，同时双臂跟随
-实时 retarget 结果。
+:::tip 暂停不等于结束 VR 控制
+键盘或 Pico 手柄 `A` 只会冻结并恢复当前动捕姿态。需要结束会话并回到站立时，
+请按键盘 `X`。
+:::
 
-## 可选头显视频预览
+## 选择 Viewer 布局
 
-pico-bridge 0.2.1 可以在头显中显示 host 侧视频流。在仿真中，Teleopit 可以推送
-MuJoCo `d435i_rgb` 相机：
+Pico 仿真默认会打开动捕、重定向和物理仿真三个视图。不再需要全部视图时，可以减少窗口：
+
+```bash
+# 只看物理仿真结果
+python scripts/run/run_sim.py \
+    --config-name pico4_sim \
+    controller.policy_path=ckpt/track_g1.onnx \
+    viewers=sim2sim
+
+# 不打开窗口
+python scripts/run/run_sim.py \
+    --config-name pico4_sim \
+    controller.policy_path=ckpt/track_g1.onnx \
+    viewers=none
+```
+
+## 可选：头显视频
+
+把仿真的 `d435i_rgb` 相机画面发送回头显：
 
 ```bash
 python scripts/run/run_sim.py \
     --config-name pico4_sim \
-    controller.policy_path=track.onnx \
+    controller.policy_path=ckpt/track_g1.onnx \
     input.video.enabled=true
 ```
 
-使用 `input.video.source=test-pattern` 可以做 receiver 侧视频 sanity check。如果视频启动失败，
-Teleopit 会记录错误、关闭视频，并继续运行追踪和控制。设置
-`input.video.fail_on_error=true` 可改为启动失败。
+使用 `input.video.source=test-pattern` 可以只检查视频链路。视频失败时预览会关闭，但
+身体追踪和运控会继续运行。
 
-## 常用参数
+## 网络参数
+
+大部分网络只需要自动发现。诊断显示网络有问题时再使用这些参数：
 
 ```bash
-# 等待第一帧 Pico body 数据的超时时间
-input.pico4_timeout=30
-
-# 覆盖 discovery 广播给头显的 IP
+# 向头显广播指定的电脑地址
 input.bridge_advertise_ip=192.168.1.20
 
-# 关闭 discovery 并显式绑定
-input.bridge_discovery=false input.bridge_host=0.0.0.0 input.bridge_port=63901
+# 关闭自动发现并显式绑定
+input.bridge_discovery=false
+input.bridge_host=0.0.0.0
+input.bridge_port=63901
 
-# 更换 Pico 暂停键
-input.pause_button=right_axis_click
-
-# 关闭键盘模式控制
-keyboard.enabled=false
-
-# 修改策略频率
-policy_hz=30
-
-# 开启头显视频预览
-input.video.enabled=true
+# 延长等待第一帧身体数据的时间
+input.pico4_timeout=30
 ```
 
-## 故障排查
+## 常见问题
 
-| 现象 | 可能原因 | 解决方法 |
-|------|----------|----------|
-| `ImportError: pico_bridge` | 未安装 Pico extra | 执行 `pip install -e '.[pico4]'` |
-| 启动提示 pico-bridge 太旧 | 已安装 receiver 不支持所需 API 或 tracking 语义 | 重新安装 Pico extra，确保使用 pico-bridge 0.2.1 |
-| `TimeoutError: No Pico4 body data` | 头显未连接或 body tracking 未激活 | 检查头显 app、网络和 `input.pico4_timeout` |
-| discovery 找不到 host | 广播 IP 不对或 UDP 被阻断 | 设置 `input.bridge_advertise_ip=<host-ip>`，确认 UDP 端口 `63901` 可达 |
-| 仿真机器人不跟随 | 循环仍在 `STANDING` | 追踪准备好后按 `Y` |
-| Pico 视频黑屏或被关闭 | 视频源失败或相机不可访问 | 检查 `input.video.source` 和日志 |
+| 问题 | 解决方法 |
+|------|----------|
+| 收不到身体帧 | 把 Pico 头显升级到最新可用的系统版本，重启头显，重新开启全身追踪，然后再次运行 `scripts/dev/test_pico_bridge.py --no-video` |
+
+这条流程稳定后，再继续[用 VR 遥操真实 G1](pico-sim2real)。

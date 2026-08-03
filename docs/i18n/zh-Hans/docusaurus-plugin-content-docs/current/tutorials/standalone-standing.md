@@ -34,7 +34,7 @@ bash scripts/setup/setup_g1_bridge.sh
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface enp130s0 \
     --dry-run
 ```
@@ -45,7 +45,7 @@ python scripts/run/standalone_standing.py \
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface enp130s0
 ```
 
@@ -53,7 +53,7 @@ python scripts/run/standalone_standing.py \
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface eth0
 ```
 
@@ -64,7 +64,7 @@ standalone standing 复用 sim2real standing 组件：`UnitreeG1Robot`、
 
 ```bash
 python scripts/run/standalone_standing.py \
-    --policy track.onnx \
+    --policy ckpt/track_g1.onnx \
     --network-interface eth0 \
     --kp-ramp-duration 2.0 \
     --kp-ramp-floor-ratio 0.1

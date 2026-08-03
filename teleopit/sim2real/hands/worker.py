@@ -37,6 +37,9 @@ class HandRuntime:
             finally:
                 raise
 
+    def get_state(self, side: str) -> tuple[float, ...]:
+        return self._device.get_state(side)
+
     def tick(
         self,
         *,
@@ -89,6 +92,10 @@ class DisabledHandRuntime:
 
     def start(self) -> tuple[HandPoseCommand, ...]:
         return ()
+
+    def get_state(self, side: str) -> tuple[float, ...]:
+        del side
+        raise RuntimeError("Dexterous hand control is disabled")
 
     def tick(
         self,

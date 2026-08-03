@@ -9,12 +9,19 @@ from enum import Enum
 from pathlib import Path
 import sys
 import time
+import uuid
 from typing import Any, Callable
 
 import numpy as np
 from numpy.typing import NDArray
 
 from teleopit.constants import FULL_QPOS_DIM, NUM_JOINTS, ROOT_DIM
+from teleopit.high_level_policy.client import PolicyActionChunk
+from teleopit.high_level_policy.config import (
+    parse_high_level_policy_config,
+    parse_high_level_policy_safety_config,
+)
+from teleopit.high_level_policy.scheduler import HighLevelPolicyScheduler, PolicyFrameTransform
 from teleopit.controllers.observation import VelCmdObservationBuilder, align_motion_qpos_yaw
 from teleopit.controllers.rl_policy import RLPolicyController
 from teleopit.inputs.bvh_provider import BVHInputProvider
@@ -43,11 +50,16 @@ from teleopit.runtime.mocap_session import MocapSessionManager, MocapSessionStat
 from teleopit.runtime.reference_config import parse_reference_config
 from teleopit.runtime.terminal_keyboard import TerminalKeyboardReader
 from teleopit.recording.hdf5 import (
+    DEFAULT_ROBOT_TYPE,
+    NO_HAND_TYPE,
+    NO_NECK_TYPE,
     build_mode_observation,
     build_mp4_video_config,
     build_observation_state,
-    normalize_hand_action,
+    build_recording_schema,
     normalize_action_reference_qpos,
+    normalize_hand_action,
+    build_neck_action,
 )
 from teleopit.sim.reference_motion import OfflineReferenceMotion
 from teleopit.sim.reference_timeline import ReferenceTimeline, ReferenceWindow, ReferenceWindowBuilder
@@ -62,15 +74,24 @@ from teleopit.sim2real.hands.worker import build_hand_runtime
 from teleopit.sim2real.hands.base import HandPoseCommand
 from teleopit.sim2real.hands.linkerhand_l6 import parse_linkerhand_l6_config
 from teleopit.sim2real.hands.linkerhand_o6 import parse_linkerhand_o6_config
+from teleopit.sim2real.neck.config import parse_neck_config
+from teleopit.sim2real.neck.worker import build_neck_runtime, head_pose_packet, mode_packet_active
 from teleopit.sim2real.mp.ipc import (
     BODY_TOPIC,
     COMMAND_TOPIC,
     CONTROL_EVENTS_TOPIC,
     CONTROLLER_TOPIC,
     HAND_COMMAND_TOPIC,
+    HEAD_POSE_TOPIC,
     HAND_TOPIC,
     HEALTH_TOPIC,
+    HIGH_LEVEL_POLICY_ACTION_TOPIC,
+    HIGH_LEVEL_POLICY_OBSERVATION_TOPIC,
+    HIGH_LEVEL_POLICY_SESSION_TOPIC,
+    HIGH_LEVEL_POLICY_STATUS_TOPIC,
+    HIGH_LEVEL_POLICY_TARGET_TOPIC,
     MODE_TOPIC,
+    NECK_COMMAND_TOPIC,
     RECORD_TOPIC,
     REFERENCE_TOPIC,
     VIDEO_TOPIC,
@@ -85,7 +106,13 @@ from teleopit.sim2real.mp.messages import (
     ControlEventsPacket,
     HandCommandPacket,
     HealthPacket,
+    HighLevelPolicyActionPacket,
+    HighLevelPolicyObservationPacket,
+    HighLevelPolicySessionPacket,
+    HighLevelPolicyStatusPacket,
+    HighLevelPolicyTargetPacket,
     ModeStatePacket,
+    NeckCommandPacket,
     ReferencePacket,
     RecordStepPacket,
     SnapshotPacket,
@@ -111,6 +138,7 @@ Float64Array = NDArray[np.float64]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ARM_MOCAP_REFERENCE_COMMAND = "arm_mocap_reference"
 DISARM_MOCAP_REFERENCE_COMMAND = "disarm_mocap_reference"
+HIGH_LEVEL_POLICY_FAULT_COMMAND = "high_level_policy_fault"
 
 
 class RobotMode(Enum):
@@ -118,6 +146,7 @@ class RobotMode(Enum):
     STANDING = "standing"
     MOCAP = "mocap"
     ARMS = "arms"
+    POLICY = "policy"
     DAMPING = "damping"
 
 
@@ -269,6 +298,11 @@ def _input_provider_kind(cfg: Any) -> str:
     return str(cfg_get(cfg_get(cfg, "input", {}) or {}, "provider", "bvh")).strip().lower()
 
 
+def _high_level_policy_enabled(cfg: Any) -> bool:
+    policy_cfg = cfg_get(cfg, "high_level_policy", {}) or {}
+    return bool(cfg_get(policy_cfg, "enabled", False))
+
+
 def _recording_cfg(cfg: Any) -> Any:
     return cfg_get(cfg, "recording", {}) or {}
 
@@ -279,6 +313,24 @@ def _recording_enabled(cfg: Any) -> bool:
 
 def _recording_camera_cfg(cfg: Any) -> Any:
     return cfg_get(_recording_cfg(cfg), "camera", {}) or {}
+
+
+def _recording_hardware_types(cfg: Any) -> tuple[str, str, str]:
+    robot_cfg = cfg_get(cfg, "robot", {}) or {}
+    robot_type = str(cfg_get(robot_cfg, "type", DEFAULT_ROBOT_TYPE)).strip().lower()
+    hands_cfg = cfg_get(cfg, "hands", {}) or {}
+    hand_type = (
+        str(cfg_get(hands_cfg, "driver", "linkerhand_l6")).strip().lower()
+        if bool(cfg_get(hands_cfg, "enabled", False))
+        else NO_HAND_TYPE
+    )
+    neck_cfg = cfg_get(cfg, "neck", {}) or {}
+    neck_type = (
+        str(cfg_get(neck_cfg, "driver", "openneck")).strip().lower()
+        if bool(cfg_get(neck_cfg, "enabled", False))
+        else NO_NECK_TYPE
+    )
+    return robot_type, hand_type, neck_type
 
 
 def _configured_open_hand_pose(cfg: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -308,15 +360,32 @@ def _validate_new_runtime_config(cfg: Any) -> None:
             "Legacy sim2real config keys are no longer supported: "
             f"{', '.join(legacy_keys)}. Use input.provider, runtime, and hands instead."
         )
+    if _high_level_policy_enabled(cfg):
+        raise ValueError(
+            "high_level_policy.enabled=true requires the independent "
+            "scripts/run/run_high_level_policy_sim2real.py entry point"
+        )
     provider = _input_provider_kind(cfg)
     if provider not in ("pico4", "bvh"):
         raise ValueError(f"sim2real input.provider must be pico4 or bvh, got {provider!r}")
     hands_cfg = cfg_get(cfg, "hands", {}) or {}
     if bool(cfg_get(hands_cfg, "enabled", False)) and provider != "pico4":
         raise ValueError("hands.enabled=true requires input.provider=pico4")
+    neck_cfg = parse_neck_config(cfg)
+    if neck_cfg.enabled:
+        if provider != "pico4":
+            raise ValueError("neck.enabled=true requires input.provider=pico4")
+        if neck_cfg.driver != "openneck":
+            raise ValueError(f"Unsupported neck.driver={neck_cfg.driver!r}; supported drivers: openneck")
     if _recording_enabled(cfg):
         if provider != "pico4":
             raise ValueError("recording.enabled=true requires input.provider=pico4")
+        if bool(cfg_get(hands_cfg, "enabled", False)):
+            hand_sides = {str(side).strip().lower() for side in cfg_get(hands_cfg, "sides", ("left", "right"))}
+            if hand_sides != {"left", "right"}:
+                raise ValueError("hand-state recording requires hands.sides=[left, right]")
+        if neck_cfg.enabled and neck_cfg.dry_run:
+            raise ValueError("neck-state recording requires neck.dry_run=false")
         rec_cfg = _recording_cfg(cfg)
         if str(cfg_get(rec_cfg, "format", "hdf5")) != "hdf5":
             raise ValueError("Only recording.format=hdf5 is supported")
@@ -330,6 +399,14 @@ def _validate_new_runtime_config(cfg: Any) -> None:
             raise ValueError("recording.camera.source must be realsense")
         if int(cfg_get(rec_cfg, "fps", 30)) != int(cfg_get(camera_cfg, "fps", 30)):
             raise ValueError("recording.fps must match recording.camera.fps")
+        robot_type, hand_type, neck_type = _recording_hardware_types(cfg)
+        build_recording_schema(
+            camera_cfg,
+            fps=int(cfg_get(rec_cfg, "fps", 30)),
+            robot_type=robot_type,
+            hand_type=hand_type,
+            neck_type=neck_type,
+        )
         input_video = parse_pico_video_config(cfg_get(cfg, "input", {}) or {})
         if not input_video.enabled:
             raise ValueError("recording.enabled=true requires input.video.enabled=true")
@@ -412,12 +489,11 @@ class Sim2RealRuntime:
                 self._command_pub = ZmqPublisher(self._endpoints.command_pub)
                 self._keyboard = TerminalKeyboardReader()
                 operator_logger.info("keyboard recording controls active: R start, S save, D discard, Q shutdown, H help")
+            reported_noncritical_dead: set[str] = set()
             while not self._stop_event.is_set():
                 self._poll_terminal_recording_controls()
                 time.sleep(0.2)
                 critical_names = {"robot_control", "reference"}
-                if _input_provider_kind(self.cfg) == "pico4":
-                    critical_names.add("pico_input")
                 critical_dead = [
                     process.name
                     for process in self._processes
@@ -435,9 +511,14 @@ class Sim2RealRuntime:
                     if not process.is_alive()
                     and process.exitcode not in (None, 0)
                     and process.name not in critical_names
+                    and process.name not in reported_noncritical_dead
                 ]
                 if noncritical_dead:
-                    operator_logger.warning("non-critical worker exited: %s", ", ".join(noncritical_dead))
+                    operator_logger.warning(
+                        "non-critical worker exited: %s; G1 control remains active",
+                        ", ".join(noncritical_dead),
+                    )
+                    reported_noncritical_dead.update(noncritical_dead)
         except KeyboardInterrupt:
             operator_logger.info("keyboard interrupt -> shutting down")
             self._stop_event.set()
@@ -479,6 +560,9 @@ class Sim2RealRuntime:
         hands_cfg = cfg_get(self.cfg, "hands", {}) or {}
         if bool(cfg_get(hands_cfg, "enabled", False)):
             specs.append(("hand_worker", _run_hand_worker))
+        neck_cfg = parse_neck_config(self.cfg)
+        if neck_cfg.enabled:
+            specs.append(("neck_worker", _run_neck_worker))
         if _recording_enabled(self.cfg):
             specs.append(("recording_worker", _run_recording_worker))
         video_cfg = parse_pico_video_config(cfg_get(self.cfg, "input", {}))
@@ -567,6 +651,28 @@ def _run_pico_io_worker(
         )
 
         body_pub = ZmqPublisher(endpoints.body_pub)
+        head_pose_pub: ZmqPublisher | None = None
+
+        def _disable_head_pose_publisher(message: str) -> None:
+            nonlocal head_pose_pub
+            logger.exception(message)
+            failed_publisher = head_pose_pub
+            head_pose_pub = None
+            if failed_publisher is None:
+                return
+            try:
+                failed_publisher.close()
+            except Exception:
+                logger.exception("Failed to close disabled OpenNeck head-pose publisher")
+
+        if parse_neck_config(cfg).enabled:
+            try:
+                head_pose_pub = ZmqPublisher(endpoints.head_pose_pub)
+            except Exception:
+                _disable_head_pose_publisher(
+                    "OpenNeck head-pose IPC setup failed; neck control is disabled "
+                    "while pico_input continues"
+                )
         hand_pub = ZmqPublisher(endpoints.hand_pub)
         controller_pub = ZmqPublisher(endpoints.controller_pub)
         events_pub = ZmqPublisher(endpoints.control_events_pub)
@@ -591,27 +697,59 @@ def _run_pico_io_worker(
         video_runtime = PicoVideoRuntime(
             provider=provider,
             config=video_cfg,
-            mode="sim2real",
             frame_callback=_publish_recording_frame if _recording_enabled(cfg) else None,
         )
 
         hz = float(cfg_get(_mp_cfg(cfg), "pico_input_hz", 120.0))
         sleep_s = 1.0 / max(hz, 1.0)
         last_body_seq = -1
+        last_head_pose_seq = -1
         last_hand_seq = -1
         last_controller_seq = -1
         last_video_seq = -1
         last_health_s = 0.0
         try:
-            video_runtime.start()
+            try:
+                video_runtime.start()
+            except Exception:
+                logger.exception(
+                    "Pico video startup failed; video is disabled while pico_input and robot control continue"
+                )
             while not stop_event.is_set():
-                video_runtime.tick()
+                try:
+                    video_runtime.tick()
+                except Exception:
+                    logger.exception(
+                        "Pico video runtime failed; video is disabled while pico_input and robot control continue"
+                    )
                 command = command_sub.recv_latest()
                 if isinstance(command, CommandPacket) and command.command == "shutdown":
                     stop_event.set()
                     break
 
                 now = time.monotonic()
+                if head_pose_pub is not None:
+                    try:
+                        head_pose_snapshot = provider.get_head_pose_snapshot()
+                        if (
+                            head_pose_snapshot is not None
+                            and int(head_pose_snapshot.seq) != last_head_pose_seq
+                        ):
+                            head_pose_pub.publish(
+                                HEAD_POSE_TOPIC,
+                                SnapshotPacket(
+                                    snapshot=head_pose_snapshot,
+                                    timestamp_s=float(head_pose_snapshot.timestamp_s),
+                                    seq=int(head_pose_snapshot.seq),
+                                ),
+                            )
+                            last_head_pose_seq = int(head_pose_snapshot.seq)
+                    except Exception:
+                        _disable_head_pose_publisher(
+                            "OpenNeck head-pose stream failed; neck control is disabled "
+                            "while pico_input continues"
+                        )
+
                 if callable(getattr(provider, "has_frame", None)) and provider.has_frame():
                     try:
                         frame, timestamp_s, seq = provider.get_frame_packet()
@@ -668,6 +806,7 @@ def _run_pico_io_worker(
                             metrics={
                                 "body_seq": last_body_seq,
                                 "body_fps": float(provider.fps),
+                                "head_pose_seq": last_head_pose_seq,
                                 "hand_seq": last_hand_seq,
                                 "controller_seq": last_controller_seq,
                                 "video_seq": last_video_seq,
@@ -677,11 +816,26 @@ def _run_pico_io_worker(
                     last_health_s = now
                 time.sleep(sleep_s)
         finally:
-            video_runtime.stop()
+            try:
+                video_runtime.stop()
+            except Exception:
+                logger.exception("Failed to stop Pico video runtime during pico_input cleanup")
             if frame_writer is not None:
                 frame_writer.close(unlink=True)
             command_sub.close()
-            for publisher in (body_pub, hand_pub, controller_pub, events_pub, health_pub, video_pub):
+            if head_pose_pub is not None:
+                try:
+                    head_pose_pub.close()
+                except Exception:
+                    logger.exception("Failed to close OpenNeck head-pose publisher")
+            for publisher in (
+                body_pub,
+                hand_pub,
+                controller_pub,
+                events_pub,
+                health_pub,
+                video_pub,
+            ):
                 if publisher is not None:
                     publisher.close()
             provider.close()
@@ -1050,6 +1204,7 @@ class _RobotControlWorker:
         self.endpoints = endpoints
         self.stop_event = stop_event
         self.provider_kind = _input_provider_kind(cfg)
+        self.high_level_policy_enabled = _high_level_policy_enabled(cfg)
         self.mode = RobotMode.IDLE
         self.policy_hz = float(cfg_get(cfg, "policy_hz", 50.0))
         self.dt = 1.0 / self.policy_hz
@@ -1079,6 +1234,8 @@ class _RobotControlWorker:
             policy_dt_s=self.dt,
             reference_steps=cfg_get(cfg, "reference_steps", [0]),
         )
+        if self.high_level_policy_enabled and self._reference_window_builder.reference_steps != (0,):
+            raise ValueError("High-level policy sim2real currently requires reference_steps=[0]")
         self._ref_proc = Sim2RealReferenceProcessor(
             obs_builder=self.obs_builder,
             policy=self.policy,
@@ -1102,6 +1259,41 @@ class _RobotControlWorker:
         self._mocap_reference_arm_retry_s = float(cfg_get(_mp_cfg(cfg), "mocap_reference_arm_retry_s", 0.1))
         self._mocap_session = MocapSessionManager()
 
+        self._high_level_policy_cfg = (
+            parse_high_level_policy_config(cfg) if self.high_level_policy_enabled else None
+        )
+        self._high_level_policy_safety_cfg = (
+            parse_high_level_policy_safety_config(cfg)
+            if self.high_level_policy_enabled
+            else None
+        )
+        self._high_level_policy_scheduler = (
+            HighLevelPolicyScheduler(
+                hold_s=self._high_level_policy_cfg.hold_s,
+                safety=self._high_level_policy_safety_cfg,
+                output_hz=self.policy_hz,
+            )
+            if self._high_level_policy_cfg is not None
+            else None
+        )
+        self._policy_entry_pending = False
+        self._policy_entry_deadline_s: float | None = None
+        self._policy_session_id: str | None = None
+        self._policy_frame_transform: PolicyFrameTransform | None = None
+        self._policy_paused = False
+        self._policy_resume_pending = False
+        self._policy_resume_deadline_s: float | None = None
+        self._policy_resume_source_timestamp_ns: int | None = None
+        self._policy_hold_qpos: Float64Array | None = None
+        self._policy_session_seq = 0
+        self._policy_observation_seq = 0
+        self._policy_target_seq = 0
+        self._last_policy_session_publish_s = 0.0
+        self._last_policy_video_seq = -1
+        self._latest_policy_video: SharedFrameDescriptor | None = None
+        self._latest_policy_status: HighLevelPolicyStatusPacket | None = None
+        self._last_policy_status_seq = -1
+
         self._latest_reference: ReferencePacket | None = None
         mp_cfg = _mp_cfg(cfg)
         self._max_reference_age_s = float(cfg_get(mp_cfg, "max_reference_age_s", 0.25))
@@ -1111,12 +1303,56 @@ class _RobotControlWorker:
         self._last_reference_seq = -1
         self._consecutive_valid_references = 0
 
-        self._reference_sub = LatestSubscriber(endpoints.reference_pub, REFERENCE_TOPIC)
-        self._events_sub = LatestSubscriber(endpoints.control_events_pub, CONTROL_EVENTS_TOPIC)
+        self._reference_sub = (
+            None
+            if self.high_level_policy_enabled
+            else LatestSubscriber(endpoints.reference_pub, REFERENCE_TOPIC)
+        )
+        self._events_sub = (
+            None
+            if self.high_level_policy_enabled
+            else LatestSubscriber(endpoints.control_events_pub, CONTROL_EVENTS_TOPIC)
+        )
         self._command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
-        self._reference_command_pub = ZmqPublisher(endpoints.reference_command_pub)
+        self._reference_command_pub = (
+            None
+            if self.high_level_policy_enabled
+            else ZmqPublisher(endpoints.reference_command_pub)
+        )
+        self._policy_video_sub = (
+            LatestSubscriber(endpoints.video_pub, VIDEO_TOPIC)
+            if self.high_level_policy_enabled
+            else None
+        )
+        self._policy_hand_state_sub = (
+            LatestSubscriber(endpoints.hand_command_pub, HAND_COMMAND_TOPIC)
+            if self.high_level_policy_enabled
+            else None
+        )
+        self._policy_neck_state_sub = (
+            LatestSubscriber(endpoints.neck_command_pub, NECK_COMMAND_TOPIC)
+            if self.high_level_policy_enabled
+            else None
+        )
+        self._policy_action_sub = (
+            LatestSubscriber(endpoints.high_level_policy_result_pub, HIGH_LEVEL_POLICY_ACTION_TOPIC)
+            if self.high_level_policy_enabled
+            else None
+        )
+        self._policy_status_sub = (
+            LatestSubscriber(endpoints.high_level_policy_result_pub, HIGH_LEVEL_POLICY_STATUS_TOPIC)
+            if self.high_level_policy_enabled
+            else None
+        )
+        self._policy_control_pub = (
+            ZmqPublisher(endpoints.high_level_policy_control_pub)
+            if self.high_level_policy_enabled
+            else None
+        )
         self._mode_pub = ZmqPublisher(endpoints.mode_pub)
         self._record_pub = ZmqPublisher(endpoints.record_pub) if _recording_enabled(cfg) else None
+        self._latest_policy_hand_state: HandCommandPacket | None = None
+        self._latest_policy_neck_state: NeckCommandPacket | None = None
 
         viewers = _parse_sim2real_viewers(cfg)
         self._retarget_viewer = _Sim2RealRetargetViewer(
@@ -1150,6 +1386,8 @@ class _RobotControlWorker:
                         self._standing_step()
                     elif self.mode in (RobotMode.MOCAP, RobotMode.ARMS):
                         self._mocap_step()
+                    elif self.mode == RobotMode.POLICY:
+                        self._high_level_policy_step()
 
                 self._publish_mode_state()
                 work_elapsed_s = time.monotonic() - t0
@@ -1158,13 +1396,15 @@ class _RobotControlWorker:
                     loop_start_s=t0,
                     work_elapsed_s=work_elapsed_s,
                     cycle_elapsed_s=cycle_elapsed_s,
-                    pico_age_s=self._reference_age_s(),
+                    pico_age_s=None if self.high_level_policy_enabled else self._reference_age_s(),
                 )
         finally:
             self.shutdown()
 
     def shutdown(self) -> None:
-        if self.mode in (RobotMode.STANDING, RobotMode.MOCAP, RobotMode.ARMS):
+        if self.high_level_policy_enabled and self._policy_session_id is not None:
+            self._stop_high_level_policy_session()
+        if self.mode in (RobotMode.STANDING, RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY):
             try:
                 self.robot.set_damping()
                 time.sleep(0.5)
@@ -1175,10 +1415,22 @@ class _RobotControlWorker:
             except Exception:
                 logger.exception("Failed to exit debug mode during robot_control shutdown")
         self._retarget_viewer.shutdown()
-        self._reference_sub.close()
-        self._events_sub.close()
+        for subscriber in (
+            self._reference_sub,
+            self._events_sub,
+            self._policy_video_sub,
+            self._policy_hand_state_sub,
+            self._policy_neck_state_sub,
+            self._policy_action_sub,
+            self._policy_status_sub,
+        ):
+            if subscriber is not None:
+                subscriber.close()
         self._command_sub.close()
-        self._reference_command_pub.close()
+        if self._reference_command_pub is not None:
+            self._reference_command_pub.close()
+        if self._policy_control_pub is not None:
+            self._policy_control_pub.close()
         self._mode_pub.close()
         if self._record_pub is not None:
             self._record_pub.close()
@@ -1204,6 +1456,20 @@ class _RobotControlWorker:
         if isinstance(command, CommandPacket) and command.command == "shutdown":
             self.stop_event.set()
             return
+        if isinstance(command, CommandPacket) and command.command == HIGH_LEVEL_POLICY_FAULT_COMMAND:
+            detail = str(
+                command.payload.get(
+                    "detail",
+                    "required high-level-policy input worker exited",
+                )
+            )
+            self._handle_high_level_policy_fault(detail)
+            return
+        if bool(getattr(self, "high_level_policy_enabled", False)):
+            self._drain_high_level_policy_ipc()
+            return
+        if self._reference_sub is None or self._events_sub is None:
+            raise RuntimeError("Teleoperation robot worker is missing reference/event subscribers")
         reference = self._reference_sub.recv_latest()
         if isinstance(reference, ReferencePacket):
             self._note_reference_packet(reference)
@@ -1212,6 +1478,9 @@ class _RobotControlWorker:
             self._handle_mocap_control_events(events.events)
 
     def _handle_transitions(self) -> None:
+        if bool(getattr(self, "high_level_policy_enabled", False)):
+            self._handle_high_level_policy_transitions()
+            return
         if self.mode == RobotMode.IDLE:
             if self.remote.start.on_pressed:
                 operator_logger.info("Start -> STANDING")
@@ -1233,13 +1502,17 @@ class _RobotControlWorker:
                 self._send_reference_command("replay_mocap")
                 self._resume_paused_mocap_if_needed()
                 return
-            if self.remote.A.on_pressed:
+            pause_pressed = (
+                self.remote.B.on_pressed if self.provider_kind == "pico4" else self.remote.A.on_pressed
+            )
+            if pause_pressed:
+                button = "B" if self.provider_kind == "pico4" else "A"
                 if self._mocap_session.state == MocapSessionState.PAUSED:
-                    operator_logger.info("A -> resume playback")
+                    operator_logger.info("%s -> resume playback", button)
                     self._send_reference_command("resume_mocap")
                     self._resume_paused_mocap()
                 else:
-                    operator_logger.info("A -> pause playback")
+                    operator_logger.info("%s -> pause playback", button)
                     self._send_reference_command("pause_mocap")
                     self._pause_active_mocap()
                 return
@@ -1250,6 +1523,448 @@ class _RobotControlWorker:
             if self.remote.start.on_pressed:
                 operator_logger.info("Start -> STANDING")
                 self._enter_standing()
+
+    def _drain_high_level_policy_ipc(self) -> None:
+        if self._policy_video_sub is None or self._policy_action_sub is None or self._policy_status_sub is None:
+            raise RuntimeError("High-level policy robot worker is missing IPC subscribers")
+        video = self._policy_video_sub.recv_latest()
+        if isinstance(video, SharedFrameDescriptor) and int(video.seq) > self._last_policy_video_seq:
+            self._latest_policy_video = video
+        status = self._policy_status_sub.recv_latest()
+        if isinstance(status, HighLevelPolicyStatusPacket) and int(status.seq) > self._last_policy_status_seq:
+            self._latest_policy_status = status
+            self._last_policy_status_seq = int(status.seq)
+            if status.status in ("fault", "unavailable"):
+                logger.warning("High-level policy host status=%s: %s", status.status, status.detail)
+            current_session = status.session_id == self._policy_session_id
+            terminal_fault = status.status == "fault" or (
+                status.status == "unavailable" and self.mode == RobotMode.POLICY
+            )
+            if current_session and terminal_fault:
+                self._handle_high_level_policy_fault(status.detail)
+                return
+        packet = self._policy_action_sub.recv_latest()
+        if not isinstance(packet, HighLevelPolicyActionPacket):
+            return
+        if packet.session_id != self._policy_session_id:
+            logger.debug(
+                "Discarded high-level policy action for inactive session: active=%r received=%r",
+                self._policy_session_id,
+                packet.session_id,
+            )
+            return
+        # A request may already be in flight when the operator pauses. Drain
+        # its result without replacing the reference frozen at the B press.
+        if self._policy_paused and not self._policy_resume_pending:
+            return
+        scheduler = self._high_level_policy_scheduler
+        policy_cfg = self._high_level_policy_cfg
+        if scheduler is None or policy_cfg is None:
+            return
+        now_s = time.monotonic()
+        if self.mode == RobotMode.STANDING and self._policy_entry_pending:
+            deadline_s = self._policy_entry_deadline_s
+            if deadline_s is not None and now_s > deadline_s:
+                operator_logger.warning(
+                    "High-level policy entry timed out; remaining in STANDING"
+                )
+                self._enter_standing()
+                return
+        if self.mode == RobotMode.POLICY and self._policy_resume_pending:
+            deadline_s = self._policy_resume_deadline_s
+            if deadline_s is not None and now_s > deadline_s:
+                self._handle_high_level_policy_fault(
+                    "resume timed out waiting for a fresh action chunk"
+                )
+                return
+        result_age_s = now_s - float(packet.received_timestamp_s)
+        if (
+            not np.isfinite(result_age_s)
+            or result_age_s < 0.0
+            or result_age_s > policy_cfg.max_result_age_s
+        ):
+            logger.warning(
+                "Rejected stale high-level policy result: age=%.3fs limit=%.3fs",
+                result_age_s,
+                policy_cfg.max_result_age_s,
+            )
+            if self.mode == RobotMode.STANDING and self._policy_entry_pending:
+                operator_logger.warning(
+                    "High-level policy entry failed; received a stale action result"
+                )
+                self._enter_standing()
+            return
+        minimum_source_timestamp_ns = self._policy_resume_source_timestamp_ns
+        if (
+            self._policy_resume_pending
+            and minimum_source_timestamp_ns is not None
+            and int(packet.source_onboard_monotonic_timestamp_ns)
+            < minimum_source_timestamp_ns
+        ):
+            logger.warning("Discarded pre-resume high-level policy action chunk")
+            return
+        if self.mode == RobotMode.STANDING and not self._policy_entry_pending:
+            return
+        chunk = PolicyActionChunk(
+            session_id=packet.session_id,
+            source_sequence_id=int(packet.source_sequence_id),
+            source_onboard_monotonic_timestamp_ns=int(
+                packet.source_onboard_monotonic_timestamp_ns
+            ),
+            action_fps=int(packet.action_fps),
+            actions=np.asarray(packet.actions, dtype=np.float32),
+            policy_id=str(packet.policy_id),
+            server_inference_ms=float(packet.server_inference_ms),
+        )
+        if self.mode == RobotMode.STANDING:
+            try:
+                scheduler.accept(chunk, now_s=now_s)
+            except ValueError as exc:
+                logger.warning("Rejected high-level policy entry chunk: %s", exc)
+                operator_logger.warning(
+                    "High-level policy entry failed; remaining in STANDING"
+                )
+                self._enter_standing()
+                return
+            self._transition_to_high_level_policy()
+            return
+        try:
+            scheduler.accept(chunk, now_s=now_s)
+        except ValueError as exc:
+            logger.warning("Rejected high-level policy action chunk: %s", exc)
+            return
+        if self._policy_resume_pending:
+            scheduler.resume(now_s)
+            self._policy_paused = False
+            self._policy_resume_pending = False
+            self._policy_resume_deadline_s = None
+            self._policy_resume_source_timestamp_ns = None
+            operator_logger.info("fresh action chunk -> resume POLICY")
+
+    def _handle_high_level_policy_transitions(self) -> None:
+        if self.mode == RobotMode.IDLE:
+            if self.remote.start.on_pressed:
+                operator_logger.info("Start -> STANDING")
+                self._enter_standing()
+            return
+        if self.mode == RobotMode.STANDING:
+            if self.remote.X.on_pressed and self._policy_entry_pending:
+                operator_logger.info("X -> cancel high-level policy entry")
+                self._enter_standing()
+                return
+            if self.remote.Y.on_pressed and not self._policy_entry_pending:
+                operator_logger.info("Y -> request high-level policy")
+                self._begin_high_level_policy_entry()
+            if self._policy_entry_pending:
+                self._publish_high_level_policy_session(
+                    "start",
+                    repeat=True,
+                )
+                deadline_s = self._policy_entry_deadline_s
+                if deadline_s is not None and time.monotonic() > deadline_s:
+                    operator_logger.warning("High-level policy entry timed out; remaining in STANDING")
+                    self._enter_standing()
+            return
+        if self.mode == RobotMode.POLICY:
+            if self.remote.X.on_pressed:
+                operator_logger.info("X -> STANDING")
+                self._enter_standing()
+                return
+            if self.remote.B.on_pressed:
+                self._toggle_high_level_policy_pause()
+                return
+            self._publish_high_level_policy_session(
+                "resume"
+                if self._policy_resume_pending or not self._policy_paused
+                else "pause",
+                repeat=True,
+            )
+            return
+        if self.mode == RobotMode.DAMPING and self.remote.start.on_pressed:
+            operator_logger.info("Start -> STANDING")
+            self._enter_standing()
+
+    def _begin_high_level_policy_entry(self) -> None:
+        self._start_high_level_policy_entry_session()
+
+    def _build_high_level_policy_boundary_action(self, state: object) -> np.ndarray:
+        transform = self._policy_frame_transform
+        if transform is None:
+            raise RuntimeError("High-level policy entry is missing its frame transform")
+        initial_action = np.zeros(50, dtype=np.float32)
+        initial_action[:36] = transform.localize_body_action(
+            self._build_robot_state_qpos(state)
+        )
+        return initial_action
+
+    def _build_high_level_policy_reference_action(self, reference_qpos: object) -> np.ndarray:
+        transform = self._policy_frame_transform
+        if transform is None:
+            raise RuntimeError("High-level policy entry is missing its frame transform")
+        initial_reference = np.zeros(50, dtype=np.float32)
+        initial_reference[:36] = transform.localize_body_action(reference_qpos)
+        return initial_reference
+
+    def _start_high_level_policy_entry_session(self) -> None:
+        policy_cfg = self._high_level_policy_cfg
+        scheduler = self._high_level_policy_scheduler
+        if policy_cfg is None or scheduler is None:
+            raise RuntimeError("High-level policy runtime is not configured")
+        if self._policy_session_id is not None:
+            self._publish_high_level_policy_session("stop")
+        state = self.robot.get_state()
+        root_pos = self._resolve_base_pos(state)
+        self._policy_frame_transform = PolicyFrameTransform.from_robot_pose(
+            root_pos[:2],
+            getattr(state, "quat"),
+        )
+        active_reference = (
+            np.asarray(self._last_commanded_motion_qpos, dtype=np.float64).copy()
+            if self._last_commanded_motion_qpos is not None
+            else self._standing_qpos.copy()
+        )
+        session_started_s = time.monotonic()
+        self._policy_session_id = uuid.uuid4().hex
+        scheduler.reset(
+            self._policy_session_id,
+            initial_action=self._build_high_level_policy_boundary_action(state),
+            initial_reference=self._build_high_level_policy_reference_action(
+                active_reference
+            ),
+            initial_timestamp_s=session_started_s,
+        )
+        self._policy_entry_pending = True
+        self._policy_entry_deadline_s = session_started_s + policy_cfg.entry_timeout_s
+        self._policy_paused = False
+        self._policy_resume_pending = False
+        self._policy_resume_deadline_s = None
+        self._policy_resume_source_timestamp_ns = None
+        self._policy_hold_qpos = active_reference.copy()
+        self._policy_observation_seq = 0
+        self._last_policy_video_seq = (
+            -1
+            if self._latest_policy_video is None
+            else int(self._latest_policy_video.seq)
+        )
+        self._last_policy_session_publish_s = 0.0
+        self._publish_high_level_policy_session("start", repeat=False)
+
+    def _publish_high_level_policy_session(self, command: str, *, repeat: bool = False) -> None:
+        publisher = self._policy_control_pub
+        session_id = self._policy_session_id
+        policy_cfg = self._high_level_policy_cfg
+        if publisher is None or session_id is None or policy_cfg is None:
+            return
+        now_s = time.monotonic()
+        if repeat and now_s - self._last_policy_session_publish_s < 0.2:
+            return
+        self._policy_session_seq += 1
+        publisher.publish(
+            HIGH_LEVEL_POLICY_SESSION_TOPIC,
+            HighLevelPolicySessionPacket(
+                session_id=session_id,
+                task=policy_cfg.task,
+                command=str(command),
+                timestamp_s=now_s,
+                seq=self._policy_session_seq,
+            ),
+        )
+        self._last_policy_session_publish_s = now_s
+
+    def _publish_high_level_policy_observation(self, robot_state: object) -> None:
+        if not (self._policy_entry_pending or self.mode == RobotMode.POLICY):
+            return
+        if self._policy_paused and not self._policy_resume_pending:
+            return
+        publisher = self._policy_control_pub
+        frame = self._latest_policy_video
+        scheduler = self._high_level_policy_scheduler
+        session_id = self._policy_session_id
+        policy_cfg = self._high_level_policy_cfg
+        if (
+            publisher is None
+            or frame is None
+            or scheduler is None
+            or session_id is None
+            or policy_cfg is None
+        ):
+            return
+        if int(frame.seq) <= self._last_policy_video_seq:
+            return
+        now_s = time.monotonic()
+        if abs(now_s - float(frame.timestamp_s)) > policy_cfg.max_observation_age_s:
+            return
+        self._drain_high_level_policy_hardware_state()
+        hardware_state = self._high_level_policy_hardware_state(
+            now_s=now_s,
+            max_age_s=policy_cfg.max_observation_age_s,
+        )
+        if hardware_state is None:
+            return
+        dex_state, neck_state = hardware_state
+        source_reference_root_pose = scheduler.reference_root_pose_at(
+            float(frame.timestamp_s)
+        )
+        if source_reference_root_pose is None:
+            return
+        body_joint_positions = build_observation_state(robot_state)[:NUM_JOINTS]
+        sequence_id = self._policy_observation_seq
+        publisher.publish(
+            HIGH_LEVEL_POLICY_OBSERVATION_TOPIC,
+            HighLevelPolicyObservationPacket(
+                session_id=session_id,
+                sequence_id=sequence_id,
+                onboard_monotonic_timestamp_ns=int(round(float(frame.timestamp_s) * 1e9)),
+                body_joint_positions=body_joint_positions.astype(
+                    np.float32,
+                    copy=True,
+                ),
+                dex_state=dex_state,
+                neck_state=neck_state,
+                source_reference_root_pose=source_reference_root_pose,
+                frame=frame,
+                timestamp_s=now_s,
+            ),
+        )
+        self._policy_observation_seq += 1
+        self._last_policy_video_seq = int(frame.seq)
+
+    def _drain_high_level_policy_hardware_state(self) -> None:
+        hand_subscriber = self._policy_hand_state_sub
+        neck_subscriber = self._policy_neck_state_sub
+        if hand_subscriber is None or neck_subscriber is None:
+            return
+        hand_state = hand_subscriber.recv_latest()
+        if isinstance(hand_state, HandCommandPacket):
+            self._latest_policy_hand_state = hand_state
+        neck_state = neck_subscriber.recv_latest()
+        if isinstance(neck_state, NeckCommandPacket):
+            self._latest_policy_neck_state = neck_state
+
+    def _high_level_policy_hardware_state(
+        self,
+        *,
+        now_s: float,
+        max_age_s: float,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        hand = self._latest_policy_hand_state
+        neck = self._latest_policy_neck_state
+        if (
+            hand is None
+            or hand.left_state is None
+            or hand.right_state is None
+            or neck is None
+            or neck.state_yaw_deg is None
+            or neck.state_pitch_deg is None
+        ):
+            return None
+        hand_age_s = float(now_s) - float(hand.timestamp_s)
+        neck_age_s = float(now_s) - float(neck.timestamp_s)
+        if not (
+            np.isfinite(hand_age_s)
+            and 0.0 <= hand_age_s <= float(max_age_s)
+            and np.isfinite(neck_age_s)
+            and 0.0 <= neck_age_s <= float(max_age_s)
+        ):
+            return None
+        left_state = np.asarray(hand.left_state, dtype=np.float32).reshape(-1)
+        right_state = np.asarray(hand.right_state, dtype=np.float32).reshape(-1)
+        dex_state = np.concatenate((left_state, right_state), dtype=np.float32)
+        neck_state = np.asarray(
+            [neck.state_yaw_deg, neck.state_pitch_deg],
+            dtype=np.float32,
+        )
+        if dex_state.shape != (12,) or not np.all(np.isfinite(dex_state)):
+            return None
+        if neck_state.shape != (2,) or not np.all(np.isfinite(neck_state)):
+            return None
+        return dex_state.copy(), neck_state.copy()
+
+    def _transition_to_high_level_policy(self) -> None:
+        state = self.robot.get_state()
+        resume_qpos = self._build_robot_state_qpos(state)
+        self._reset_policy_state()
+        self._last_retarget_qpos = None
+        self._last_commanded_motion_qpos = resume_qpos.copy()
+        self._policy_hold_qpos = resume_qpos.copy()
+        self._policy_entry_pending = False
+        self._policy_entry_deadline_s = None
+        self._policy_paused = False
+        self._policy_resume_pending = False
+        self._policy_resume_deadline_s = None
+        self._policy_resume_source_timestamp_ns = None
+        self.mode = RobotMode.POLICY
+        operator_logger.info("mode -> POLICY")
+
+    def _toggle_high_level_policy_pause(self) -> None:
+        scheduler = self._high_level_policy_scheduler
+        if scheduler is None:
+            return
+        now_s = time.monotonic()
+        if self._policy_paused:
+            if self._policy_resume_pending:
+                return
+            policy_cfg = self._high_level_policy_cfg
+            if policy_cfg is None:
+                return
+            self._policy_resume_pending = True
+            self._policy_resume_deadline_s = now_s + policy_cfg.entry_timeout_s
+            self._policy_resume_source_timestamp_ns = int(round(now_s * 1e9))
+            self._publish_high_level_policy_session("resume")
+            operator_logger.info("B -> resume POLICY; waiting for a fresh action chunk")
+        else:
+            scheduler.pause(now_s)
+            self._policy_paused = True
+            self._policy_resume_pending = False
+            self._policy_resume_deadline_s = None
+            self._policy_resume_source_timestamp_ns = None
+            self._policy_hold_qpos = self._resolve_mocap_hold_qpos()
+            self._publish_high_level_policy_session("pause")
+            operator_logger.info("B -> pause POLICY")
+
+    def _stop_high_level_policy_session(self) -> None:
+        if self._policy_session_id is not None:
+            self._publish_high_level_policy_session("stop")
+        scheduler = self._high_level_policy_scheduler
+        if scheduler is not None:
+            scheduler.clear()
+        self._policy_entry_pending = False
+        self._policy_entry_deadline_s = None
+        self._policy_session_id = None
+        self._policy_frame_transform = None
+        self._policy_paused = False
+        self._policy_resume_pending = False
+        self._policy_resume_deadline_s = None
+        self._policy_resume_source_timestamp_ns = None
+        self._policy_hold_qpos = None
+        self._latest_policy_status = None
+
+    def _handle_high_level_policy_fault(self, detail: str) -> None:
+        if not bool(getattr(self, "high_level_policy_enabled", False)):
+            return
+        if self.mode == RobotMode.POLICY:
+            if self._policy_paused and not self._policy_resume_pending:
+                return
+            scheduler = self._high_level_policy_scheduler
+            if scheduler is not None:
+                scheduler.pause(time.monotonic())
+            self._policy_paused = True
+            self._policy_resume_pending = False
+            self._policy_resume_deadline_s = None
+            self._policy_resume_source_timestamp_ns = None
+            self._policy_hold_qpos = self._resolve_mocap_hold_qpos()
+            self._publish_high_level_policy_session("pause")
+            operator_logger.warning(
+                "High-level policy fault -> pause POLICY: %s",
+                detail,
+            )
+            return
+        if self._policy_entry_pending:
+            operator_logger.warning(
+                "High-level policy entry failed; remaining in STANDING: %s",
+                detail,
+            )
+            self._enter_standing()
 
     def _standing_step(self) -> None:
         robot_state = self.robot.get_state()
@@ -1275,6 +1990,7 @@ class _RobotControlWorker:
         self._last_action = np.asarray(action, dtype=np.float32).reshape(-1)
         self._last_retarget_qpos = qpos.copy()
         self._last_commanded_motion_qpos = qpos.copy()
+        self._publish_high_level_policy_observation(robot_state)
         self._publish_record_step(robot_state=robot_state, reference_qpos=qpos)
         self._write_retarget_viewer(qpos)
 
@@ -1301,15 +2017,106 @@ class _RobotControlWorker:
         robot_state = self.robot.get_state()
         self._execute_mocap_pipeline(reference.qpos, robot_state, reference.reference_window)
 
+    def _high_level_policy_step(self) -> None:
+        scheduler = self._high_level_policy_scheduler
+        transform = self._policy_frame_transform
+        session_id = self._policy_session_id
+        if self._policy_resume_pending:
+            robot_state = self.robot.get_state()
+            self._publish_high_level_policy_observation(robot_state)
+            deadline_s = self._policy_resume_deadline_s
+            if deadline_s is not None and time.monotonic() > deadline_s:
+                self._handle_high_level_policy_fault("resume timed out waiting for a fresh action chunk")
+            hold_qpos = self._policy_hold_qpos
+            if hold_qpos is None:
+                hold_qpos = self._resolve_mocap_hold_qpos()
+                self._policy_hold_qpos = hold_qpos.copy()
+            self._run_static_mocap_step(hold_qpos)
+            return
+        if self._policy_paused:
+            hold_qpos = self._policy_hold_qpos
+            if hold_qpos is None:
+                hold_qpos = self._resolve_mocap_hold_qpos()
+                self._policy_hold_qpos = hold_qpos.copy()
+            self._run_static_mocap_step(hold_qpos)
+            return
+        if scheduler is None or transform is None or session_id is None:
+            detail = "POLICY mode is missing its scheduler/session transform"
+            logger.error(detail)
+            self._handle_high_level_policy_fault(detail)
+            hold_qpos = self._policy_hold_qpos
+            if hold_qpos is None:
+                hold_qpos = self._resolve_mocap_hold_qpos()
+                self._policy_hold_qpos = hold_qpos.copy()
+            self._run_static_mocap_step(hold_qpos)
+            return
+
+        robot_state = self.robot.get_state()
+        self._publish_high_level_policy_observation(robot_state)
+        scheduled = scheduler.sample(time.monotonic())
+        if scheduled is None:
+            self._handle_high_level_policy_fault("action watchdog expired")
+            hold_qpos = self._policy_hold_qpos
+            if hold_qpos is None:
+                hold_qpos = self._resolve_mocap_hold_qpos()
+                self._policy_hold_qpos = hold_qpos.copy()
+            self._run_static_mocap_step(hold_qpos)
+            return
+        reference_qpos = transform.delocalize_body_action(scheduled[:36]).astype(np.float64)
+        self._execute_reference_pipeline(
+            reference_qpos,
+            robot_state,
+            reference_window=None,
+            align_reference=False,
+            compose_arms=False,
+        )
+        self._policy_hold_qpos = reference_qpos.copy()
+        publisher = self._policy_control_pub
+        if publisher is not None:
+            self._policy_target_seq += 1
+            publisher.publish(
+                HIGH_LEVEL_POLICY_TARGET_TOPIC,
+                HighLevelPolicyTargetPacket(
+                    session_id=session_id,
+                    action=np.asarray(scheduled, dtype=np.float32).copy(),
+                    timestamp_s=time.monotonic(),
+                    seq=self._policy_target_seq,
+                ),
+            )
+
     def _execute_mocap_pipeline(
         self,
         reference_qpos: Float64Array,
         robot_state: object,
         reference_window: ReferenceWindow | None,
     ) -> None:
+        self._execute_reference_pipeline(
+            reference_qpos,
+            robot_state,
+            reference_window=reference_window,
+            align_reference=True,
+            compose_arms=self.mode == RobotMode.ARMS,
+        )
+
+    def _execute_reference_pipeline(
+        self,
+        reference_qpos: Float64Array,
+        robot_state: object,
+        *,
+        reference_window: ReferenceWindow | None,
+        align_reference: bool,
+        compose_arms: bool,
+    ) -> None:
         reference_window_aligned = False
-        reference_qpos = self._ref_proc.align_reference_yaw(reference_qpos, robot_state=robot_state)
-        if self.mode == RobotMode.ARMS:
+        if align_reference:
+            reference_qpos = self._ref_proc.align_reference_yaw(
+                reference_qpos,
+                robot_state=robot_state,
+            )
+        else:
+            reference_qpos = np.asarray(reference_qpos, dtype=np.float64).copy()
+            reference_window_aligned = True
+        if compose_arms:
             reference_qpos = self._compose_arm_reference(reference_qpos)
             aligned_window = self._ref_proc.align_reference_window(reference_window, robot_state)
             reference_window = self._compose_arm_reference_window(aligned_window)
@@ -1372,10 +2179,21 @@ class _RobotControlWorker:
 
     def _enter_standing(self) -> None:
         prev_mode = self.mode
+        if bool(getattr(self, "high_level_policy_enabled", False)) and (
+            prev_mode == RobotMode.POLICY or self._policy_entry_pending
+        ):
+            self._stop_high_level_policy_session()
         self._disarm_mocap_reference_if_needed()
         self._clear_reference_gate()
         self._mocap_entry_requested = False
-        already_in_debug = self.mode in (RobotMode.STANDING, RobotMode.MOCAP, RobotMode.ARMS)
+        if prev_mode == RobotMode.STANDING:
+            return
+        already_in_debug = self.mode in (
+            RobotMode.STANDING,
+            RobotMode.MOCAP,
+            RobotMode.ARMS,
+            RobotMode.POLICY,
+        )
         if not already_in_debug:
             logger.info("Entering debug mode...")
             ok = self.robot.enter_debug_mode()
@@ -1385,7 +2203,12 @@ class _RobotControlWorker:
             time.sleep(0.5)
 
         state = self.robot.get_state()
-        if prev_mode not in (RobotMode.MOCAP, RobotMode.ARMS):
+        if prev_mode not in (
+            RobotMode.STANDING,
+            RobotMode.MOCAP,
+            RobotMode.ARMS,
+            RobotMode.POLICY,
+        ):
             logger.info("Locking joints to current position...")
             self.robot.lock_all_joints()
             time.sleep(0.3)
@@ -1397,7 +2220,11 @@ class _RobotControlWorker:
         self._last_commanded_motion_qpos = None
         self._set_default_standing_reference(state)
         self._reset_policy_state()
-        if prev_mode in (RobotMode.MOCAP, RobotMode.ARMS):
+        if prev_mode in (
+            RobotMode.MOCAP,
+            RobotMode.ARMS,
+            RobotMode.POLICY,
+        ):
             self._safety.start_kp_ramp(
                 duration_s=self._standing_return_ramp_duration,
                 floor_ratio=self._standing_return_kp_ramp_floor_ratio,
@@ -1473,10 +2300,14 @@ class _RobotControlWorker:
             self._resume_paused_mocap()
 
     def _enter_damping(self) -> None:
+        if bool(getattr(self, "high_level_policy_enabled", False)) and (
+            self.mode == RobotMode.POLICY or self._policy_entry_pending
+        ):
+            self._stop_high_level_policy_session()
         self._disarm_mocap_reference_if_needed()
         self._clear_reference_gate()
         self._mocap_entry_requested = False
-        if self.mode in (RobotMode.STANDING, RobotMode.MOCAP, RobotMode.ARMS):
+        if self.mode in (RobotMode.STANDING, RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY):
             logger.info("DAMPING: sending LowCmd damping...")
             self.robot.set_damping()
             time.sleep(0.5)
@@ -1587,6 +2418,8 @@ class _RobotControlWorker:
         logger.info("Mocap session -> ACTIVE (multiprocess episode-reset + reference realignment)")
 
     def _send_reference_command(self, command: str) -> None:
+        if self._reference_command_pub is None:
+            return
         self._reference_command_pub.publish(
             COMMAND_TOPIC,
             CommandPacket(command=command, timestamp_s=time.monotonic()),
@@ -1638,7 +2471,7 @@ class _RobotControlWorker:
             raise RuntimeError("Paused mocap session is missing a hold_qpos")
         self._run_static_mocap_step(hold_qpos)
 
-    def _run_static_mocap_step(self, hold_qpos: Float64Array) -> None:
+    def _run_static_mocap_step(self, hold_qpos: Float64Array) -> object:
         robot_state = self.robot.get_state()
         qpos = np.asarray(hold_qpos, dtype=np.float64).copy()
         motion_joint_vel = np.zeros(self.num_actions, dtype=np.float32)
@@ -1665,6 +2498,7 @@ class _RobotControlWorker:
         self._last_commanded_motion_qpos = qpos.copy()
         self._publish_record_step(robot_state=robot_state, reference_qpos=qpos)
         self._write_retarget_viewer(qpos)
+        return robot_state
 
     def _hold_mocap_reference(self, reason: str, *, detail: str | None = None) -> None:
         if self._last_mocap_hold_reason != reason:
@@ -1687,6 +2521,10 @@ class _RobotControlWorker:
                 mocap_paused=paused,
                 timestamp_s=time.monotonic(),
                 seq=self._mode_seq,
+                policy_paused=self.mode == RobotMode.POLICY and self._policy_paused,
+                policy_session_id=(
+                    self._policy_session_id if self.mode == RobotMode.POLICY else None
+                ),
             ),
         )
 
@@ -1706,7 +2544,7 @@ class _RobotControlWorker:
                     mocap_active=active,
                     recordable=recordable,
                     observation_state=build_observation_state(robot_state).astype(np.float32, copy=True),
-                    observation_mode=build_mode_observation(record_mode).astype(np.float32, copy=True),
+                    observation_mode=int(build_mode_observation(record_mode)),
                     action_reference_qpos=normalize_action_reference_qpos(reference_qpos).astype(np.float32, copy=True),
                     seq=self._mode_seq,
                 ),
@@ -1728,7 +2566,7 @@ class _RobotControlWorker:
                     mocap_active=False,
                     recordable=False,
                     observation_state=build_observation_state(robot_state).astype(np.float32, copy=True),
-                    observation_mode=np.array([-1.0], dtype=np.float32),
+                    observation_mode=-1,
                     action_reference_qpos=normalize_action_reference_qpos(reference_qpos).astype(np.float32, copy=True),
                     seq=self._mode_seq,
                 ),
@@ -1802,6 +2640,8 @@ def _run_robot_control_worker(
 
 
 class _RecordingWorker:
+    _CAMERA_TIMEOUT_S = 1.0
+
     def __init__(
         self,
         cfg: dict[str, Any],
@@ -1827,6 +2667,7 @@ class _RecordingWorker:
         self._record_sub = LatestSubscriber(endpoints.record_pub, RECORD_TOPIC)
         self._video_sub = LatestSubscriber(endpoints.video_pub, VIDEO_TOPIC)
         self._hand_command_sub = LatestSubscriber(endpoints.hand_command_pub, HAND_COMMAND_TOPIC)
+        self._neck_command_sub = LatestSubscriber(endpoints.neck_command_pub, NECK_COMMAND_TOPIC)
         self._command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
         self._frame_reader = frame_reader or SharedFrameRingReader()
         self._latest_record: RecordStepPacket | None = None
@@ -1840,23 +2681,35 @@ class _RecordingWorker:
             right_pose=right_open.astype(np.float32, copy=True),
             seq=0,
         )
+        self._latest_neck_command = NeckCommandPacket(
+            timestamp_s=0.0,
+            driver=str(cfg_get(cfg_get(cfg, "neck", {}) or {}, "driver", "openneck")).strip().lower(),
+            active=False,
+            yaw_deg=0.0,
+            pitch_deg=0.0,
+            seq=0,
+        )
         self._latest_video_seq = -1
+        self._latest_video_received_s: float | None = None
         self._active = False
         self._episode_started_s = 0.0
         self._episode_frames = 0
 
-        from teleopit.recording.hdf5 import (
-            TeleopitHDF5Recorder,
-            build_recording_schema,
-        )
+        from teleopit.recording.hdf5 import TeleopitHDF5Recorder
 
-        self._schema = build_recording_schema(self.camera_cfg)
+        robot_type, hand_type, neck_type = _recording_hardware_types(cfg)
+        self._schema = build_recording_schema(
+            self.camera_cfg,
+            fps=self.fps,
+            robot_type=robot_type,
+            hand_type=hand_type,
+            neck_type=neck_type,
+        )
         self._video_config = build_mp4_video_config(cfg_get(self.rec_cfg, "video", {}) or {})
         factory = recorder_factory or TeleopitHDF5Recorder.create
         self._recorder = factory(
             output_dir=cfg_get(self.rec_cfg, "output_dir", "data/recordings/sim2real_hdf5"),
             task=self.task,
-            fps=self.fps,
             schema=self._schema,
             video_config=self._video_config,
         )
@@ -1879,9 +2732,14 @@ class _RecordingWorker:
                 if isinstance(hand_command, HandCommandPacket):
                     self._latest_hand_command = hand_command
 
+                neck_command = self._neck_command_sub.recv_latest()
+                if isinstance(neck_command, NeckCommandPacket):
+                    self._latest_neck_command = neck_command
+
                 video = self._video_sub.recv_latest()
                 if isinstance(video, SharedFrameDescriptor):
                     self._handle_video(video)
+                self._discard_if_camera_stale()
 
                 time.sleep(idle_sleep_s)
         finally:
@@ -1896,6 +2754,7 @@ class _RecordingWorker:
                 self._record_sub.close()
                 self._video_sub.close()
                 self._hand_command_sub.close()
+                self._neck_command_sub.close()
                 self._command_sub.close()
                 self._frame_reader.close()
 
@@ -1928,6 +2787,9 @@ class _RecordingWorker:
                 record.recordable,
             )
             return
+        if not self._camera_is_fresh():
+            operator_logger.warning("cannot start recording: no fresh RealSense frame")
+            return
         self._recorder.start_episode()
         self._active = True
         self._episode_started_s = time.monotonic()
@@ -1937,6 +2799,9 @@ class _RecordingWorker:
     def _save_episode(self) -> None:
         if not self._active:
             operator_logger.info("no active recording episode to save")
+            return
+        if not self._camera_is_fresh():
+            self._discard_episode("camera stream timeout")
             return
         duration_s = time.monotonic() - self._episode_started_s
         if self._episode_frames <= 0:
@@ -1963,6 +2828,7 @@ class _RecordingWorker:
         if int(descriptor.seq) == self._latest_video_seq:
             return
         self._latest_video_seq = int(descriptor.seq)
+        self._latest_video_received_s = time.monotonic()
         if not self._active:
             return
         record = self._latest_record
@@ -1973,19 +2839,76 @@ class _RecordingWorker:
             logger.warning("Recording stopped because mode is no longer recordable: %s", record.mode)
             self._discard_episode("mode not recordable")
             return
+        if self._schema.has_hand_action and (
+            self._latest_hand_command.left_state is None
+            or self._latest_hand_command.right_state is None
+        ):
+            return
+        if self._schema.has_neck_action and (
+            self._latest_neck_command.state_yaw_deg is None
+            or self._latest_neck_command.state_pitch_deg is None
+        ):
+            return
         image = self._frame_reader.read(descriptor, copy=True)
-        self._recorder.add_frame(
-            image=np.asarray(image, dtype=np.uint8),
-            state=np.asarray(record.observation_state, dtype=np.float32),
-            mode=np.asarray(record.observation_mode, dtype=np.float32),
-            action=np.asarray(record.action_reference_qpos, dtype=np.float32),
-            hand_action=normalize_hand_action(
+        hand_state = (
+            normalize_hand_action(
+                self._latest_hand_command.left_state,
+                self._latest_hand_command.right_state,
+            )
+            if self._schema.has_hand_action
+            else None
+        )
+        hand_action = (
+            normalize_hand_action(
                 self._latest_hand_command.left_pose,
                 self._latest_hand_command.right_pose,
-            ),
-            task=self.task,
+            )
+            if self._schema.has_hand_action
+            else None
         )
+        neck_state = (
+            build_neck_action(
+                self._latest_neck_command.state_yaw_deg,
+                self._latest_neck_command.state_pitch_deg,
+            )
+            if self._schema.has_neck_action
+            else None
+        )
+        neck_action = (
+            build_neck_action(
+                self._latest_neck_command.yaw_deg,
+                self._latest_neck_command.pitch_deg,
+            )
+            if self._schema.has_neck_action
+            else None
+        )
+        frame_kwargs = {
+            "image": np.asarray(image, dtype=np.uint8),
+            "state": np.asarray(record.observation_state, dtype=np.float32),
+            "mode": record.observation_mode,
+            "action": np.asarray(record.action_reference_qpos, dtype=np.float32),
+            "hand_state": hand_state,
+            "hand_action": hand_action,
+        }
+        if neck_state is not None:
+            frame_kwargs["neck_state"] = neck_state
+        if neck_action is not None:
+            frame_kwargs["neck_action"] = neck_action
+        self._recorder.add_frame(**frame_kwargs)
         self._episode_frames += 1
+
+    def _camera_is_fresh(self, *, now_s: float | None = None) -> bool:
+        if self._latest_video_received_s is None:
+            return False
+        now = time.monotonic() if now_s is None else float(now_s)
+        return now - self._latest_video_received_s <= self._CAMERA_TIMEOUT_S
+
+    def _discard_if_camera_stale(self, *, now_s: float | None = None) -> bool:
+        if not self._active or self._camera_is_fresh(now_s=now_s):
+            return False
+        self._discard_episode("camera stream timeout")
+        return True
+
 
 def _run_recording_worker(
     cfg: dict[str, Any],
@@ -1997,6 +2920,128 @@ def _run_recording_worker(
         worker.run()
 
     _worker_loop("recording_worker", cfg, _main)
+
+
+def _run_neck_worker(
+    cfg: dict[str, Any],
+    endpoints: Sim2RealIpcEndpoints,
+    stop_event: MpEvent,
+) -> None:
+    def _main() -> None:
+        neck_cfg = parse_neck_config(cfg)
+        runtime = build_neck_runtime(neck_cfg)
+        head_pose_sub = LatestSubscriber(endpoints.head_pose_pub, HEAD_POSE_TOPIC)
+        mode_sub = LatestSubscriber(endpoints.mode_pub, MODE_TOPIC)
+        command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
+        neck_command_pub = (
+            ZmqPublisher(endpoints.neck_command_pub)
+            if _recording_enabled(cfg)
+            else None
+        )
+        latest_hmd_rotation: Float64Array | None = None
+        latest_spine3_rotation: Float64Array | None = None
+        latest_pose_timestamp_s: float | None = None
+        latest_pose_seq = -1
+        latest_mode: ModeStatePacket | None = None
+        command_count = 0
+        command_seq = 0
+        sleep_s = 1.0 / max(float(neck_cfg.rate_hz), 1.0)
+        last_status_s = 0.0
+
+        def _publish_neck_command(
+            *,
+            timestamp_s: float,
+            active: bool,
+            yaw_deg: float,
+            pitch_deg: float,
+        ) -> None:
+            nonlocal command_seq
+            if neck_command_pub is None:
+                return
+            try:
+                state_yaw_deg, state_pitch_deg = runtime.read_deg()
+            except Exception:
+                logger.exception("OpenNeck state read failed")
+                state_yaw_deg = state_pitch_deg = None
+            command_seq += 1
+            neck_command_pub.publish(
+                NECK_COMMAND_TOPIC,
+                NeckCommandPacket(
+                    timestamp_s=float(timestamp_s),
+                    driver=neck_cfg.driver,
+                    active=bool(active),
+                    yaw_deg=float(yaw_deg),
+                    pitch_deg=float(pitch_deg),
+                    seq=command_seq,
+                    state_yaw_deg=state_yaw_deg,
+                    state_pitch_deg=state_pitch_deg,
+                ),
+            )
+
+        try:
+            runtime.start()
+            if neck_cfg.center_on_start or neck_command_pub is not None:
+                _publish_neck_command(
+                    timestamp_s=time.monotonic(),
+                    active=False,
+                    yaw_deg=0.0,
+                    pitch_deg=0.0,
+                )
+            while not stop_event.is_set():
+                runtime_command = command_sub.recv_latest()
+                if isinstance(runtime_command, CommandPacket) and runtime_command.command == "shutdown":
+                    stop_event.set()
+                    break
+                pose_packet = head_pose_sub.recv_latest()
+                hmd_rotation, spine3_rotation, pose_timestamp_s, pose_seq = head_pose_packet(pose_packet)
+                if pose_seq >= 0:
+                    latest_hmd_rotation = hmd_rotation
+                    latest_spine3_rotation = spine3_rotation
+                    latest_pose_timestamp_s = pose_timestamp_s
+                    latest_pose_seq = pose_seq
+                mode_packet = mode_sub.recv_latest()
+                if isinstance(mode_packet, ModeStatePacket):
+                    latest_mode = mode_packet
+                now_s = time.monotonic()
+                active = mode_packet_active(latest_mode, neck_cfg)
+                try:
+                    neck_command = runtime.tick(
+                        hmd_rotation_wxyz=latest_hmd_rotation,
+                        spine3_rotation_wxyz=latest_spine3_rotation,
+                        pose_timestamp_s=latest_pose_timestamp_s,
+                        active=active,
+                        now_s=now_s,
+                    )
+                    if neck_command is not None:
+                        command_count += 1
+                        _publish_neck_command(
+                            timestamp_s=now_s,
+                            active=active,
+                            yaw_deg=neck_command.yaw_deg,
+                            pitch_deg=neck_command.pitch_deg,
+                        )
+                except Exception:
+                    logger.exception("OpenNeck worker tick failed; neck control continues")
+                if now_s - last_status_s >= 5.0:
+                    logger.debug(
+                        "OpenNeck worker status | head_pose_seq=%s commands=%s active=%s",
+                        latest_pose_seq,
+                        command_count,
+                        active,
+                    )
+                    last_status_s = now_s
+                time.sleep(sleep_s)
+        finally:
+            try:
+                runtime.close()
+            finally:
+                head_pose_sub.close()
+                mode_sub.close()
+                command_sub.close()
+                if neck_command_pub is not None:
+                    neck_command_pub.close()
+
+    _worker_loop("neck_worker", cfg, _main)
 
 
 class _HandSnapshotProxy:
@@ -2037,6 +3082,11 @@ def _run_hand_worker(
         hand_mode = str(cfg_get(hands_cfg, "mode", "gripper")).strip().lower()
         left_pose, right_pose = _configured_open_hand_pose(cfg)
         command_seq = 0
+        recording_enabled = _recording_enabled(cfg)
+        state_interval_s = (
+            1.0 / float(cfg_get(_recording_cfg(cfg), "fps", 30))
+            if recording_enabled else 0.0
+        )
 
         def _apply_hand_commands(commands: tuple[HandPoseCommand, ...]) -> bool:
             nonlocal left_pose, right_pose
@@ -2056,8 +3106,20 @@ def _run_hand_worker(
                     logger.warning("Ignoring hand command with unsupported side %r", hand_command.side)
             return changed
 
-        def _publish_hand_command(*, timestamp_s: float, active_state: bool) -> None:
+        def _publish_hand_command(
+            *,
+            timestamp_s: float,
+            active_state: bool,
+            read_state: bool = True,
+        ) -> None:
             nonlocal command_seq
+            left_state = right_state = None
+            if recording_enabled and read_state:
+                try:
+                    left_state = np.asarray(runtime.get_state("left"), dtype=np.float32)
+                    right_state = np.asarray(runtime.get_state("right"), dtype=np.float32)
+                except Exception:
+                    logger.exception("LinkerHand state read failed")
             command_seq += 1
             hand_command_pub.publish(
                 HAND_COMMAND_TOPIC,
@@ -2069,6 +3131,8 @@ def _run_hand_worker(
                     left_pose=np.asarray(left_pose, dtype=np.float32).copy(),
                     right_pose=np.asarray(right_pose, dtype=np.float32).copy(),
                     seq=command_seq,
+                    left_state=None if left_state is None else left_state.copy(),
+                    right_state=None if right_state is None else right_state.copy(),
                 ),
             )
 
@@ -2077,6 +3141,7 @@ def _run_hand_worker(
             startup_s = time.monotonic()
             _apply_hand_commands(startup_commands)
             _publish_hand_command(timestamp_s=startup_s, active_state=False)
+            last_state_s = startup_s
             while not stop_event.is_set():
                 command = command_sub.recv_latest()
                 if isinstance(command, CommandPacket) and command.command == "shutdown":
@@ -2099,9 +3164,11 @@ def _run_hand_worker(
                         active=active,
                         now_s=now_s,
                     )
-                    if commands:
-                        if _apply_hand_commands(commands):
-                            _publish_hand_command(timestamp_s=now_s, active_state=active)
+                    commands_changed = bool(commands) and _apply_hand_commands(commands)
+                    state_due = recording_enabled and now_s - last_state_s >= state_interval_s
+                    if commands_changed or state_due:
+                        _publish_hand_command(timestamp_s=now_s, active_state=active)
+                        last_state_s = now_s
                 except Exception:
                     logger.exception("Dexterous hand worker tick failed; hand control continues")
                 time.sleep(sleep_s)
@@ -2110,7 +3177,7 @@ def _run_hand_worker(
                 shutdown_commands = runtime.close()
                 shutdown_s = time.monotonic()
                 if _apply_hand_commands(shutdown_commands):
-                    _publish_hand_command(timestamp_s=shutdown_s, active_state=False)
+                    _publish_hand_command(timestamp_s=shutdown_s, active_state=False, read_state=False)
             finally:
                 hand_sub.close()
                 controller_sub.close()

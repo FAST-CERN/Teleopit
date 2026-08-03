@@ -56,6 +56,10 @@ class Sim2RealSafetyManager:
             self._joint_pos_lower = None
             self._joint_pos_upper = None
 
+    @property
+    def kp_ramp_active(self) -> bool:
+        return self._kp_ramp_active
+
     def compute_kp_ramp_gains(self) -> tuple[Float32Array, Float32Array] | None:
         """Return (kp, kd) for current Kp-ramp step, or None if ramp inactive."""
         if not self._kp_ramp_active:

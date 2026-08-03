@@ -98,12 +98,29 @@ hands:
     close_pose: [86, 73, 118, 111, 110, 111]
     print_input: false
   somehand:
-    config_path: third_party/somehand/configs/retargeting/bihand/linkerhand_l6_bihand.yaml
+    l6_config_path: third_party/somehand/configs/retargeting/bihand/linkerhand_l6_bihand.yaml
+    o6_config_path: third_party/somehand/configs/retargeting/bihand/linkerhand_o6_bihand.yaml
     # Low-latency vr_hand_pose path. This favors response speed over smoothing.
     rate_hz: 60.0
     max_iterations: 12
     temporal_filter_alpha: 1.0
     output_alpha: 1.0
+
+# Optional OpenNeck active-vision gimbal control. Use only with input.provider=pico4.
+neck:
+  enabled: false
+  driver: openneck
+  config_path: null
+  port: null
+  rate_hz: 60.0
+  frame_timeout_s: 0.2
+  active_modes: [standing, mocap, arms, pause]
+  dead_zone_deg: 0.5
+  pitch_gain: 1.4
+  center_on_start: true
+  center_on_shutdown: false
+  release_on_shutdown: false
+  dry_run: false
 
 # Physical robot SDK configuration
 real_robot:

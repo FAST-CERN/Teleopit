@@ -12,9 +12,14 @@ Config: Hydra/OmegaConf YAML files in `teleopit/configs/`
 
 ```
 InputProvider (BVH file / Pico4 VR) → Retargeter (GMR) → ObservationBuilder (167D) → Controller (dual-input TemporalCNN ONNX) → Robot (MuJoCo + PD / Unitree SDK)
+
+Host policy service → onboard policy client/scheduler → 36D reference → same ObservationBuilder/Controller → Unitree SDK
 ```
 
-Module-internal isolation: all modules run in-process and communicate via `InProcessBus` (zero-copy). Core interfaces are defined as `typing.Protocol` in `teleopit/interfaces.py`.
+Offline core modules communicate through `InProcessBus` (zero-copy). Sim2real
+workers use localhost ZMQ plus shared-memory video rings, while the external
+host-policy boundary uses strict msgpack/ZeroMQ without pickle. Core interfaces
+are defined as `typing.Protocol` in `teleopit/interfaces.py`.
 
 ## Supported Surface
 
@@ -22,6 +27,7 @@ Module-internal isolation: all modules run in-process and communicate via `InPro
 - Inference observation: `velcmd_history` (167D, dual-input ONNX with `obs` + `obs_history`)
 - TemporalCNN actor/critic with scaled dims (2048,1024,512,256,128)
 - Realtime inference uses a retargeted-reference timeline before observation build; `reference_steps=[0]` is the default production path
+- Host high-level-policy deployment uses an independent script/environment boundary; its network structure is defined by the current client/server code and protocol tests, and LeRobot is not a Teleopit dependency
 
 ## Directory Structure
 
@@ -56,13 +62,17 @@ teleopit/                 # Core inference package
 │   └── loop.py           # SimulationLoop — PD control at 200Hz, policy at 50Hz
 ├── sim2real/
 │   ├── mp/               # Process-isolated sim2real runtime and IPC
-│   └── hands/            # Optional LinkerHand driver/mapper plugins
+│   ├── hands/            # Optional LinkerHand driver/mapper plugins
+│   └── neck/             # Optional OpenNeck active-vision gimbal control
+├── high_level_policy/    # Host-policy protocol, strict client, frame transform, and action scheduler
 └── recording/            # Pico motion NPZ recording helpers
 scripts/
 ├── run/run_sim.py        # Offline sim2sim pipeline
 ├── run/run_sim2real.py   # G1 sim2real control; supports offline BVH playback and Pico4
+├── run/run_high_level_policy_sim2real.py # Independent host-policy deployment runtime
 ├── run/record_pico_motion.py # Interactive Pico recording → G1 motion NPZ clips
 ├── render/render_sim.py  # Render single BVH → 3 MuJoCo videos (mocap input, retarget, sim2sim)
+├── view/view_recording.py # Read-only synchronized sim2real recording reviewer
 └── dev/compute_ik_offsets.py # Compute IK quaternion offsets for new BVH formats
 train_mimic/              # Training package
 ├── app.py                # Shared app helpers for train/play/benchmark
@@ -78,7 +88,7 @@ train_mimic/              # Training package
 └── scripts/
     ├── train.py          # Training entry point
     ├── play.py           # Checkpoint playback
-    ├── benchmark.py      # Policy evaluation with tracking errors
+    ├── benchmark.py      # OmniXtreme-style policy benchmark
     └── save_onnx.py      # Export TemporalCNN ONNX
 ```
 
@@ -87,7 +97,7 @@ train_mimic/              # Training package
 ### Sim2Sim Pipeline
 - Policy runs at 50Hz, PD control at 200Hz (`decimation=4`, `sim_dt=0.005`)
 - Action flow: `compute_action()` returns raw action → `get_target_dof_pos()` applies clip `[-10, 10]`, scale, and `default_dof_pos`
-- Must use `assets/robots/unitree_g1/g1_29dof.xml` for training, sim2sim, dataset FK, and retargeting; it is the canonical G1 XML entry point
+- `assets/robots/unitree_g1/g1_29dof.xml` is the default G1 XML, not a model allowlist; training can select another task-compatible model with `--robot_xml`, and each workflow should keep its robot joint/body definitions consistent
 
 ### Multi-Viewer Support
 `SimulationLoop` supports multiple simultaneous viewer windows controlled by the `viewers` config:
@@ -134,6 +144,8 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - The pico-bridge receiver runs on the Teleopit host, which can be a workstation PC or robot onboard computer; do not maintain a separate onboard Pico input mode
 - pico-bridge 0.2.1 is the supported runtime; camera preview uses `PicoBridge(video="frames").push_video_frame(rgb_uint8)`
 - Pico video preview is optional and disabled by default; sim2sim uses the MuJoCo `d435i_rgb` camera and sim2real uses RealSense when `input.video.enabled=true`
+- RealSense frame timeouts and disconnects are non-critical in sim2real: the video producer rebuilds the capture pipeline in the background, and video start/tick/stop failures must never exit `pico_input` or stop G1 control
+- The supervisor treats `pico_input` as non-critical; if that process exits, `robot_control` remains active, stale mocap references hold the last command, and the Unitree remote remains available for `STANDING` or manual `DAMPING`
 - Bone naming follows `pico_bridge_to_g1.json`
 - The provider applies an input-space transform to match the current retarget config
 - Do not hardcode that transform as a public coordinate-system contract; validate against actual retarget/sim2sim behavior when SDK or firmware changes
@@ -141,7 +153,7 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - Pico sim2sim supports a keyboard-driven top-level mode state machine: `STANDING → MOCAP ↔ ARMS`, `X` returns to `STANDING`
 - Default Pico sim2sim keyboard mappings are `Y` → `MOCAP`, `A` → pause/resume mocap, `B` → toggle `MOCAP`/`ARMS`, `X` → back to `STANDING`, `Q` → quit
 - Pico4 sim2real pause/resume is handled as a mocap-session control event (`toggle_pause`), not as a mode switch to `STANDING`
-- Default Pico pause button is `A`; resume resets policy/reference state and yaw/XY root-offset alignment while the process-isolated realtime reference worker continues its live input timeline
+- Default Pico/controller pause button is `A`; Unitree remote `B` also pauses/resumes Pico sim2real. Resume resets policy/reference state and yaw/XY root-offset alignment while the process-isolated realtime reference worker continues its live input timeline
 - Pico4 sim2real arms the process-isolated reference worker only when entering `MOCAP`; `STANDING` and `DAMPING` disarm it so cold startup frames do not warm-start GMR before mocap entry
 - Pico4 sim2sim/sim2real support `ARMS` mode toggled from `MOCAP` with Pico/controller `B`; retargeting continues, while the control loop sends the motion tracker a composed reference with stand-pose body/legs/waist and live retargeted arms
 - `ARMS` entering/exiting/resume resets policy/reference alignment and uses Kp ramp; offline BVH sim2real does not use `ARMS`, and Unitree remote `B` remains BVH replay
@@ -149,16 +161,43 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - Optional LinkerHand control uses `hands.enabled=true`, `hands.driver=linkerhand_l6|linkerhand_o6`, and `hands.mode=gripper|vr_hand_pose`; default is disabled
 - Optional Pico sim2real HDF5 recording uses `--config-name sim2real_record` or `recording.enabled=true`; it requires `input.provider=pico4`, `input.video.enabled=true`, `input.video.source=realsense`, an interactive terminal, and the `recording` extra
 - Recording is manual only: terminal `R` starts an episode, `S` saves, `D` discards the active episode, and `Q` shuts down; `STANDING`, `MOCAP`, `ARMS`, and paused mocap are recordable
-- Recording captures `observation.images.d435i_rgb` RealSense RGB video at 30Hz plus `observation.state(68)`, `observation.mode(1)`, `action(36)`, and `action.hand(12)`; RealSense capture lives in `pico_input` through the normal `input.video` path
-- HDF5 recording writes compressed MP4 sidecar videos under `recording.output_dir/videos/<camera_key>/` while HDF5 episodes store `frame_index`, `timestamp`, low-dimensional data, and video sync attributes; raw RGB image datasets are not supported
-- `gripper` mode reuses `Pico4InputProvider.get_controller_snapshot()` for Pico grip/trigger open-close control and supports LinkerHand L6 and O6
-- `vr_hand_pose` mode reuses `Pico4InputProvider.get_hand_snapshot()` and somehand 0.2.0 public `somehand.api` for continuous Pico hand-pose retargeting; do not start a second `PicoBridge` for hand control
+- Recording requires a fresh RealSense frame before `R` can start an episode; an active episode is discarded after one second without a fresh camera frame while Pico input and G1 control continue, and recording does not restart automatically when video recovers
+- Recording captures `observation.images.d435i_rgb` RealSense RGB video at 30Hz plus `observation.state(68)`, scalar `observation.mode`, and `action(36)` as the root-plus-joint reference consumed by the motion tracker; when LinkerHand control is enabled, `observation.state.hand(12)` stores the left/right hardware joint readback and `action.hand(12)` stores the target; when OpenNeck control is enabled, `observation.state.neck(2)` stores the servo `[yaw_deg, pitch_deg]` readback and `action.neck(2)` stores the mechanically clamped target
+- Sim2real recording uses an editable source layout: `schema.json`, `episodes.jsonl`, per-episode HDF5 files under `recording.output_dir/data/`, and compressed MP4 files under `recording.output_dir/videos/d435i_rgb/`; task prompts live only in `episodes.jsonl`, and HDF5 files contain only frame arrays with no metadata attributes or raw RGB datasets
+- Recording `schema.json` stores `robot_type=unitree_g1_29dof`, `hand_type=none|linkerhand_l6|linkerhand_o6`, `neck_type=none|openneck`, FPS, and feature definitions; optional hand/neck state and action fields are controlled directly by `hands.enabled` and `neck.enabled`; the recording worker rejects an existing mismatched schema without writing episodes, but remains non-critical and must not stop the G1 control runtime; the previous attribute-based HDF5 layout is unsupported
+- Episodes interrupted before their `episodes.jsonl` entry is committed are discarded on the next recording-worker startup and do not consume an episode index
+- Review saved sim2real recordings with `scripts/view/view_recording.py`; it validates manifest/HDF5/MP4 alignment and synchronizes camera video, an observed-vs-reference MuJoCo overlay, joint/mode plots, and optional hand/neck signals; because measured root XYZ is not recorded, the observed robot is anchored to the reference root position
+- `gripper` mode reuses `Pico4InputProvider.get_controller_snapshot()` and supports LinkerHand L6 and O6; the side grip trigger is a deadman enable, the index trigger controls closure while it is held, and releasing the side grip opens that hand
+- `vr_hand_pose` mode reuses `Pico4InputProvider.get_hand_snapshot()` and somehand 0.3.0 public `somehand.api` for continuous Pico hand-pose retargeting; do not start a second `PicoBridge` for hand control
 - Teleopit owns Pico 26-joint hand-state to 21-landmark conversion; do not import `somehand.pico_input`
-- LinkerHand O6 supports only `hands.mode=gripper`; its default `close_pose` is `[86, 73, 118, 111, 110, 111]`
-- L6 `gripper` mode uses the configured `hands.linkerhand_l6.speed` (default `[50]*6`); O6 `gripper` mode uses `hands.linkerhand_o6.speed` (default `[255]*6`); `vr_hand_pose` always sets LinkerHand L6 speed to `[255]*6`
+- LinkerHand O6 supports `hands.mode=gripper|vr_hand_pose`; its default `close_pose` is `[86, 73, 118, 111, 110, 111]`
+- L6 `gripper` mode uses the configured `hands.linkerhand_l6.speed` (default `[50]*6`); O6 `gripper` mode uses `hands.linkerhand_o6.speed` (default `[255]*6`); `vr_hand_pose` always sets LinkerHand L6/O6 speed to `[255]*6`
 - `vr_hand_pose` defaults to a low-latency somehand path: `hands.somehand.rate_hz=60`, `max_iterations=12`, `temporal_filter_alpha=1.0`, and `output_alpha=1.0`; this prioritizes response speed over smoothing
 - LinkerHand control is active in all sim2real modes when `hands.enabled=true`; shutdown and hand-runtime failure must send the configured open pose
 - In `vr_hand_pose` mode, missing/inactive hand pose holds the last commanded pose for that side instead of opening the hand
+- Optional OpenNeck active-vision gimbal control uses `neck.enabled=true` and `neck.driver=openneck`; it requires `input.provider=pico4`, reuses the existing Pico receiver, and must not start a second `PicoBridge`
+- OpenNeck is integrated as a non-critical sim2real `neck_worker`; failures should not stop the G1 control loop, and no OpenNeck state is added to the 167D policy observation
+
+### Host High-Level Policy
+- `scripts/run/run_high_level_policy_sim2real.py` is independent from the Pico `run_sim2real.py` runtime; it must not start PicoBridge, GMR, or the realtime retarget reference worker
+- The host LeRobot/ReplayPolicy service runs in the separate `lerobot-teleopit` repository and environment; Teleopit must not depend on LeRobot, Transformers, or host policy classes
+- The current client/server code and protocol tests define the ZeroMQ request/response structure. During active development, Teleopit and `lerobot-teleopit` must update that structure together; no legacy network envelope is supported
+- The only shared data file is `hand_calibration.json`, which contains the LinkerHand O6 open/close calibration and must stay identical in both repositories
+- The host boundary uses ZeroMQ REQ/REP with msgpack and non-pickle float32 arrays. Deployment is asynchronous and receding-horizon: the isolated client worker keeps at most one request in flight, submits the latest eligible observation every `high_level_policy.replan_steps` 30 Hz source frames, and leaves the current plan executing while inference runs. The onboard scheduler uses the echoed monotonic observation timestamp to skip elapsed source frames and replace the active plan when a newer response arrives; process isolation keeps the 50 Hz robot loop running
+- Policy `get_action` input is RGB JPEG plus G1 joint positions `float32[29]`, raw measured left/right LinkerHand O6 readback `float32[12]`, measured OpenNeck yaw/pitch degrees `float32[2]`, and the observation-time active reference root pose `float32[7]` (`xyz + quaternion wxyz`) in the session-local frame. The first three arrays form the 43D model state; the source reference pose is used only to reconstruct source-relative root output and is not a model input
+- The scheduler keeps a short history of the rate-limited active session-local reference and queries/interpolates it at each camera timestamp. Session reset seeds this history from the initial active reference; the source anchor must never be reconstructed from the robot's measured root pose
+- Canonical action is `float32[T,50]` with protocol horizon `T` in `[1,50]`: local root `xyz(3)` + local root quaternion `wxyz(4)` + G1 joint reference `29` + left/right O6 closure `12` + OpenNeck yaw/pitch degrees `2`
+- The body reference `[0:36]` is yaw/XY-delocalized once and sent through the existing motion tracker. It is never sent directly as a G1 motor command and must not pass through the mocap alignment a second time
+- High-level-policy formal robot modes are `IDLE`, `STANDING`, `POLICY`, and `DAMPING`. After Unitree remote `Y`, Teleopit creates exactly one host session and remains in `STANDING` only while waiting for its first valid chunk; that chunk enters `POLICY` directly. There is no candidate-reference alignment, entry Kp ramp, second session/reset, or `POLICY_STARTING` mode. The 50 Hz output limiter starts from the measured robot reference captured when the session begins, and an entry failure remains in `STANDING`
+- Unitree remote controls are `Start -> STANDING`, `Y -> request POLICY`, `B -> pause/resume`, `X -> STANDING/cancel pending`, and `L1+R1 -> DAMPING`
+- Policy pause freezes the scheduler/body reference and holds the latest hand/neck command. Leaving `POLICY` opens LinkerHand and centers OpenNeck
+- The onboard scheduler clips G1 joint references to `real_robot.joint_pos_lower/upper` when the required correction is at most `high_level_policy.safety.max_joint_projection_rad` (default `0.1` rad), and clips OpenNeck yaw/pitch commands to their configured degree ranges. It rejects whole chunks on excessive joint correction, shape/finiteness, session/sequence, quaternion, absolute root height, hand closure, or staleness failures. It accepts temporal root, yaw, and joint-reference discontinuities at entry, inside chunks, and across chunks because recorded pause/resume transitions may be discontinuous; accepted root translation, yaw, and joint output is rate-limited at 50 Hz. Never pad or trim malformed host output, and do not clip other out-of-range fields into validity
+- A newer timestamp-aligned chunk normally replaces the active plan before its horizon ends. If inference runs longer, the scheduler holds the plan's final reference for `high_level_policy.hold_s`; exhausting that grace period triggers the action watchdog. A request timeout, host/network failure, watchdog expiry, or loss of a required camera/client worker puts `POLICY` into the same resumable pause state used by remote `B`; an invalid result is rejected while the last valid plan remains available. The runtime never enters `STANDING` automatically; `B` resumes after a fresh valid chunk is available, while `X` remains the manual transition to `STANDING`
+- Initial production hardware support requires two LinkerHand O6 hands and OpenNeck because all 50 canonical action dimensions are active
+- OpenNeck 0.2.0 is the supported runtime; Teleopit sends physical degrees through `move_deg()`, and the direct-drive OpenNeck package converts degrees to servo steps and clips them to its calibrated mechanical limits; the removed normalized API and config fields are unsupported
+- OpenNeck maps the independent HMD `PicoFrame.head.rotation` relative to the same-frame full-body `Body.Spine3` orientation; it must never use the full-body `Body.Head` skeleton joint for neck control, and HMD pose updates must remain independent of duplicate-body-frame filtering
+- OpenNeck uses a fixed identity neutral pose and no neck-side EMA; it must not capture the first live frame as a runtime zero pose, so tracking can start while the operator's head is turned
+- After the raw relative-angle dead zone, `neck.pitch_gain` (default `1.4`) scales pitch before `move_deg()` while yaw remains one-to-one; OpenNeck remains responsible for final mechanical clipping; positive yaw turns left and positive pitch looks up
 
 ### SimulationLoop Runtime Behavior
 - `realtime=true` enforces wall-clock pacing even without a viewer
@@ -169,7 +208,7 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - Realtime inferred `motion_joint_vel`, anchor linear velocity, and anchor angular velocity can be EMA-smoothed via `reference_velocity_smoothing_alpha` and `reference_anchor_velocity_smoothing_alpha`
 - Sim2real Pico pause/resume uses mocap-session states `ACTIVE ↔ PAUSED`; resume clears policy/reference state, rebuilds yaw/XY root alignment, and does not interpolate retarget qpos from the paused pose
 - Realtime sim2sim with Pico control events uses the same mocap-session pause/resume semantics and rebuilds the realtime reference path on resume, including the configured warmup
-- Realtime sim2sim `STANDING ↔ MOCAP` transitions rebuild the realtime reference path on entry; Pico sim2real `STANDING -> MOCAP` additionally rearms and resets the process-isolated reference worker before accepting fresh references
+- Realtime Pico sim2sim `STANDING -> MOCAP` resets GMR, seeds its floating root from the current live pelvis target, and rebuilds the realtime reference path before accepting references; Pico sim2real performs the same GMR cold start through its rearmed process-isolated reference worker
 - Realtime Pico sim2sim can start directly in `STANDING` with keyboard mode control enabled via top-level `keyboard.enabled`
 
 ### Inference Observation
@@ -203,7 +242,7 @@ The single supported training task is `General-Tracking-G1` (experiment name: `g
 - Training env uses `sampling_mode="rewind"`
 - Tracking rewards include root position/orientation/linear velocity/angular velocity, body pose/velocity, joint position/velocity, survival, action-rate, joint-limit, self-collision, and ankle acceleration terms
 - Supported motion sampling modes are `uniform`, `start`, and `rewind`; `rewind` restarts failed environments from the same clip after stepping back `rewind_min_steps..rewind_max_steps` with probability `rewind_prob`, otherwise it falls back to uniform sampling
-- Playback/benchmark use `play=True`, which switches motion sampling to `start`
+- Playback and benchmark use `play=True`, which switches motion sampling to `start`; benchmark pins exact clip ids/start times, disables clip-end resampling, and reports `MPJPE(m)`, `root_pos_error(m)`, `root_rot_error(rad)`, `root_vel_error(m/s)`, and `success_rate(%)`
 - `window_steps=[0]`
 - `save_onnx.py` exports dual-input TemporalCNN ONNX
 
@@ -239,9 +278,11 @@ python train_mimic/scripts/save_onnx.py --checkpoint logs/rsl_rl/g1_general_trac
 
 ### External Assets
 - Do not commit robot meshes, datasets, checkpoints, or demo media to Git; use `scripts/setup/download_assets.py`
-- `assets/robots/unitree_g1/g1_29dof.xml` and its meshes are the canonical G1 robot model assets; they are downloaded from the `robots` asset group and are not tracked in Git
+- G1 XML variants and their meshes are downloaded under `assets/robots/unitree_g1/` by the `robots` asset group and are not tracked in Git; `g1_29dof.xml` is the default
+- The neck-and-O6 runtime variant is `assets/robots/unitree_g1/g1_29dof_neck_o6.xml`
+- Released tracking assets download under `ckpt/` as the matching `track_g1.{pt,onnx}` and `track_g1_neck_o6.{pt,onnx}` pairs
 - `teleopit/retargeting/gmr/assets/` is gitignored; downloaded at runtime
-- `train_mimic/assets/` is no longer tracked; FK tooling reuses `assets/robots/unitree_g1/g1_29dof.xml`
+- `train_mimic/assets/` is no longer tracked; FK tooling uses the robot assets under `assets/robots/`, with `assets/robots/unitree_g1/g1_29dof.xml` as the default G1 model
 - `third_party/linkerhand-python-sdk` and `third_party/somehand` support optional LinkerHand sim2real control
 - Run `python scripts/dev/check_large_tracked_files.py` before pushing
 
@@ -263,7 +304,7 @@ python scripts/setup/prepare_modelscope_assets.py --only data
 
 # 2. Upload to each repo
 modelscope upload --repo-type model BingqianWu/Teleopit-models \
-  data/modelscope_upload/checkpoints checkpoints
+  data/modelscope_upload/checkpoints checkpoints --sync
 modelscope upload --repo-type model BingqianWu/Teleopit-models \
   data/modelscope_upload/archives archives
 modelscope upload --repo-type dataset BingqianWu/Teleopit-datasets \
@@ -289,6 +330,11 @@ Critical note: align robot root orientation to the BVH human forward direction b
 
 ## Development
 
+### Simplicity Policy
+- Prefer the smallest implementation that satisfies the current requirement
+- Do not add speculative configuration switches, abstraction layers, compatibility paths, or extensibility without a concrete use case
+- Reuse existing enable flags and data flows when they already express the required behavior
+
 ### Runtime Validation Policy
 - Fail fast for logical mismatches such as observation definition vs. ONNX signature mismatch
 - Do not silently pad, trim, clip, or replace invalid data/config to "make it run"
@@ -309,4 +355,4 @@ pytest tests/ -v
 ## Known Issues
 
 1. `lafan1-resolved` retargeting is still broken because it uses a different BVH skeleton layout.
-2. Legacy downloaded GMR XMLs under `teleopit/retargeting/gmr/assets/unitree_g1/` are not the project entry point; use `assets/robots/unitree_g1/g1_29dof.xml`.
+2. Legacy downloaded GMR XMLs under `teleopit/retargeting/gmr/assets/unitree_g1/` are separate retargeting assets, not replacements for the runtime robot bundle under `assets/robots/unitree_g1/`; `g1_29dof.xml` is the default runtime G1 model.

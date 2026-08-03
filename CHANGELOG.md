@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0] - 2026-08-03
+
+- 新增独立的 host high-level-policy sim2real 运行时：使用严格的 msgpack/ZeroMQ 协议、异步 receding-horizon replanning、时间戳对齐调度，以及 50 Hz 输出安全校验和限速。
+- 扩展 G1 外设支持：加入 OpenNeck 0.2.0 物理角度控制、Pico HMD 主动视觉映射、LinkerHand O6 somehand 0.3.0 手势控制，以及手部和颈部状态回读。
+- 更新 sim2real 录制与审阅流程：采用 `schema.json`、`episodes.jsonl`、逐 episode HDF5 和压缩 MP4 布局，记录可选手部/颈部状态与动作，并新增同步 recording viewer。
+- 新增匹配的 G1 模型/策略组合：默认 `g1_29dof.xml` 配合 `ckpt/track_g1.{pt,onnx}`，neck-and-O6 版本配合 `g1_29dof_neck_o6.xml` 和 `ckpt/track_g1_neck_o6.{pt,onnx}`。
+- 更新 OmniXtreme-style benchmark，并增强 Pico/RealSense 故障恢复、GMR mocap-entry cold start、high-level-policy watchdog 和引用安全处理。
+
+### 迁移说明
+
+- v0.4 的根目录 `track.{pt,onnx}` 路径已替换为 `ckpt/track_g1.{pt,onnx}`；neck-and-O6 运行时必须使用对应的模型和策略组合。
+- 旧的 attribute-based sim2real HDF5 格式不再支持；录制、转换和审阅工具使用当前 manifest-based source layout。
+- Host-policy 网络协议不提供旧 envelope 兼容，OpenNeck 旧 normalized API 也不再支持；Teleopit 与 companion runtime 必须使用匹配版本。
+
 ## [0.4.0] - 2026-06-25
 
 - 改进 Pico 实时控制：支持 pico-bridge 0.2.1、`ARMS` 模式，以及保留 retargeter warm-start 的模式切换/暂停恢复。

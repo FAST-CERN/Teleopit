@@ -2,6 +2,7 @@
 # Action scale computed as 0.25 * effort_limit / stiffness per actuator.
 # Do NOT copy from deploy.yaml (contains known waist_yaw scale error).
 
+type: unitree_g1_29dof
 num_actions: 29
 # Inference uses the 167D velcmd_history observation path (General-Tracking-G1).
 

@@ -56,6 +56,20 @@ def test_robot_asset_group_uses_archive_layout() -> None:
     assert entries[0].mode == "extract"
 
 
+def test_checkpoint_asset_group_uses_named_ckpt_directory() -> None:
+    entries = ASSET_GROUPS["ckpt"]
+
+    assert [(entry.remote_path, entry.local_path) for entry in entries] == [
+        ("checkpoints/track_g1.onnx", "ckpt/track_g1.onnx"),
+        ("checkpoints/track_g1.pt", "ckpt/track_g1.pt"),
+        (
+            "checkpoints/track_g1_neck_o6.onnx",
+            "ckpt/track_g1_neck_o6.onnx",
+        ),
+        ("checkpoints/track_g1_neck_o6.pt", "ckpt/track_g1_neck_o6.pt"),
+    ]
+
+
 def test_data_asset_group_downloads_only_hdf5_shards() -> None:
     entries = ASSET_GROUPS["data"]
 

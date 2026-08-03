@@ -8,8 +8,6 @@ const sidebars: SidebarsConfig = {
       label: 'Getting Started',
       items: [
         'getting-started/installation',
-        'getting-started/download-assets',
-        'getting-started/quick-start',
       ],
     },
     {
@@ -18,33 +16,37 @@ const sidebars: SidebarsConfig = {
       items: [
         'tutorials/offline-sim2sim',
         'tutorials/pico-sim2sim',
-        'tutorials/standalone-standing',
         'tutorials/pico-sim2real',
-        'tutorials/bvh-sim2real',
+        'tutorials/high-level-policy-sim2real',
         'tutorials/training',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Configuration',
-      items: [
-        'configuration/overview',
-        'configuration/config-reference',
-        'configuration/faq',
       ],
     },
     {
       type: 'category',
       label: 'Reference',
       items: [
+        {
+          type: 'category',
+          label: 'Configuration',
+          items: [
+            'reference/configuration/overview',
+            'reference/configuration/fields',
+          ],
+        },
         'reference/architecture',
-        'reference/assets',
-        'reference/dataset',
-        'reference/g1-bridge-sdk',
-        'reference/training-troubleshooting',
+        {
+          type: 'category',
+          label: 'Resources',
+          items: [
+            'reference/resources/assets',
+            'reference/resources/motion-datasets',
+            'reference/resources/teleoperation-datasets',
+          ],
+        },
+        'reference/companion-projects',
+        'contributing',
       ],
     },
-    'contributing',
   ],
 };
 

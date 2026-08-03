@@ -13,4 +13,3 @@ input:
     height: 480
     fps: 30
     device: null
-    fail_on_error: true

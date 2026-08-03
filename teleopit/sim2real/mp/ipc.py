@@ -11,8 +11,10 @@ import zmq
 
 
 BODY_TOPIC = "body"
+HEAD_POSE_TOPIC = "head_pose"
 HAND_TOPIC = "hand"
 HAND_COMMAND_TOPIC = "hand_command"
+NECK_COMMAND_TOPIC = "neck_command"
 CONTROLLER_TOPIC = "controller"
 CONTROL_EVENTS_TOPIC = "control_events"
 REFERENCE_TOPIC = "reference"
@@ -21,13 +23,20 @@ VIDEO_TOPIC = "video"
 RECORD_TOPIC = "record"
 HEALTH_TOPIC = "health"
 COMMAND_TOPIC = "command"
+HIGH_LEVEL_POLICY_SESSION_TOPIC = "high_level_policy_session"
+HIGH_LEVEL_POLICY_OBSERVATION_TOPIC = "high_level_policy_observation"
+HIGH_LEVEL_POLICY_ACTION_TOPIC = "high_level_policy_action"
+HIGH_LEVEL_POLICY_STATUS_TOPIC = "high_level_policy_status"
+HIGH_LEVEL_POLICY_TARGET_TOPIC = "high_level_policy_target"
 
 
 @dataclass(frozen=True)
 class Sim2RealIpcEndpoints:
     body_pub: str
+    head_pose_pub: str
     hand_pub: str
     hand_command_pub: str
+    neck_command_pub: str
     controller_pub: str
     control_events_pub: str
     reference_pub: str
@@ -37,6 +46,8 @@ class Sim2RealIpcEndpoints:
     health_pub: str
     command_pub: str
     reference_command_pub: str
+    high_level_policy_control_pub: str
+    high_level_policy_result_pub: str
 
 
 def default_endpoints(*, host: str = "127.0.0.1", base_port: int = 39700) -> Sim2RealIpcEndpoints:
@@ -44,8 +55,10 @@ def default_endpoints(*, host: str = "127.0.0.1", base_port: int = 39700) -> Sim
     prefix = f"tcp://{host}:"
     return Sim2RealIpcEndpoints(
         body_pub=f"{prefix}{base_port}",
+        head_pose_pub=f"{prefix}{base_port + 13}",
         hand_pub=f"{prefix}{base_port + 1}",
         hand_command_pub=f"{prefix}{base_port + 2}",
+        neck_command_pub=f"{prefix}{base_port + 12}",
         controller_pub=f"{prefix}{base_port + 3}",
         control_events_pub=f"{prefix}{base_port + 4}",
         reference_pub=f"{prefix}{base_port + 5}",
@@ -55,6 +68,8 @@ def default_endpoints(*, host: str = "127.0.0.1", base_port: int = 39700) -> Sim
         health_pub=f"{prefix}{base_port + 9}",
         command_pub=f"{prefix}{base_port + 10}",
         reference_command_pub=f"{prefix}{base_port + 11}",
+        high_level_policy_control_pub=f"{prefix}{base_port + 14}",
+        high_level_policy_result_pub=f"{prefix}{base_port + 15}",
     )
 
 
