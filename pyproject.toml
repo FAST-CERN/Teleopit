@@ -16,6 +16,9 @@ dependencies = [
     "mujoco",
     "mink",
     "qpsolvers[proxqp]",
+    # proxsuite >=0.7.3 has no Windows wheel and fails to compile from source
+    # on MSVC (error C2325). Pin to the latest version that ships Windows wheels.
+    "proxsuite<0.7.3 ; platform_system == 'Windows'",
     "torch",
     "scipy",
     "numpy",
