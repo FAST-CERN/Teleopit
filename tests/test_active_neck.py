@@ -60,7 +60,7 @@ def test_hmd_pose_mapper_applies_pitch_gain_to_openneck_degrees() -> None:
         spine3_rotation_wxyz=_quat_y(0.0),
     )
     assert command is not None
-    assert command.yaw_deg == pytest_approx(-30.0)
+    assert command.yaw_deg == pytest_approx(30.0)
 
     command = mapper.map_pose(
         hmd_rotation_wxyz=_quat_y(0.0),
@@ -74,7 +74,7 @@ def test_hmd_pose_mapper_applies_pitch_gain_to_openneck_degrees() -> None:
         spine3_rotation_wxyz=_quat_x(0.0),
     )
     assert command is not None
-    assert command.pitch_deg == pytest_approx(-21.0)
+    assert command.pitch_deg == pytest_approx(21.0)
 
 
 def test_hmd_pose_mapper_applies_dead_zone_before_pitch_gain() -> None:
@@ -94,7 +94,7 @@ def test_hmd_pose_mapper_applies_dead_zone_before_pitch_gain() -> None:
     assert inside_dead_zone is not None
     assert inside_dead_zone.pitch_deg == pytest_approx(0.0)
     assert outside_dead_zone is not None
-    assert outside_dead_zone.pitch_deg == pytest_approx(-20.0)
+    assert outside_dead_zone.pitch_deg == pytest_approx(20.0)
 
 
 def test_hmd_pose_mapper_uses_body_relative_orientation() -> None:
@@ -106,7 +106,7 @@ def test_hmd_pose_mapper_uses_body_relative_orientation() -> None:
     )
 
     assert command is not None
-    assert command.yaw_deg == pytest_approx(-30.0)
+    assert command.yaw_deg == pytest_approx(30.0)
 
 
 def test_hmd_pose_mapper_requires_hmd_and_spine3_orientations() -> None:
@@ -151,11 +151,11 @@ def test_neck_runtime_sends_degrees_and_returns_applied_target() -> None:
     runtime.close()
 
     assert command is not None
-    assert command.yaw_deg == pytest_approx(-20.0)
+    assert command.yaw_deg == pytest_approx(20.0)
     assert command.pitch_deg == pytest_approx(0.0)
     assert neutral_command is not None
     assert neutral_command.yaw_deg == pytest_approx(0.0)
-    np.testing.assert_allclose(device.moves, [(-30.0, 0.0), (0.0, 0.0)], atol=1e-6)
+    np.testing.assert_allclose(device.moves, [(30.0, 0.0), (0.0, 0.0)], atol=1e-6)
     assert device.center_calls == 2
     assert device.closed is True
 

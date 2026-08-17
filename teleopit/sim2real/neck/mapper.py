@@ -43,10 +43,9 @@ class HmdPoseMapper:
         # its model constraints can under-report extreme head pitch.
         q_cmd = _qmul(_qconj(q_body), q_hmd)
         yaw_deg, pitch_deg, roll_deg = _openneck_yaw_pitch_roll_deg(q_cmd)
-        # Convert the supported PICO convention to OpenNeck's physical command
-        # convention: positive yaw turns left and positive pitch looks up.
-        yaw_deg = -yaw_deg
-        pitch_deg = -pitch_deg
+        # The PICO head-relative Euler yaw/pitch already matches OpenNeck's
+        # physical command convention: positive yaw turns left and positive
+        # pitch looks up (verified against real hardware on Twist2Neck).
         if abs(yaw_deg) < self._cfg.dead_zone_deg:
             yaw_deg = 0.0
         if abs(pitch_deg) < self._cfg.dead_zone_deg:
