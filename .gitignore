@@ -105,3 +105,7 @@ data/modelscope_upload/
 # Codex local workspace state
 .codex
 .omx/
+# Added by code-review-graph
+.code-review-graph/
+# Claude Code per-user local settings
+.claude/settings.local.json
