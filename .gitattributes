@@ -1,0 +1,28 @@
+# Normalize all text files to LF in the repository and on checkout.
+# Blobs are already stored as LF, so this adds no renormalization diff;
+# it only pins the working-tree line ending across platforms (Windows
+# core.autocrlf=true previously produced CRLF checkouts that showed as
+# fully modified after scp/rsync to the on-robot Linux machine).
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets — never normalize
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.onnx binary
+*.pt binary
+*.pth binary
+*.npz binary
+*.npy binary
+*.mp4 binary
+*.hdf5 binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
