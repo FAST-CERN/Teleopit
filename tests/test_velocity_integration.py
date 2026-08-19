@@ -27,14 +27,15 @@ report for the full evidence):
    0.15 rad, with the measured floor documented. The floor is NOT a seeding
    artifact: the joint-space seeding fix (Task 8) is in place and reduces the
    hand-off discontinuity to its irreducible minimum — the two policies'
-   standing attractors differ by ~0.21 rad at the ankles (the velocity policy
-   holds left_ankle_pitch ~0.23 rad below pose B even at steady state with
-   zero command; the mimic policy's standing target sits ~0.13 rad from pose
-   B), so the first velocity target necessarily steps ~0.21 rad from the last
-   mimic target. Zeros-seeding measures 0.229, raw-copy seeding (the pre-fix
-   behavior) 0.374. During active gait a 50 Hz walking policy legitimately
-   moves knee/ankle targets by 0.3-0.85 rad per step, so the window bound is
-   only meaningful for the zero-command settle used here.
+   standing attractors differ at the ankles (the velocity policy holds
+   left_ankle_pitch ~0.23 rad below pose B even at steady state with zero
+   command; the mimic attractor's dominant deviation from pose B is ~0.24 rad
+   at right_ankle_pitch, with left_elbow only ~0.10). Attractor-to-attractor
+   distance peaks at ~0.20 rad (left_ankle_pitch), and the hand-off first-step
+   transient measures 0.211. Zeros-seeding measures 0.229, raw-copy seeding
+   (the pre-fix behavior) 0.374. During active gait a 50 Hz walking policy
+   legitimately moves knee/ankle targets by 0.3-0.85 rad per step, so the
+   window bound is only meaningful for the zero-command settle used here.
 """
 from __future__ import annotations
 
