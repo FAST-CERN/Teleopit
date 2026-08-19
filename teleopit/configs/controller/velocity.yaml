@@ -1,0 +1,26 @@
+# Velocity-policy controller section (twist cmd_vel channel).
+# Default pose is the POLICY's neutral pose (pose B) — do not let robot-level
+# defaults propagate over these (propagate_controller_defaults is skipped for
+# explicit sections that already define both keys).
+policy_path: assets/policies/velocity_v1/policy.onnx
+observation_type: twist_cmd
+device: auto
+clip_range: [-10.0, 10.0]
+default_dof_pos: [-0.1,0,0,0.3,-0.2,0,
+                  -0.1,0,0,0.3,-0.2,0,
+                  0,0,0,
+                  0.35,0.18,0,0.87,0,0,0,
+                  0.35,-0.18,0,0.87,0,0,0]
+action_scale: [0.55,0.35,0.55,0.35,0.44,0.44,
+               0.55,0.35,0.55,0.35,0.44,0.44,
+               0.55,0.44,0.44,
+               0.44,0.44,0.44,0.44,0.44,0.07,0.07,
+               0.44,0.44,0.44,0.44,0.44,0.07,0.07]
+# Twist command clamp ranges (mirrors unitree deploy.yaml commands.base_velocity.ranges)
+cmd_limits:
+  lin_vel_x: [-1.0, 2.0]
+  lin_vel_y: [-0.5, 0.5]
+  ang_vel_z: [-1.0, 1.0]
+# Gait phase clock
+gait_period_s: 0.6
+gait_zero_cmd_norm: 0.1
