@@ -135,9 +135,11 @@ class VelocitySimSession:
 
         # Arm the STANDING-side reference interpolator from the currently held
         # pose toward pose-B standing. The twist policy never consumes it; it
-        # only keeps the standing reference continuous on hand-off.
+        # only keeps the standing reference continuous on hand-off. from_hold
+        # yaw-aligns the pose-B target into the robot's current heading, so the
+        # ramp does not twist the robot back to world yaw 0.
         hold = self._current_hold_qpos(state)
-        self._interpolator = StandingReferenceInterpolator(
+        self._interpolator = StandingReferenceInterpolator.from_hold(
             hold, self._pose_b_qpos, self._transition_duration_s,
         )
         if target == VelocityMode.VELOCITY:

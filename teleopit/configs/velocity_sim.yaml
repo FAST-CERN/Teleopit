@@ -1,0 +1,74 @@
+# STANDING(mimic) <-> VELOCITY(twist cmd_vel) simulation.
+# Launched only by scripts/run/run_velocity_sim.py.
+#
+# The mimic (standing) policy is the legacy `controller` section (167D
+# velcmd_history, dual-input ONNX). It ships empty on purpose: supply a real
+# checkpoint on the command line, e.g.
+#   python scripts/run/run_velocity_sim.py controller.policy_path=ckpt/track_g1.onnx
+defaults:
+  - robot: g1
+  - controller: rl_policy   # legacy mimic section (167D)
+  - _self_
+
+policy_hz: 50.0
+# Physics substeps per policy step = pd_hz / policy_hz = 4 (each substep is
+# robot.sim_dt = 0.005 s from robot/g1.yaml, so one policy step spans exactly
+# 1/policy_hz = 0.02 s of sim time). Do NOT raise pd_hz without lowering
+# robot.sim_dt to match: decimation * sim_dt must equal 1/policy_hz or the
+# policy runs on a time-distorted plant (with pd_hz=1000 + sim_dt=0.005 the
+# robot falls within a second). Matches teleopit/configs/default.yaml and the
+# mjlab training setup (dt 0.005, decimation 4, 50 Hz policy).
+pd_hz: 200.0
+viewers: "sim2sim"
+realtime: true
+# 0 = run until STOP (Esc / Ctrl-C); >0 = fixed policy-step budget for
+# headless smoke runs and tests.
+num_steps: 0
+
+controllers:
+  # Velocity (twist cmd_vel) section. Values are an explicit copy of
+  # teleopit/configs/controller/velocity.yaml — duplicated deliberately so
+  # this entry config is self-contained (pose B lives here, never in robot
+  # defaults, which are pose A).
+  velocity:
+    policy_path: assets/policies/velocity_v1/policy.onnx
+    observation_type: twist_cmd
+    device: auto
+    clip_range: [-10.0, 10.0]
+    default_dof_pos: [-0.1,0,0,0.3,-0.2,0,
+                      -0.1,0,0,0.3,-0.2,0,
+                      0,0,0,
+                      0.35,0.18,0,0.87,0,0,0,
+                      0.35,-0.18,0,0.87,0,0,0]
+    action_scale: [0.55,0.35,0.55,0.35,0.44,0.44,
+                   0.55,0.35,0.55,0.35,0.44,0.44,
+                   0.55,0.44,0.44,
+                   0.44,0.44,0.44,0.44,0.44,0.07,0.07,
+                   0.44,0.44,0.44,0.44,0.44,0.07,0.07]
+    cmd_limits:
+      lin_vel_x: [-1.0, 2.0]
+      lin_vel_y: [-0.5, 0.5]
+      ang_vel_z: [-1.0, 1.0]
+    gait_period_s: 0.6
+    gait_zero_cmd_norm: 0.1
+
+modes:
+  standing_pose: velocity_default   # pose B via controllers.velocity.default_dof_pos
+  transition_duration_s: 1.0        # tune 0.5-2.0
+
+safety:
+  joint_vel_limit: 10.0
+  tilt_threshold_rad: 1.0
+
+command:
+  provider: keyboard
+  keyboard:
+    speeds: {lin_x: 1.0, lin_y: 0.5, ang_z: 1.0}
+
+console:
+  log_level: info
+  show_timing: false
+
+hydra:
+  run:
+    dir: .

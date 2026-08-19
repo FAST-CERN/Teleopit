@@ -416,6 +416,33 @@ def test_standing_transition_interpolates_then_holds_pose_b():
     assert session._interpolator is None
 
 
+def test_standing_transition_arms_yaw_aligning_interpolator():
+    """Transition arming must preserve the robot's heading (from_hold), not ramp
+    yaw back to world 0 (raw ctor). Mirrors
+    test_reference_interpolation.py::test_from_hold_aligns_target_yaw."""
+    robot, mimic_runner, vel_runner = _components()
+
+    class _YawedRobot(_StubRobot):
+        def get_state(self):
+            st = super().get_state()
+            half = np.pi / 4.0  # yaw pi/2
+            quat = np.array([np.cos(half), 0.0, 0.0, np.sin(half)], dtype=np.float64)
+            return dataclasses.replace(st, quat=quat)
+
+    yawed = _YawedRobot()
+    mimic_runner.robot = yawed
+    vel_runner.robot = yawed
+    session = _session(yawed, mimic_runner, vel_runner)
+    session.request_mode(VelocityMode.VELOCITY)
+    session._apply_pending_mode(yawed.get_state())
+    interpolator = session._interpolator
+    assert interpolator is not None
+    end = interpolator.sample(session._transition_duration_s)
+    q = np.asarray(end[3:7], dtype=np.float64)
+    yaw = 2.0 * np.arctan2(q[3], q[0])
+    assert abs(yaw - np.pi / 2) < 1e-6
+
+
 # ---------------------------------------------------------------------------
 # Keyboard
 # ---------------------------------------------------------------------------
