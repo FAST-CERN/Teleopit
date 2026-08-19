@@ -75,3 +75,8 @@ include = ["teleopit*", "train_mimic*"]
 
 [tool.setuptools.package-data]
 "teleopit.high_level_policy" = ["hand_calibration.json"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: real-asset rollout tests (real ONNX policies + MuJoCo plant, seconds-to-minutes runtime)",
+]

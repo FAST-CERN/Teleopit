@@ -120,6 +120,41 @@ class VelocitySimSession:
     # Transitions
     # ------------------------------------------------------------------
 
+    def _velocity_prev_action_seed(self) -> np.ndarray:
+        """Joint-space-equivalent prev_action for the first velocity step.
+
+        The velocity policy decodes ``target = pose_B + vel_scale * action``;
+        seeding its prev_action channel with the action whose decoded target is
+        the mimic policy's currently commanded target makes the observation
+        continuous in joint space across the hand-off:
+
+            seed = (mimic_target_dof_pos - pose_B) / vel_action_scale
+
+        ``mimic_target_dof_pos`` is computed through the mimic runner's own
+        decode (its scale, its pose A) so the two decodes never mix. Falls back
+        to zeros when the mimic controller exposes no default pose (its
+        decode would be identity, which is not the mimic target in joint
+        space).
+        """
+        num = self._velocity_runner.num_actions
+        mimic_ctrl = self._mimic_runner.controller
+        if getattr(mimic_ctrl, "default_dof_pos", None) is None or np.asarray(
+            mimic_ctrl.default_dof_pos
+        ).size == 0:
+            return np.zeros(num, dtype=np.float32)
+        mimic_target = np.asarray(
+            self._mimic_runner.compute_target_dof_pos(
+                np.asarray(self._mimic_runner.last_action, dtype=np.float32)
+            ),
+            dtype=np.float64,
+        ).reshape(-1)
+        vel_scale = np.asarray(
+            getattr(self._velocity_runner.controller, "action_scale", None),
+            dtype=np.float64,
+        ).reshape(-1)
+        seed = (mimic_target - self._pose_b) / vel_scale
+        return np.clip(seed, -10.0, 10.0).astype(np.float32)
+
     def _apply_pending_mode(self, state: Any) -> None:
         if self._pending_mode is None:
             return
@@ -143,11 +178,13 @@ class VelocitySimSession:
             hold, self._pose_b_qpos, self._transition_duration_s,
         )
         if target == VelocityMode.VELOCITY:
-            # Seed prev_action from mimic's last action (Q8/Q9: no zero-jump in
-            # the first velocity-step observation).
-            self._velocity_runner.last_action = np.asarray(
-                self._mimic_runner.last_action, dtype=np.float32
-            ).reshape(-1).copy()
+            # Seed prev_action with the JOINT-SPACE equivalent of the mimic
+            # policy's current output, not its raw action: the two policies
+            # decode actions with different action_scales and different neutral
+            # poses (A vs B), so the same raw value claims a different joint
+            # offset under each (Q8/Q9: no artificial jump in the first
+            # velocity-step observation).
+            self._velocity_runner.last_action = self._velocity_prev_action_seed()
             self._velocity_runner.controller.reset()
             self._velocity_runner.obs_builder.reset()
         else:  # STANDING

@@ -39,9 +39,13 @@ _SUMMARY_KEYS = {
 
 
 class _StubController:
-    def __init__(self, dim_in: int, neutral_out: float = 0.0):
+    def __init__(self, dim_in: int, neutral_out: float = 0.0, action_scale=1.0, default_dof_pos=None):
         self.dim_in = dim_in
         self._neutral = neutral_out
+        self.action_scale = np.asarray(action_scale, dtype=np.float64)
+        self.default_dof_pos = (
+            None if default_dof_pos is None else np.asarray(default_dof_pos, dtype=np.float64)
+        )
         self.reset_called = 0
         self.compute_called = 0
 
@@ -147,7 +151,14 @@ class _StubRunner:
         )
 
     def compute_target_dof_pos(self, action):
-        return np.asarray(action, dtype=np.float32)
+        # Joint-space decode: scale + own neutral pose, like RLPolicyController.
+        ctrl = self.controller
+        scale = np.asarray(getattr(ctrl, "action_scale", 1.0), dtype=np.float64)
+        default = getattr(ctrl, "default_dof_pos", None)
+        default = (
+            np.zeros(self.num_actions) if default is None else np.asarray(default, dtype=np.float64)
+        )
+        return (np.asarray(action, dtype=np.float64) * scale + default).astype(np.float32)
 
     def apply_control(self, target):
         self.robot.steps += 1
@@ -202,13 +213,25 @@ class _RecordingConsole:
         self.events.append((key, action, result))
 
 
-def _components(mimic_dim=167, velocity_dim=98, mimic_neutral=0.0, velocity_neutral=0.0):
+def _components(
+    mimic_dim=167,
+    velocity_dim=98,
+    mimic_neutral=0.0,
+    velocity_neutral=0.0,
+    mimic_scale=1.0,
+    velocity_scale=1.0,
+    mimic_default=None,
+):
     robot = _StubRobot()
     mimic_runner = _StubRunner(
-        robot, _StubController(mimic_dim, mimic_neutral), _StubMimicObsBuilder(mimic_dim)
+        robot,
+        _StubController(mimic_dim, mimic_neutral, action_scale=mimic_scale, default_dof_pos=mimic_default),
+        _StubMimicObsBuilder(mimic_dim),
     )
     vel_runner = _StubRunner(
-        robot, _StubController(velocity_dim, velocity_neutral), _StubTwistObsBuilder(velocity_dim)
+        robot,
+        _StubController(velocity_dim, velocity_neutral, action_scale=velocity_scale),
+        _StubTwistObsBuilder(velocity_dim),
     )
     return robot, mimic_runner, vel_runner
 
@@ -267,8 +290,11 @@ def test_summary_keys_exact():
 # ---------------------------------------------------------------------------
 
 
-def test_switch_to_velocity_uses_twist_builder_and_keeps_last_action():
-    robot, mimic_runner, vel_runner = _components()
+def test_switch_to_velocity_uses_twist_builder_and_seeds_joint_space_action():
+    pose_a = np.full(29, 0.1)
+    robot, mimic_runner, vel_runner = _components(
+        mimic_scale=1.0, velocity_scale=1.0, mimic_default=pose_a,
+    )
     seed = np.full(29, 0.3, dtype=np.float32)
     mimic_runner.last_action = seed.copy()
     session = _session(robot, mimic_runner, vel_runner, cmd=[1.0, 0, 0, 0, 0, 0])
@@ -278,8 +304,10 @@ def test_switch_to_velocity_uses_twist_builder_and_keeps_last_action():
     # Twist builder built every step; mimic builder never ran:
     assert len(vel_runner.obs_builder.prev_actions) == 3
     assert mimic_runner.obs_builder.builds == []
-    # prev_action observation was seeded from mimic's last action, not zeroed:
-    np.testing.assert_allclose(vel_runner.obs_builder.prev_actions[0], seed)
+    # prev_action observation was seeded with the joint-space equivalent of the
+    # mimic action (0.3 + pose_a - pose_B with unit scales), not zeroed:
+    expected = (0.3 + pose_a - POSE_B).astype(np.float32)
+    np.testing.assert_allclose(vel_runner.obs_builder.prev_actions[0], expected)
     assert not np.allclose(vel_runner.obs_builder.prev_actions[0], 0.0)
     # Subsequent steps consume the velocity policy's own actions:
     np.testing.assert_allclose(vel_runner.obs_builder.prev_actions[1], 0.0)
@@ -290,14 +318,65 @@ def test_switch_to_velocity_uses_twist_builder_and_keeps_last_action():
 
 
 def test_apply_pending_mode_seeds_velocity_last_action_immediately():
-    robot, mimic_runner, vel_runner = _components()
-    seed = np.full(29, 0.3, dtype=np.float32)
-    mimic_runner.last_action = seed.copy()
+    pose_a = np.full(29, 0.1)
+    robot, mimic_runner, vel_runner = _components(mimic_default=pose_a)
+    raw = np.full(29, 0.3, dtype=np.float32)
+    mimic_runner.last_action = raw.copy()
     session = _session(robot, mimic_runner, vel_runner)
     session.request_mode(VelocityMode.VELOCITY)
     session._apply_pending_mode(robot.get_state())
-    np.testing.assert_allclose(vel_runner.last_action, seed)
+    np.testing.assert_allclose(
+        vel_runner.last_action, (0.3 + pose_a - POSE_B).astype(np.float32)
+    )
     assert session.mode == VelocityMode.VELOCITY
+
+
+def test_velocity_seed_rescales_mimic_action_into_joint_space():
+    """Seed = (mimic_target - pose_B) / vel_action_scale, NOT the raw action.
+
+    Mimic and velocity policies decode with different scales and different
+    neutral poses (A vs B); the same raw number means a different joint offset
+    under each. The seed must make the two decodes agree in joint space.
+    """
+    pose_a = np.linspace(-0.2, 0.2, 29)  # any non-zero pose A
+    robot, mimic_runner, vel_runner = _components(
+        mimic_scale=0.5475, velocity_scale=0.44, mimic_default=pose_a,
+    )
+    raw = np.full(29, 0.7, dtype=np.float32)  # large raw mimic action
+    mimic_runner.last_action = raw.copy()
+    session = _session(robot, mimic_runner, vel_runner)
+    session.request_mode(VelocityMode.VELOCITY)
+    session._apply_pending_mode(robot.get_state())
+
+    mimic_target = 0.7 * 0.5475 + pose_a
+    expected_seed = np.asarray((mimic_target - POSE_B) / 0.44, dtype=np.float32)
+    np.testing.assert_allclose(vel_runner.last_action, expected_seed, rtol=1e-5)
+    # And definitively NOT the raw action:
+    assert not np.allclose(vel_runner.last_action, raw)
+
+
+def test_velocity_seed_falls_back_to_zeros_without_mimic_default():
+    robot, mimic_runner, vel_runner = _components(mimic_default=None)
+    mimic_runner.last_action = np.full(29, 0.9, dtype=np.float32)
+    session = _session(robot, mimic_runner, vel_runner)
+    session.request_mode(VelocityMode.VELOCITY)
+    session._apply_pending_mode(robot.get_state())
+    np.testing.assert_allclose(vel_runner.last_action, 0.0)
+
+
+def test_velocity_seed_clipped_to_clip_range():
+    """Pathological mimic targets must not blow the prev_action channel past
+    the policy's clip range ([-10, 10] for velocity_v1)."""
+    robot, mimic_runner, vel_runner = _components(
+        mimic_scale=0.5475, velocity_scale=0.07, mimic_default=np.zeros(29),
+    )
+    mimic_runner.last_action = np.full(29, 9.9, dtype=np.float32)
+    session = _session(robot, mimic_runner, vel_runner)
+    session.request_mode(VelocityMode.VELOCITY)
+    session._apply_pending_mode(robot.get_state())
+    unclipped = (9.9 * 0.5475 - POSE_B) / 0.07  # >> 10 on most joints
+    assert np.abs(vel_runner.last_action).max() <= 10.0
+    assert np.abs(unclipped).max() > 10.0  # the clip actually engaged
 
 
 # ---------------------------------------------------------------------------
