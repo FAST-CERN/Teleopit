@@ -45,7 +45,7 @@ class TestLayout:
         """[0:3]=ang_vel [3:6]=proj_grav [6:9]=cmd [9:11]=gait [11:40]=jpos_rel [40:69]=jvel [69:98]=last_action"""
         b = TwistCmdObservationBuilder(_cfg())
         ang = np.array([0.1, 0.2, 0.3], dtype=np.float32)
-        cmd = np.array([0.5, -0.2, 0.3, 0, 0, 0], dtype=np.float32)
+        cmd = np.array([0.5, -0.2, 0.0, 0.0, 0.0, 0.3], dtype=np.float32)
         act = np.full(29, 0.05, dtype=np.float32)
         obs = b.build(_state(ang_vel=ang), cmd, act)
         np.testing.assert_allclose(obs[0:3], ang, atol=1e-6)
@@ -67,7 +67,7 @@ class TestLayout:
 
     def test_cmd_clamped_to_limits(self):
         b = TwistCmdObservationBuilder(_cfg())
-        obs = b.build(_state(), np.array([9.0, -9.0, 9.0, 0, 0, 0], dtype=np.float32), np.zeros(29, dtype=np.float32))
+        obs = b.build(_state(), np.array([9.0, -9.0, 0.0, 0.0, 0.0, 9.0], dtype=np.float32), np.zeros(29, dtype=np.float32))
         np.testing.assert_allclose(obs[6:9], [2.0, -0.5, 1.0], atol=1e-6)
 
 

@@ -119,7 +119,8 @@ class TwistCmdObservationBuilder:
         if ang_vel_b.shape[0] != 3:
             raise ValueError(f"state.ang_vel must be 3D, got {ang_vel_b.shape[0]}")
 
-        cmd3 = np.clip(cmd_vec[:3] * np.array([1.0, 1.0, 1.0], dtype=np.float32), self._cmd_lo, self._cmd_hi).astype(np.float32)
+        # 6D twist contract: [lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]; policy consumes [lin_x, lin_y, ang_z]
+        cmd3 = np.clip(cmd_vec[[0, 1, 5]], self._cmd_lo, self._cmd_hi).astype(np.float32)
         gait = self._advance_gait(cmd3)
         projected_gravity_b = _quat_rotate_inv_np(quat, _GRAVITY_UNIT_W)
         joint_pos_rel = qpos - self.default_dof_pos
