@@ -5,9 +5,14 @@
 # velcmd_history, dual-input ONNX). It ships empty on purpose: supply a real
 # checkpoint on the command line, e.g.
 #   python scripts/run/run_velocity_sim.py controller.policy_path=ckpt/track_g1.onnx
+#
+# controllers.velocity is the single-source controller/velocity.yaml (twist
+# cmd_vel section, pose B) pulled in via the defaults retarget below. Top-level
+# defaults list ONLY: nested `defaults:` inside the mapping do NOT work here.
 defaults:
   - robot: g1
   - controller: rl_policy   # legacy mimic section (167D)
+  - controller@controllers.velocity: velocity   # twist cmd_vel section (pose B)
   - _self_
 
 policy_hz: 50.0
@@ -24,33 +29,6 @@ realtime: true
 # 0 = run until STOP (Esc / Ctrl-C); >0 = fixed policy-step budget for
 # headless smoke runs and tests.
 num_steps: 0
-
-controllers:
-  # Velocity (twist cmd_vel) section. Values are an explicit copy of
-  # teleopit/configs/controller/velocity.yaml — duplicated deliberately so
-  # this entry config is self-contained (pose B lives here, never in robot
-  # defaults, which are pose A).
-  velocity:
-    policy_path: assets/policies/velocity_v1/policy.onnx
-    observation_type: twist_cmd
-    device: auto
-    clip_range: [-10.0, 10.0]
-    default_dof_pos: [-0.1,0,0,0.3,-0.2,0,
-                      -0.1,0,0,0.3,-0.2,0,
-                      0,0,0,
-                      0.35,0.18,0,0.87,0,0,0,
-                      0.35,-0.18,0,0.87,0,0,0]
-    action_scale: [0.55,0.35,0.55,0.35,0.44,0.44,
-                   0.55,0.35,0.55,0.35,0.44,0.44,
-                   0.55,0.44,0.44,
-                   0.44,0.44,0.44,0.44,0.44,0.07,0.07,
-                   0.44,0.44,0.44,0.44,0.44,0.07,0.07]
-    cmd_limits:
-      lin_vel_x: [-1.0, 2.0]
-      lin_vel_y: [-0.5, 0.5]
-      ang_vel_z: [-1.0, 1.0]
-    gait_period_s: 0.6
-    gait_zero_cmd_norm: 0.1
 
 modes:
   standing_pose: velocity_default   # pose B via controllers.velocity.default_dof_pos

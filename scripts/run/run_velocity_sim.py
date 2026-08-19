@@ -170,6 +170,17 @@ def main(cfg: DictConfig) -> None:
     decimation = int(round(pd_hz / policy_hz))
     if abs(pd_hz / policy_hz - decimation) > 1e-6:
         raise ValueError(f"pd_hz/policy_hz must be an integer ratio, got {pd_hz / policy_hz}")
+    # decimation * sim_dt == 1/policy_hz (physics invariant; 4 * 0.005 == 0.02)
+    sim_dt = float(cfg_get(cfg.robot, "sim_dt", 0.005))
+    if abs(decimation * sim_dt - 1.0 / policy_hz) > 1e-9:
+        raise ValueError(
+            f"decimation * sim_dt must equal 1/policy_hz: got "
+            f"{decimation} * {sim_dt} = {decimation * sim_dt} != {1.0 / policy_hz}. "
+            f"The policy would run on a time-distorted plant (e.g. pd_hz=1000 "
+            f"with sim_dt=0.005 gives 5x time distortion and the robot falls "
+            f"within a second). Raise pd_hz only together with lowering "
+            f"robot.sim_dt to match."
+        )
 
     viewer_manager = ViewerManager(
         robot=robot,

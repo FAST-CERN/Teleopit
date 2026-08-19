@@ -42,13 +42,13 @@ On Windows, the interpreter path is typically `C:/Users/user/.conda/envs/teleopi
 - `b` — Transition from VELOCITY → STANDING mode
 - `Esc` — Emergency stop (freezes robot state with damping)
 
-**Velocity commands (twist):**
-- `w` — Forward (negative x direction)
-- `s` — Backward (positive x direction)
-- `a` — Strafe left (negative y direction)
-- `d` — Strafe right (positive y direction)
-- `q` — Turn left (counterclockwise)
-- `e` — Turn right (clockwise)
+**Velocity commands (twist, body-frame):**
+- `w` — Forward (+lin_x)
+- `s` — Backward (−lin_x)
+- `a` — Strafe left (−lin_y)
+- `d` — Strafe right (+lin_y)
+- `q` — Turn left (counterclockwise, +ang_z)
+- `e` — Turn right (clockwise, −ang_z)
 
 **Reset:**
 - `x` — Zero all twist commands (stop walking, return to standing)
@@ -63,9 +63,9 @@ On Windows, the interpreter path is typically `C:/Users/user/.conda/envs/teleopi
 - [ ] Standing height > 0.6 m (measured 0.758 m — confirms pose B is upright)
 
 ### Transition STANDING → VELOCITY (press v)
-- [ ] Single smooth weight shift, no jump/spasm
+- [ ] Hand-off at the switch instant: single smooth weight shift, NO visible jump or spasm in any joint at the moment v takes effect
 - [ ] Gait starts within ~0.6 s (one phase period)
-- [ ] Target jump metric: max_target_jump_rad < 0.25 (attractor floor 0.211 rad documented)
+- [ ] Hand-off jump bound 0.25 rad (attractor floor 0.211 rad documented) is enforced by the pytest gate (`test_transition_jump_bounded`), which measures the last-standing→first-velocity target seam — do not read the session-cumulative console `max_target_jump_rad` for this
 
 ### VELOCITY walking (w/s/a/d/q/e, x = stop)
 - [ ] w: walks FORWARD (if backward → joint order or sign bug, stop and file)
@@ -84,7 +84,7 @@ On Windows, the interpreter path is typically `C:/Users/user/.conda/envs/teleopi
 
 ### Metrics cross-check
 - [ ] Console summary shows:
-  - `max_target_jump_rad < 0.25` (attractor floor 0.211 rad documented in Task 8)
+  - `max_target_jump_rad` — the 0.25 bound applies ONLY to the STANDING→VELOCITY hand-off moment (the automated gate measures exactly that seam in pytest: `tests/test_velocity_integration.py::test_transition_jump_bounded`). **Do NOT fail the run on this console value:** it accumulates over the WHOLE session, and during active gait a 50 Hz walking policy legitimately moves knee/ankle targets by 0.3-0.85 rad per step — so after any walking the session-cumulative value is EXPECTED to exceed 0.25 and that is not a failure. Use the hand-off checklist item above (watch the switch instant: single smooth weight shift, no visible jump/spasm) as the observational criterion; the numeric 0.25 check is done by the pytest gate.
   - `cmd_track_err_mps < 0.35` (measured 0.159 m/s in Task 8)
   - Standing height > 0.6 m (measured 0.758 m — pose B is upright)
 - [ ] Record actual values here:
