@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from teleopit.controllers.observation import VelCmdObservationBuilder
+from teleopit.controllers.rl_policy import RLPolicyController
+from teleopit.controllers.twist_observation import TwistCmdObservationBuilder
 from teleopit.inputs.pico_video import bridge_video_source, parse_pico_video_config
 
 from .common import cfg_get, cfg_set, normalize_path_in_cfg, parse_viewers, require_section
@@ -27,6 +30,17 @@ class MocapComponents:
     retargeter: Any
     controller: Any
     obs_builder: Any
+
+
+@dataclass(frozen=True)
+class VelocityComponents:
+    robot: Any
+    mimic_controller: Any
+    mimic_obs_builder: Any
+    velocity_controller: Any
+    velocity_obs_builder: Any
+    sim_cfg: dict[str, object]
+    command_cfg: dict[str, object]
 
 
 
@@ -97,8 +111,62 @@ def _prepare_policy_paths(robot_cfg: Any, controller_cfg: Any, project_root: Pat
 
 
 
+def _build_velcmd_builder(obs_cfg: dict[str, object]) -> Any:
+    # Resolves the module global at call time so tests can monkeypatch
+    # teleopit.runtime.factory.VelCmdObservationBuilder.
+    return VelCmdObservationBuilder(obs_cfg)
+
+
+def _build_twist_builder(obs_cfg: dict[str, object]) -> Any:
+    return TwistCmdObservationBuilder(obs_cfg)
+
+
+_OBS_BUILDERS: dict[str, Callable[[dict[str, object]], Any]] = {
+    "velcmd_history": _build_velcmd_builder,
+    "twist_cmd": _build_twist_builder,
+}
+
+
+_TWIST_OBS_KEYS = (
+    "num_actions",
+    "default_dof_pos",
+    "cmd_limits",
+    "gait_period_s",
+    "gait_zero_cmd_norm",
+    "policy_dt",
+)
+
+
+def _build_twist_obs_cfg(robot_cfg: Any, controller_cfg: Any, sim_cfg: dict[str, object]) -> dict[str, object]:
+    """Assemble the reduced twist_cmd obs cfg (no mimic-only history keys).
+
+    default_dof_pos comes from the controller (velocity) section — pose B — and
+    never from robot defaults (pose A). policy_dt derives from policy_hz.
+    """
+    policy_hz = float(sim_cfg.get("policy_hz", 50.0))
+    obs_cfg: dict[str, object] = {
+        "num_actions": int(cfg_get(robot_cfg, "num_actions")),
+        "default_dof_pos": cfg_get(controller_cfg, "default_dof_pos"),
+        "cmd_limits": cfg_get(controller_cfg, "cmd_limits"),
+        "gait_period_s": cfg_get(controller_cfg, "gait_period_s", 0.6),
+        "gait_zero_cmd_norm": cfg_get(controller_cfg, "gait_zero_cmd_norm", 0.1),
+        "policy_dt": 1.0 / policy_hz,
+    }
+    assert set(obs_cfg) == set(_TWIST_OBS_KEYS)
+    return obs_cfg
+
+
 def _build_obs_builder(robot_cfg: Any, controller_cfg: Any, sim_cfg: dict[str, object]) -> Any:
     observation_type = str(cfg_get(controller_cfg, "observation_type", "velcmd_history")).lower()
+    builder_fn = _OBS_BUILDERS.get(observation_type)
+    if builder_fn is None:
+        raise ValueError(
+            f"Unsupported controller.observation_type='{observation_type}'. "
+            f"Supported values: {sorted(_OBS_BUILDERS)}."
+        )
+    if observation_type == "twist_cmd":
+        return builder_fn(_build_twist_obs_cfg(robot_cfg, controller_cfg, sim_cfg))
+
     reference_steps = [int(v) for v in sim_cfg.get("reference_steps", [0])]
     future_steps_raw = cfg_get(controller_cfg, "future_steps", None)
     future_steps = reference_steps if future_steps_raw is None else [int(v) for v in future_steps_raw]
@@ -123,12 +191,7 @@ def _build_obs_builder(robot_cfg: Any, controller_cfg: Any, sim_cfg: dict[str, o
         "robot_joint_names": list(cfg_get(controller_cfg, "robot_joint_names", cfg_get(controller_cfg, "joint_names", []))),
         "target_joint_names": cfg_get(controller_cfg, "target_joint_names", None),
     }
-    if observation_type == "velcmd_history":
-        return VelCmdObservationBuilder(obs_cfg)
-    raise ValueError(
-        f"Unsupported controller.observation_type='{observation_type}'. "
-        "Supported value is velcmd_history."
-    )
+    return builder_fn(obs_cfg)
 
 
 
@@ -139,12 +202,15 @@ def _build_policy_components(
     sim_cfg: dict[str, object],
     project_root: Path,
     controller_cls: type[Any],
+    single_input_ok: bool = False,
+    propagate_defaults: bool = True,
 ) -> tuple[Any, Any]:
     _prepare_policy_paths(robot_cfg, controller_cfg, project_root)
-    propagate_controller_defaults(controller_cfg, robot_cfg)
+    if propagate_defaults:
+        propagate_controller_defaults(controller_cfg, robot_cfg)
 
     controller = controller_cls(controller_cfg)
-    if not bool(getattr(controller, "_multi_input", False)):
+    if not single_input_ok and not bool(getattr(controller, "_multi_input", False)):
         raise ValueError(
             "Only dual inputs ONNX policies are supported here; expected inputs named 'obs' and 'obs_history'."
         )
@@ -355,4 +421,73 @@ def build_sim2real_mocap_components(
         retargeter=retargeter,
         controller=controller,
         obs_builder=obs_builder,
+    )
+
+
+
+def build_velocity_components(
+    cfg: Any,
+    project_root: Path,
+    *,
+    robot_cls: type[Any],
+) -> VelocityComponents:
+    """Build BOTH the mimic and velocity (twist_cmd) controller stacks.
+
+    The mimic section is resolved from ``controllers.mimic`` with fallback to the
+    legacy ``controller`` key and is built exactly like ``build_inference_components``
+    does today (dual-input requirement, defaults propagation). The velocity section
+    is ``controllers.velocity``: it may use a single-input ONNX policy and its
+    ``default_dof_pos`` (pose B) must be explicit — robot defaults (pose A) are
+    deliberately not propagated into it.
+    """
+    robot_cfg = require_section(cfg, "robot")
+
+    controllers_cfg = cfg_get(cfg, "controllers", None)
+    mimic_cfg = cfg_get(controllers_cfg, "mimic", None) if controllers_cfg is not None else None
+    if mimic_cfg is None:
+        mimic_cfg = require_section(cfg, "controller")
+
+    velocity_cfg = cfg_get(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
+    if velocity_cfg is None:
+        raise ValueError(
+            "cfg must include a 'controllers.velocity' section "
+            "(policy_path, observation_type, default_dof_pos, cmd_limits, ...)."
+        )
+
+    sim_cfg = build_simulation_cfg(cfg)
+
+    # Pose-B propagation guard: the velocity section owns its defaults explicitly.
+    if cfg_get(velocity_cfg, "default_dof_pos", None) is None:
+        raise ValueError(
+            "controllers.velocity.default_dof_pos must be set explicitly "
+            "(pose B); robot defaults are pose A and must not propagate."
+        )
+
+    mimic_controller, mimic_obs_builder = _build_policy_components(
+        robot_cfg=robot_cfg,
+        controller_cfg=mimic_cfg,
+        sim_cfg=sim_cfg,
+        project_root=project_root,
+        controller_cls=RLPolicyController,
+    )
+    velocity_controller, velocity_obs_builder = _build_policy_components(
+        robot_cfg=robot_cfg,
+        controller_cfg=velocity_cfg,
+        sim_cfg=sim_cfg,
+        project_root=project_root,
+        controller_cls=RLPolicyController,
+        single_input_ok=True,
+        propagate_defaults=False,
+    )
+
+    robot = robot_cls(robot_cfg)
+    command_cfg = dict(cfg_get(cfg, "command", {"provider": "keyboard"}))
+    return VelocityComponents(
+        robot=robot,
+        mimic_controller=mimic_controller,
+        mimic_obs_builder=mimic_obs_builder,
+        velocity_controller=velocity_controller,
+        velocity_obs_builder=velocity_obs_builder,
+        sim_cfg=sim_cfg,
+        command_cfg=command_cfg,
     )

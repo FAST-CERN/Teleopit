@@ -6,9 +6,11 @@ from typing import Any
 __all__ = [
     "InferenceComponents",
     "MocapComponents",
+    "VelocityComponents",
     "build_inference_components",
     "build_sim2real_mocap_components",
     "build_simulation_cfg",
+    "build_velocity_components",
     "cfg_get",
     "cfg_set",
     "parse_viewers",
@@ -18,9 +20,11 @@ __all__ = [
 _EXPORTS: dict[str, tuple[str, str]] = {
     "InferenceComponents": (".factory", "InferenceComponents"),
     "MocapComponents": (".factory", "MocapComponents"),
+    "VelocityComponents": (".factory", "VelocityComponents"),
     "build_inference_components": (".factory", "build_inference_components"),
     "build_sim2real_mocap_components": (".factory", "build_sim2real_mocap_components"),
     "build_simulation_cfg": (".factory", "build_simulation_cfg"),
+    "build_velocity_components": (".factory", "build_velocity_components"),
     "cfg_get": (".common", "cfg_get"),
     "cfg_set": (".common", "cfg_set"),
     "parse_viewers": (".common", "parse_viewers"),

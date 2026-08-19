@@ -28,6 +28,28 @@ class _OrtSession(Protocol):
     def run(self, output_names: Sequence[str], feed: dict[str, NDArray[np.float32]]) -> Sequence[object]: ...
 
 
+def _open_onnx_session(policy_path: Path, device: str) -> _OrtSession:
+    """Import onnxruntime, select execution providers, and open the session.
+
+    Kept as a module-level seam so tests can substitute the ORT session while
+    keeping RLPolicyController's input-signature analysis under test.
+    """
+    try:
+        ort = importlib.import_module("onnxruntime")
+    except ModuleNotFoundError as exc:
+        raise ImportError("onnxruntime is required for RLPolicyController") from exc
+    session_ctor = cast(object, getattr(ort, "InferenceSession"))
+    providers_fn = cast(object, getattr(ort, "get_available_providers"))
+    if not callable(session_ctor) or not callable(providers_fn):
+        raise ImportError("onnxruntime missing required API")
+
+    providers = RLPolicyController._select_providers(
+        cast(Callable[[], Sequence[str]], providers_fn),
+        device,
+    )
+    return cast(_OrtSession, session_ctor(str(policy_path), providers=providers))
+
+
 class RLPolicyController:
     _multi_input: bool
 
@@ -47,20 +69,10 @@ class RLPolicyController:
         if not policy_path.is_file():
             raise FileNotFoundError(f"ONNX policy file not found: {policy_path}")
 
-        try:
-            ort = importlib.import_module("onnxruntime")
-        except ModuleNotFoundError as exc:
-            raise ImportError("onnxruntime is required for RLPolicyController") from exc
-        session_ctor = cast(object, getattr(ort, "InferenceSession"))
-        providers_fn = cast(object, getattr(ort, "get_available_providers"))
-        if not callable(session_ctor) or not callable(providers_fn):
-            raise ImportError("onnxruntime missing required API")
-
-        providers = self._select_providers(
-            cast(Callable[[], Sequence[str]], providers_fn),
+        self._session = _open_onnx_session(
+            policy_path,
             str(cfg_get(cfg, "device", "auto")),
         )
-        self._session = cast(_OrtSession, session_ctor(str(policy_path), providers=providers))
         onnx_inputs = self._session.get_inputs()
         self._input_name = onnx_inputs[0].name
         self._output_name = self._session.get_outputs()[0].name
