@@ -147,6 +147,7 @@ def _velocity_operator_controls() -> tuple[KeyboardControl, ...]:
         KeyboardControl("A/D", "strafe"),
         KeyboardControl("Q/E", "turn"),
         KeyboardControl("X", "zero twist"),
+        KeyboardControl("T", "perturb (push left)"),
     )
 
 
@@ -222,6 +223,7 @@ def main(cfg: DictConfig) -> None:
             "realtime": bool(cfg_get(cfg, "realtime", False)),
             "pose_b": list(components.velocity_obs_builder.default_dof_pos),
             "modes": dict(cfg_get(cfg, "modes", {}) or {}),
+            "perturb": dict(cfg_get(cfg, "perturb", {}) or {}),
             "safety": dict(cfg_get(cfg, "safety", {}) or {}),
         },
         console=console,

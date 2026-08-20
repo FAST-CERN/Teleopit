@@ -613,3 +613,37 @@ class TestStandingReferenceYawRetention:
         ref = session._standing_ref_qpos
         ref_yaw = 2.0 * np.arctan2(ref[6], ref[3])
         assert abs(ref_yaw - yaw) < 1e-6, "standing ref must retain the walked-to heading"
+
+
+class TestPerturbationKey:
+    """T-key debug impulse: queues a burst in VELOCITY, ignores elsewhere,
+    and silently no-ops on robots without MuJoCo data (stubs)."""
+
+    def test_perturb_queues_in_velocity_mode(self):
+        robot, mimic_runner, vel_runner = _components()
+        session = VelocitySimSession(
+            robot=robot, mimic_runner=mimic_runner, velocity_runner=vel_runner,
+            command_provider=_StubCmd([0, 0, 0, 0, 0, 0]), cfg=_cfg(),
+        )
+        session.mode = VelocityMode.VELOCITY
+        session._request_perturbation()
+        assert session._perturb_steps_remaining == session._perturb_burst_steps
+
+    def test_perturb_ignored_in_standing(self):
+        robot, mimic_runner, vel_runner = _components()
+        session = VelocitySimSession(
+            robot=robot, mimic_runner=mimic_runner, velocity_runner=vel_runner,
+            command_provider=_StubCmd([0, 0, 0, 0, 0, 0]), cfg=_cfg(),
+        )
+        session._request_perturbation()  # STANDING: must not queue
+        assert session._perturb_steps_remaining == 0
+
+    def test_perturb_apply_noop_on_stub_robot(self):
+        robot, mimic_runner, vel_runner = _components()
+        session = VelocitySimSession(
+            robot=robot, mimic_runner=mimic_runner, velocity_runner=vel_runner,
+            command_provider=_StubCmd([0, 0, 0, 0, 0, 0]), cfg=_cfg(),
+        )
+        session._perturb_steps_remaining = 3
+        session._apply_perturbation()  # stub has no .data — silently consumed
+        assert session._perturb_steps_remaining == 3  # unchanged: no MuJoCo slot

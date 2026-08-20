@@ -12,6 +12,7 @@ import time
 from enum import Enum
 from typing import Any
 
+import mujoco
 import numpy as np
 
 from teleopit.commands.base import CommandProvider
@@ -66,6 +67,14 @@ class VelocitySimSession:
         self._joint_vel_limit = float(cfg_get(safety_cfg, "joint_vel_limit", 10.0))
         self._tilt_threshold_rad = float(cfg_get(safety_cfg, "tilt_threshold_rad", 1.0))
         self._realtime = bool(cfg_get(cfg, "realtime", False))
+
+        # Debug perturbation (key T): lateral pelvis impulse, the substitute
+        # for MuJoCo viewer ctrl-drag which cannot reach this process.
+        perturb_cfg = cfg_get(cfg, "perturb", {}) or {}
+        self._perturb_force_n = float(cfg_get(perturb_cfg, "force_n", 220.0))
+        self._perturb_burst_steps = int(cfg_get(perturb_cfg, "burst_policy_steps", 5))
+        self._perturb_body_name = str(cfg_get(perturb_cfg, "body_name", "pelvis"))
+        self._perturb_steps_remaining = 0
 
         self._pose_b = np.asarray(cfg_get(cfg, "pose_b"), dtype=np.float64).reshape(-1)
         self._pose_b_qpos = self._standing_qpos_of_pose(self._pose_b)
@@ -293,6 +302,7 @@ class VelocitySimSession:
         )
 
     def _velocity_step(self) -> None:
+        self._apply_perturbation()
         state = self._robot.get_state()
         cmd = self._cmd.get_cmd()
         obs = self._velocity_runner.obs_builder.build(
@@ -353,9 +363,50 @@ class VelocitySimSession:
             elif key == "b":
                 self.request_mode(VelocityMode.STANDING)
                 self._key_feedback("B", "standing", "STANDING")
+            elif key == "t":
+                self._request_perturbation()
             elif key in _STOP_KEY_NAMES:
                 self.request_mode(VelocityMode.STOP)
                 self._key_feedback("Esc", "stop", "STOP")
+
+    def _request_perturbation(self) -> None:
+        """Queue a lateral impulse for the next velocity step (debug key T).
+
+        The viewer is a separate mirror process, so MuJoCo ctrl-drag
+        perturbations never reach this simulation. T injects the same kind
+        of push directly: a body-frame +Y force on the pelvis for a short
+        burst of physics substeps, exactly the disturbance the tilt safety
+        check exists to catch.
+        """
+        if self.mode != VelocityMode.VELOCITY:
+            self._key_feedback("T", "perturb", "ignored (not in VELOCITY)")
+            return
+        self._perturb_steps_remaining = self._perturb_burst_steps
+        self._key_feedback("T", "perturb", f"{self._perturb_force_n}N x {self._perturb_burst_steps} steps")
+
+    def _apply_perturbation(self) -> None:
+        """Write the queued impulse into the robot's MuJoCo xfrc_applied slot."""
+        if self._perturb_steps_remaining <= 0:
+            return
+        data = getattr(self._robot, "data", None)
+        model = getattr(self._robot, "model", None)
+        if data is None or model is None:
+            return  # non-MuJoCo robot (tests): impulse silently unavailable
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, self._perturb_body_name)
+        if body_id < 0:
+            return
+        # Body-frame +Y push: rotate the body frame into world via xquat.
+        quat = np.asarray(data.xquat[body_id], dtype=np.float64)
+        force_b = np.array([0.0, self._perturb_force_n, 0.0])
+        # w-first quaternion rotation of force_b into world frame.
+        w, x, y, z = quat
+        t = 2.0 * np.cross([x, y, z], force_b)
+        force_w = force_b + w * t + np.cross([x, y, z], t)
+        data.xfrc_applied[body_id, 0:3] = force_w
+        data.xfrc_applied[body_id, 3:6] = 0.0
+        self._perturb_steps_remaining -= 1
+        if self._perturb_steps_remaining == 0:
+            data.xfrc_applied[body_id, :] = 0.0  # clear on burst end
 
     def _key_feedback(self, key: str, action: str, result: str) -> None:
         if self._console is not None:

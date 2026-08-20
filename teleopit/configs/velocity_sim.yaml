@@ -34,6 +34,13 @@ modes:
   standing_pose: velocity_default   # pose B via controllers.velocity.default_dof_pos
   transition_duration_s: 1.0        # tune 0.5-2.0
 
+# Debug perturbation key T: lateral pelvis impulse (substitute for MuJoCo
+# viewer ctrl-drag, which cannot reach the sim from the mirror viewer process).
+perturb:
+  force_n: 220.0        # ~1.5x body side-push; tune for visible stagger
+  burst_policy_steps: 5 # 5 policy steps = 0.1 s at 50 Hz
+  body_name: pelvis
+
 safety:
   # 12.0: this policy's healthy 1 m/s gait peaks ~10.1 rad/s at the knees
   # (motor rated 20 rad/s; training had no joint-vel termination). The inherited
