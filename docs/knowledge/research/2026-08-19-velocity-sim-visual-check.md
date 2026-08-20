@@ -73,7 +73,7 @@ On Windows, the interpreter path is typically `C:/Users/user/.conda/envs/teleopi
 - [ ] q/e: turns in the pressed direction
 - [ ] Turning while walking (w+q) does not trip
 - [ ] Command tracking error: cmd_track_err_mps < 0.35 (measured 0.159 m/s)
-- [ ] **Safety drill note:** At 1 m/s walking speed, knee peaks ~10 rad/s which EXCEEDS the production `joint_vel_limit=10.0`. If walking stops after ~3 seconds, check the console for the joint-velocity safety log — this is the known limit-vs-gait issue, not a failure of the checklist item itself. The gait may trip the safety→STOP by design under the current production config.
+- [ ] **Safety drill note:** At 1 m/s walking speed, knee peaks ~10.1 rad/s. The production `joint_vel_limit` is now 12.0 (user-ratified 2026-08-20; motor rated 20 rad/s, 40% margin), so a healthy walk should NOT trip the joint-velocity safety. If walking still stops with a joint-velocity log line, that is a real finding — record the logged peak value and file it.
 
 ### Transition VELOCITY → STANDING (press b)
 - [ ] Gait terminates, robot settles to pose B without stumbling

@@ -35,7 +35,11 @@ modes:
   transition_duration_s: 1.0        # tune 0.5-2.0
 
 safety:
-  joint_vel_limit: 10.0
+  # 12.0: this policy's healthy 1 m/s gait peaks ~10.1 rad/s at the knees
+  # (motor rated 20 rad/s; training had no joint-vel termination). The inherited
+  # mocap default 10.0 aborted a nominal walk ~0.6 s in. Phase B replaces the
+  # scalar with per-joint limits. User-ratified 2026-08-20.
+  joint_vel_limit: 12.0
   tilt_threshold_rad: 1.0
 
 command:
