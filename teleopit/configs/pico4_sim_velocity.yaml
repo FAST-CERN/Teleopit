@@ -3,7 +3,7 @@
 # Y=mocap, V=velocity (only from STANDING), X=standing, A=pause/resume, B=arms, Q=quit.
 # In VELOCITY: left stick = translate (Y fwd/back, X strafe), right stick X = turn.
 # Joystick comes from the pico controllers (command.provider=pico_joystick);
-# with bvh/udp input the keyboard twist fallback (WASD/QE) applies instead.
+# with bvh/udp input the keyboard twist fallback (W/S + J/L + N/M, K zero) applies.
 #
 # The mimic (standing) policy is the legacy `controller` section and ships
 # empty on purpose; supply a real checkpoint on the command line, e.g.
@@ -53,6 +53,12 @@ command:
   joystick:
     deadzone: 0.15
     max_age_s: 0.5
+    # Stick envelope cap: joint-vel safety gate (12.0 rad/s) was calibrated
+    # at 1.0 m/s (knee peak ~10.1); full-forward 2.0 m/s trips it in seconds
+    # (HMD session 2026-08-20). Stick +1 = 1.0 m/s until the gate is
+    # recalibrated per-joint (Phase B). cmd_limits above stay untouched —
+    # they are the policy contract, this is the operator envelope.
+    max_stick_scale: {lin_vel_x: 0.5}
   keyboard:
     speeds: {lin_x: 1.0, lin_y: 0.5, ang_z: 1.0}
 

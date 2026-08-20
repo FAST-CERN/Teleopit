@@ -36,6 +36,7 @@ class PicoJoystickProvider:
         *,
         deadzone: float = _DEFAULT_DEADZONE,
         cmd_limits: dict[str, list[float]] | None = None,
+        max_stick_scale: dict[str, float] | None = None,
         max_age_s: float = 0.5,
         clock: Any = time.monotonic,
     ) -> None:
@@ -49,6 +50,18 @@ class PicoJoystickProvider:
         self._lin_x = (float(limits["lin_vel_x"][0]), float(limits["lin_vel_x"][1]))
         self._lin_y = (float(limits["lin_vel_y"][0]), float(limits["lin_vel_y"][1]))
         self._ang_z = (float(limits["ang_vel_z"][0]), float(limits["ang_vel_z"][1]))
+        # Per-axis stick-scale cap in (0, 1]: stick +1 reaches only
+        # scale*hi (resp. scale*|lo|). The builder still clamps to the full
+        # cmd_limits — the cap is the operator-facing envelope, the limits
+        # are the policy contract.
+        self._stick_scale = {"lin_vel_x": 1.0, "lin_vel_y": 1.0, "ang_vel_z": 1.0}
+        if max_stick_scale:
+            for axis, scale in max_stick_scale.items():
+                if not 0.0 < float(scale) <= 1.0:
+                    raise ValueError(
+                        f"max_stick_scale[{axis!r}] must be in (0, 1], got {scale}"
+                    )
+                self._stick_scale[axis] = float(scale)
         self._max_age_s = float(max_age_s)
         self._clock = clock
 
@@ -86,9 +99,13 @@ class PicoJoystickProvider:
         if sticks is None:
             return cmd
         left_x, left_y, right_x = sticks
-        cmd[0] = self._scale(left_y, *self._lin_x)
-        cmd[1] = self._scale(left_x, *self._lin_y)
-        cmd[5] = self._scale(right_x, *self._ang_z)
+        cmd[0] = self._scale(left_y, *self._lin_x) * self._stick_scale["lin_vel_x"]
+        # Sign convention (operator-verified 2026-08-20 HMD session): the
+        # policy's lin_y>0 is a LEFT strafe and ang_z>0 is a LEFT (CCW) turn
+        # (Phase A keyboard gate: a=lin_y+, q=ang_z+), while Unity stick +X
+        # is a physical push RIGHT — so the lateral/turn axes invert here.
+        cmd[1] = self._scale(-left_x, *self._lin_y) * self._stick_scale["lin_vel_y"]
+        cmd[5] = self._scale(-right_x, *self._ang_z) * self._stick_scale["ang_vel_z"]
         return cmd
 
     def reset(self) -> None:

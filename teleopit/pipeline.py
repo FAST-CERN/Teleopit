@@ -96,6 +96,7 @@ class TeleopPipeline:
                 deadzone=float(cfg_get(joystick_cfg, "deadzone", 0.15)),
                 max_age_s=float(cfg_get(joystick_cfg, "max_age_s", 0.5)),
                 cmd_limits=dict(cmd_limits) if cmd_limits is not None else None,
+                max_stick_scale=dict(cfg_get(joystick_cfg, "max_stick_scale", {}) or {}) or None,
             )
             keyboard_tee = None
         else:

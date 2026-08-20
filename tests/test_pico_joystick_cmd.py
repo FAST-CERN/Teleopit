@@ -65,12 +65,19 @@ def test_left_stick_y_maps_lin_x_asymmetric_limits():
 
 
 def test_left_stick_x_maps_lin_y():
+    # Push RIGHT (+1) must strafe RIGHT (lin_y negative): Phase A keyboard
+    # convention has lin_y>0 = left strafe, Unity stick +X = push right.
     provider = PicoJoystickProvider(_provider(left=(1.0, 0.0)), cmd_limits=_CMD_LIMITS, clock=_clock)
+    np.testing.assert_allclose(provider.get_cmd()[1], -0.5)
+    provider = PicoJoystickProvider(_provider(left=(-1.0, 0.0)), cmd_limits=_CMD_LIMITS, clock=_clock)
     np.testing.assert_allclose(provider.get_cmd()[1], 0.5)
 
 
 def test_right_stick_x_maps_ang_z():
+    # Push RIGHT (+0.8) must turn RIGHT (ang_z negative): ang_z>0 = CCW/left.
     provider = PicoJoystickProvider(_provider(right=(0.8, 0.0)), cmd_limits=_CMD_LIMITS, clock=_clock)
+    np.testing.assert_allclose(provider.get_cmd()[5], -0.8)
+    provider = PicoJoystickProvider(_provider(right=(-0.8, 0.0)), cmd_limits=_CMD_LIMITS, clock=_clock)
     np.testing.assert_allclose(provider.get_cmd()[5], 0.8)
 
 
@@ -118,3 +125,34 @@ def test_reset_and_close_are_safe():
     provider.reset()
     provider.close()
     assert provider.get_cmd().shape == (6,)
+
+
+def test_stick_scale_cap_bounds_full_forward():
+    """max_stick_scale caps the reachable stick envelope (operator fix 2026-08-20).
+
+    Full-forward at cmd hi=2.0 m/s exceeds the Phase-A-validated safety
+    envelope (joint-vel gate 12.0 rad/s was calibrated at 1.0 m/s; a 2.0 m/s
+    gait trips it within seconds). Cap the scale so stick +1 reaches only
+    the ratified 1.0 m/s while the builder clamp stays at the yaml limits.
+    """
+    provider = PicoJoystickProvider(
+        _provider(left=(0.0, 1.0)), cmd_limits=_CMD_LIMITS, clock=_clock,
+        max_stick_scale={"lin_vel_x": 0.5},
+    )
+    np.testing.assert_allclose(provider.get_cmd()[0], 1.0)  # 1.0 * 2.0 * 0.5
+    provider = PicoJoystickProvider(
+        _provider(left=(0.0, -1.0)), cmd_limits=_CMD_LIMITS, clock=_clock,
+        max_stick_scale={"lin_vel_x": 0.5},
+    )
+    np.testing.assert_allclose(provider.get_cmd()[0], -0.5)  # -1 * 1.0 * 0.5
+
+
+def test_stick_scale_cap_partial_stick_and_default_uncapped():
+    provider = PicoJoystickProvider(
+        _provider(left=(0.0, 0.5)), cmd_limits=_CMD_LIMITS, clock=_clock,
+        max_stick_scale={"lin_vel_x": 0.5},
+    )
+    np.testing.assert_allclose(provider.get_cmd()[0], 0.5)  # half stick -> half of cap
+    # Default: no cap dict -> full envelope (unchanged Phase A behavior).
+    provider = PicoJoystickProvider(_provider(left=(0.0, 1.0)), cmd_limits=_CMD_LIMITS, clock=_clock)
+    np.testing.assert_allclose(provider.get_cmd()[0], 2.0)

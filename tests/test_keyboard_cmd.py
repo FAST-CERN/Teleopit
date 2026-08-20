@@ -34,15 +34,33 @@ def test_twist_command_vec6_roundtrip():
     np.testing.assert_allclose(t.vec6(), [0.5, -0.2, 0.0, 0.0, 0.0, 0.3])
 
 
-def test_keyboard_w_converges_while_held_and_x_stops():
+def test_keyboard_w_converges_while_held_and_k_stops():
     # Hold-to-move: a single observed press holds the target within the
     # release window, and get_cmd converges toward it exponentially.
     p = KeyboardTwistProvider(keyboard=_FakeKeyboard(["w"]), alpha=1.0)  # type: ignore[arg-type]
     np.testing.assert_allclose(p.get_cmd()[0], 1.0, atol=1e-6)
     np.testing.assert_allclose(p.get_cmd()[2], 0.0, atol=1e-6)  # no turn axis
-    p = KeyboardTwistProvider(keyboard=_FakeKeyboard(["w", "x"]), alpha=1.0)  # type: ignore[arg-type]
+    p = KeyboardTwistProvider(keyboard=_FakeKeyboard(["w", "k"]), alpha=1.0)  # type: ignore[arg-type]
     p.get_cmd()  # consumes both events
-    np.testing.assert_allclose(p.get_cmd(), np.zeros(6), atol=1e-6)  # x cleared
+    np.testing.assert_allclose(p.get_cmd(), np.zeros(6), atol=1e-6)  # k cleared
+
+
+def test_keyboard_legacy_conflicting_keys_are_gone():
+    """Session-mode keys must never double as twist keys (operator fix 2026-08-20).
+
+    Old WASD/QE/x mapping collided with the SimLoopSession mode machine on
+    the keyboard-fallback path: q quit the session when the operator meant
+    turn-left, a toggled mocap pause when they meant strafe-left, and x
+    exited VELOCITY when they meant zero-twist. The tee delivers every key
+    to BOTH consumers, so the twist map must avoid the session's keys
+    (h q y v x a b r space p) entirely.
+    """
+    for legacy in ("a", "d", "q", "e", "x"):
+        p = KeyboardTwistProvider(keyboard=_FakeKeyboard([legacy]), alpha=1.0)  # type: ignore[arg-type]
+        np.testing.assert_allclose(
+            p.get_cmd(), np.zeros(6), atol=1e-6,
+            err_msg=f"legacy key {legacy!r} must not produce a twist",
+        )
 
 
 def test_keyboard_release_returns_to_zero():
@@ -75,7 +93,9 @@ def test_keyboard_smoothed_direction_change():
 
 
 def test_keyboard_all_directions():
-    for key, idx, sign in [("w", 0, 1), ("s", 0, -1), ("a", 1, 1), ("d", 1, -1), ("q", 5, 1), ("e", 5, -1)]:
+    # Remapped keys (2026-08-20): W/S fwd/back, J/L strafe left/right,
+    # N/M turn left/right — none collide with session mode keys.
+    for key, idx, sign in [("w", 0, 1), ("s", 0, -1), ("j", 1, 1), ("l", 1, -1), ("n", 5, 1), ("m", 5, -1)]:
         p = KeyboardTwistProvider(keyboard=_FakeKeyboard([key]), alpha=1.0)  # type: ignore[arg-type]
         cmd = p.get_cmd()
         expected = np.zeros(6)
