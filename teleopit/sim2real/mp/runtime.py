@@ -62,6 +62,7 @@ from teleopit.recording.hdf5 import (
     build_neck_action,
 )
 from teleopit.sim.reference_motion import OfflineReferenceMotion
+from teleopit.sim.reference_interpolation import StandingReferenceInterpolator
 from teleopit.sim.reference_timeline import ReferenceTimeline, ReferenceWindow, ReferenceWindowBuilder
 from teleopit.sim.reference_utils import (
     build_offline_reference_window,
@@ -1227,6 +1228,14 @@ class _RobotControlWorker:
         self._standing_return_kp_ramp_floor_ratio = float(
             cfg_get(cfg, "standing_return_kp_ramp_floor_ratio", 0.5)
         )
+        # Reference-side transition ramp for entering STANDING from an active
+        # mode (MOCAP/ARMS/POLICY). Without it the standing reference jumps in
+        # one step from the operator's last commanded pose to the default
+        # standing pose — the jitter observed on MOCAP->STANDING (X key).
+        self._standing_ref_interp: StandingReferenceInterpolator | None = None
+        self._standing_ref_interp_duration_s = float(
+            cfg_get(cfg, "standing_reference_ramp_duration", 1.0)
+        )
         self._arm_joint_indices = parse_arm_joint_indices(cfg, num_actions=self.num_actions)
 
         self._ref_cfg = parse_reference_config(cfg, provider_fps=None)
@@ -1969,6 +1978,16 @@ class _RobotControlWorker:
     def _standing_step(self) -> None:
         robot_state = self.robot.get_state()
         qpos = self._standing_qpos.copy()
+        if self._standing_ref_interp is not None:
+            t_s = time.monotonic() - self._standing_ref_interp_t0
+            qpos = self._standing_ref_interp.sample(t_s)
+            if self._standing_ref_interp.finished(t_s):
+                # Adopt the ramp endpoint as the standing reference for the
+                # rest of the stint — never snap back to the fixed default.
+                self._standing_qpos[:] = np.asarray(qpos, dtype=np.float64)
+                self._standing_qpos[0:2] = self._standing_ref_hold_xy
+                self._standing_ref_interp = None
+                qpos = self._standing_qpos.copy()
         motion_joint_vel = np.zeros(self.num_actions, dtype=np.float32)
         motion_qpos = np.asarray(qpos[:7 + self.num_actions], dtype=np.float32)
         reference_window = None
@@ -2219,7 +2238,27 @@ class _RobotControlWorker:
         self._mocap_session.reset()
         self._last_commanded_motion_qpos = None
         self._set_default_standing_reference(state)
-        self._reset_policy_state()
+        if prev_mode in (RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY):
+            # Ramp the reference from where the robot IS (its current physical
+            # pose) to the standing pose instead of snapping it: the mimic
+            # policy sees a continuous reference, matching the kp ramp that
+            # already softens the output side. from_hold yaw-aligns the
+            # standing target to the robot's current heading.
+            self._standing_ref_interp = StandingReferenceInterpolator.from_hold(
+                init_qpos,
+                self._standing_qpos.copy(),
+                self._standing_ref_interp_duration_s,
+            )
+            self._standing_ref_interp_t0 = time.monotonic()
+            self._standing_ref_hold_xy = init_qpos[0:2].copy()
+            # prev_action is a 167D observation channel: zeroing it here (as
+            # _reset_policy_state does) put a step change into the policy
+            # input at the same moment the reference used to snap. Keep the
+            # last live action across the mode switch.
+            self._reset_policy_state(keep_last_action=True)
+        else:
+            self._standing_ref_interp = None
+            self._reset_policy_state()
         if prev_mode in (
             RobotMode.MOCAP,
             RobotMode.ARMS,
@@ -2322,8 +2361,9 @@ class _RobotControlWorker:
         self._last_mocap_hold_reason = None
         operator_logger.warning("mode -> DAMPING")
 
-    def _reset_policy_state(self) -> None:
-        self._last_action = np.zeros(self.num_actions, dtype=np.float32)
+    def _reset_policy_state(self, *, keep_last_action: bool = False) -> None:
+        if not keep_last_action:
+            self._last_action = np.zeros(self.num_actions, dtype=np.float32)
         self._ref_proc.reset_smoothers()
         self._ref_proc.reset_alignment()
         self._mocap_session.reset()
