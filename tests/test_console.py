@@ -19,7 +19,7 @@ def test_sim_console_shows_only_enabled_keyboard_controls() -> None:
 
     labels = [control.keys for control in sim_keyboard_controls(cfg)]
 
-    assert labels == ["Y", "A", "B", "X", "Q"]
+    assert labels == ["Y", "V", "A", "B", "X", "Q"]
 
 
 def test_sim_console_hides_non_keyboard_controls() -> None:

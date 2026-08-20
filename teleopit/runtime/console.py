@@ -216,6 +216,7 @@ def sim_keyboard_controls(cfg: Any) -> tuple[KeyboardControl, ...]:
             return ()
         return (
             KeyboardControl("Y", "mocap"),
+            KeyboardControl("V", "velocity"),
             KeyboardControl("A", "pause/resume"),
             KeyboardControl("B", "arms"),
             KeyboardControl("X", "standing"),

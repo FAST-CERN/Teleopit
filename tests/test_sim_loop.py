@@ -1087,6 +1087,36 @@ def test_velocity_mode_survives_quiet_input_stream(monkeypatch) -> None:
 
 
 @requires_mujoco
+def test_v_velocity_refused_before_first_input_frame(monkeypatch) -> None:
+    """V before the pico headset ever sent a frame must not enter VELOCITY.
+
+    Without the has_frame gate each VELOCITY iteration would block up to the
+    provider timeout (60 s default) inside _fetch_realtime_input_quiet; entry
+    is refused instead (same shape as enter_mocap_mode's gate).
+    """
+    from teleopit.sim.loop import SimulationMode
+
+    class _NeverConnectedProvider:
+        fps = 1
+
+        def has_frame(self) -> bool:
+            return False
+
+        def get_realtime_input_packet(self):
+            raise AssertionError("never-connected stream must not be polled for packets")
+
+    loop, twist_builder, vel_controller, _ = _velocity_loop(
+        monkeypatch, [(TerminalKeyEvent("v"),)]
+    )
+    provider = _NeverConnectedProvider()
+    result = loop.run(input_provider=provider, retargeter=_DummyRetargeter(), num_steps=3)
+    assert result["steps"] == 3
+    assert loop.last_session.simulation_mode == SimulationMode.STANDING
+    assert vel_controller.compute_called == 0   # no twist step ever ran
+    assert len(twist_builder.cmds) == 0
+
+
+@requires_mujoco
 def test_simulation_loop_realtime_keyboard_mode_keeps_standing_when_input_not_ready(monkeypatch) -> None:
     from teleopit.sim.loop import SimulationLoop
 

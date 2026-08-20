@@ -20,16 +20,22 @@ def _sim_status(cfg: DictConfig) -> tuple[tuple[str, str], ...]:
     if provider == "pico4":
         keyboard_cfg = cfg_get(cfg, "keyboard", {}) or {}
         state = "STANDING" if bool(cfg_get(keyboard_cfg, "enabled", False)) else "MOCAP"
-        return (
+        rows = (
             ("State", state),
             ("Input", "Pico4 live"),
             ("Viewers", viewers),
         )
-    return (
-        ("State", "MOCAP"),
-        ("Input", "BVH"),
-        ("Viewers", viewers),
-    )
+    else:
+        rows = (
+            ("State", "MOCAP"),
+            ("Input", "BVH"),
+            ("Viewers", viewers),
+        )
+    controllers_cfg = getattr(cfg, "controllers", None)
+    velocity_cfg = getattr(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
+    if velocity_cfg is not None:
+        rows = rows + (("Velocity", "V from STANDING"),)
+    return rows
 
 
 @hydra.main(version_base=None, config_path="../../teleopit/configs", config_name="default")

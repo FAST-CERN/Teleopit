@@ -279,6 +279,14 @@ class SimLoopSession:
         if self.velocity_steps is None:
             self._loop._console.key_feedback("V", "velocity", result="no velocity stack")
             return False
+        if not self._loop._realtime_input_has_frame(self._input_provider):
+            # Same gate as enter_mocap_mode: entering before the provider ever
+            # delivered a frame would make every VELOCITY iteration block up to
+            # the provider timeout inside _fetch_realtime_input_quiet — the
+            # quiet stream must never stall stepping.
+            _logger.warning("Cannot switch to VELOCITY yet: realtime input has no frame available")
+            self._loop._console.key_feedback("V", "velocity", result="waiting for input")
+            return False
         if self.simulation_mode != SimulationMode.STANDING:
             # Locked decision 3: STANDING is the only validated hand-off;
             # MOCAP->VELOCITY direct switching is forbidden.
