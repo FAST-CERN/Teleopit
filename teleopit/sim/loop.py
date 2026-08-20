@@ -37,6 +37,7 @@ class SimulationMode(Enum):
     STANDING = "standing"
     MOCAP = "mocap"
     ARMS = "arms"
+    VELOCITY = "velocity"
 
 
 @final
@@ -90,6 +91,58 @@ class SimulationLoop:
 
         self._init_reference_config()
         self._init_components(viewers)
+
+        # VELOCITY-mode stack (task #6). None => VELOCITY unreachable and the
+        # loop behaves exactly as before; attach_velocity_stack() fills these.
+        self._velocity_controller: object | None = None
+        self._velocity_obs_builder: object | None = None
+        self._velocity_step_controller: object | None = None
+        self.last_session: object | None = None
+
+    def attach_velocity_stack(
+        self,
+        *,
+        velocity_controller: object,
+        velocity_obs_builder: object,
+        cmd_provider: object,
+        transition_duration_s: float,
+        joint_vel_limit: float,
+        tilt_threshold_rad: float,
+        pose_b: Float64Array,
+    ) -> object:
+        """Build the twist-policy runner + shared step controller (task #6).
+
+        Optional: without this call the loop behaves exactly as before.
+        """
+        if self._velocity_step_controller is not None:
+            raise RuntimeError("velocity stack already attached")
+        from teleopit.sim.velocity_step import VelocityStepController
+
+        velocity_runner = PolicyStepRunner(
+            robot=self.robot,
+            controller=cast(object, velocity_controller),
+            obs_builder=cast(object, velocity_obs_builder),
+            policy_hz=self.policy_hz,
+            decimation=self.decimation,
+            num_actions=self._num_actions,
+            kps=self._kps,
+            kds=self._kds,
+            torque_limits=self._torque_limits,
+            default_dof_pos=np.asarray(pose_b, dtype=np.float32),
+        )
+        step_controller = VelocityStepController(
+            velocity_runner=velocity_runner,
+            cmd_provider=cmd_provider,
+            pose_b=pose_b,
+            policy_hz=self.policy_hz,
+            transition_duration_s=transition_duration_s,
+            joint_vel_limit=joint_vel_limit,
+            tilt_threshold_rad=tilt_threshold_rad,
+        )
+        self._velocity_controller = velocity_controller
+        self._velocity_obs_builder = velocity_obs_builder
+        self._velocity_step_controller = step_controller
+        return step_controller
 
     def _init_reference_config(self) -> None:
         """Parse reference-window / realtime-buffer configuration from self.cfg."""
@@ -149,6 +202,7 @@ class SimulationLoop:
         from teleopit.sim.session import SimLoopSession
 
         session = SimLoopSession(self, input_provider, retargeter, num_steps)
+        self.last_session = session
         return session.run()
 
     def run_headless(
