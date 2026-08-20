@@ -442,3 +442,26 @@ def test_pico4_provider_invalidates_spine3_when_body_tracking_is_inactive() -> N
     assert snapshot is not None
     assert snapshot.hmd_rotation_wxyz is not None
     assert snapshot.spine3_rotation_wxyz is None
+
+
+def test_controller_state_exposes_primary_2d_axis():
+    from teleopit.inputs.pico4_provider import Pico4InputProvider
+
+    class _Controller:
+        raw = True
+        axis = {"x": 0.25, "y": -0.75, "grip": 0.1, "trigger": 0.2}
+
+    state = Pico4InputProvider._read_controller_state(_Controller())
+    assert state.axis_x == pytest.approx(0.25)
+    assert state.axis_y == pytest.approx(-0.75)
+    assert state.grip == pytest.approx(0.1)
+    assert state.present is True
+
+
+def test_controller_state_absent_controller_defaults_zero_axis():
+    from teleopit.inputs.pico4_provider import Pico4InputProvider
+
+    state = Pico4InputProvider._read_controller_state(None)
+    assert state.axis_x == 0.0
+    assert state.axis_y == 0.0
+    assert state.present is False
