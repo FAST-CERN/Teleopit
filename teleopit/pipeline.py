@@ -85,10 +85,17 @@ class TeleopPipeline:
         selected = str(cfg_get(command_cfg, "provider", _select_cmd_provider_kind(input_provider_kind)))
         if selected == "pico_joystick":
             joystick_cfg = cfg_get(command_cfg, "joystick", {}) or {}
+            controllers_cfg = cfg_get(cfg, "controllers", None)
+            velocity_cfg = cfg_get(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
+            cmd_limits = cfg_get(velocity_cfg, "cmd_limits", None)
+            # controllers.velocity.cmd_limits is the single source of the stick
+            # -> twist scaling (mirrors the policy's clamp); absent => provider
+            # defaults.
             cmd_provider = PicoJoystickProvider(
                 self.input_provider,
                 deadzone=float(cfg_get(joystick_cfg, "deadzone", 0.15)),
                 max_age_s=float(cfg_get(joystick_cfg, "max_age_s", 0.5)),
+                cmd_limits=dict(cmd_limits) if cmd_limits is not None else None,
             )
             keyboard_tee = None
         else:

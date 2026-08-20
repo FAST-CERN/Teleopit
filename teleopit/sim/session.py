@@ -166,7 +166,6 @@ class SimLoopSession:
         # VELOCITY-mode state (None stack => mode unreachable)
         self.velocity_steps = loop._velocity_step_controller
         self._velocity_interpolator = None
-        self._velocity_standing_ref: Float64Array | None = None
         self._steps_in_mode = 0
 
         # Frame cache (updated each iteration)
@@ -258,7 +257,6 @@ class SimLoopSession:
         # pose-B ramp left over from a previous VELOCITY stint so it cannot
         # replay stale interpolation on re-entry.
         self._velocity_interpolator = None
-        self._velocity_standing_ref = None
         self._steps_in_mode = 0
         self.simulation_mode = SimulationMode.STANDING
 
@@ -322,7 +320,6 @@ class SimLoopSession:
         self._velocity_interpolator = steps.arm_standing_interpolator(
             hold, steps.pose_b_qpos
         )
-        self._velocity_standing_ref = steps.pose_b_qpos.copy()
         self.reset_policy_reference_state(reset_mocap_session=True)
         self._loop._standing_qpos = steps.pose_b_qpos.copy()
         self.simulation_mode = SimulationMode.STANDING
@@ -508,7 +505,6 @@ class SimLoopSession:
                 # Adopt the yaw-aligned endpoint — NOT the identity-yaw
                 # _standing_qpos set at exit — so the hold never commands a
                 # turn back to world yaw 0 after a walk.
-                self._velocity_standing_ref = qpos.copy()
                 self._loop._standing_qpos = qpos.copy()
                 self._velocity_interpolator = None
             self.cached_retargeted = qpos

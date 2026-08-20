@@ -748,3 +748,116 @@ def test_pipeline_pico_joystick_attachs_no_keyboard_reader(monkeypatch, tmp_path
     assert isinstance(pipeline.loop.attached["cmd_provider"], PicoJoystickProvider)
     assert pipeline.loop.attached["keyboard_reader"] is None
 
+
+def test_pipeline_feeds_joystick_cmd_limits_from_velocity_yaml(monkeypatch, tmp_path: Path) -> None:
+    """Spec integrity: controllers.velocity.cmd_limits is the single source of
+    the stick -> twist scaling — the joystick provider must not silently fall
+    back to its hardcoded defaults when the yaml narrows/widens the ranges.
+    """
+    import numpy as np
+
+    from teleopit.commands import PicoJoystickProvider
+
+    class DummyRobot:
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    class DummyController:
+        _expected_obs_dim = 167
+        _multi_input = True
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+        def reset(self) -> None:
+            pass
+
+    class DummyObsBuilder:
+        total_obs_size = 167
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+        def reset(self) -> None:
+            pass
+
+    class DummyInputProvider:
+        human_format = "lafan1"
+        fps = 60
+
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    class DummyRetargeter:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    class DummyLoop:
+        policy_hz = 50.0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.attached: dict[str, object] = {}
+
+        def attach_velocity_stack(self, **kwargs: object) -> None:
+            self.attached = kwargs
+
+    class DummyVelocityController:
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    class DummyVelocityObsBuilder:
+        total_obs_size = 6
+        default_dof_pos = np.zeros(29, dtype=np.float64)
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    policy_path = tmp_path / "policy.onnx"
+    policy_path.write_bytes(b"dummy")
+    xml_path = tmp_path / "robot.xml"
+    xml_path.write_text("<mujoco model='dummy'/>", encoding="utf-8")
+
+    cmd_limits = {
+        "lin_vel_x": [-2.0, 4.0],  # deliberately != provider defaults
+        "lin_vel_y": [-1.0, 1.0],
+        "ang_vel_z": [-2.0, 2.0],
+    }
+    cfg = OmegaConf.create(
+        {
+            "robot": {
+                "num_actions": 29,
+                "xml_path": str(xml_path),
+                "default_angles": [0.0] * 29,
+            },
+            "controller": {"policy_path": str(policy_path)},
+            "controllers": {
+                "velocity": {
+                    "policy_path": str(policy_path),
+                    "default_dof_pos": [0.0] * 29,
+                    "cmd_limits": cmd_limits,
+                }
+            },
+            "input": {"provider": "pico4"},
+            "policy_hz": 50,
+            "pd_hz": 1000,
+            "command": {"provider": "pico_joystick"},
+        }
+    )
+
+    monkeypatch.setattr("teleopit.pipeline.MuJoCoRobot", DummyRobot)
+    monkeypatch.setattr("teleopit.pipeline.RLPolicyController", DummyController)
+    monkeypatch.setattr("teleopit.runtime.factory.VelCmdObservationBuilder", DummyObsBuilder)
+    monkeypatch.setattr("teleopit.pipeline.Pico4InputProvider", DummyInputProvider)
+    monkeypatch.setattr("teleopit.pipeline.RetargetingModule", DummyRetargeter)
+    monkeypatch.setattr("teleopit.pipeline.SimulationLoop", DummyLoop)
+    monkeypatch.setattr("teleopit.runtime.factory.build_velocity_policy_components",
+                        lambda cfg, root: (DummyVelocityController({}), DummyVelocityObsBuilder({})))
+
+    pipeline = TeleopPipeline(cfg)
+
+    provider = pipeline.loop.attached["cmd_provider"]
+    assert isinstance(provider, PicoJoystickProvider)
+    assert provider._lin_x == (-2.0, 4.0)
+    assert provider._lin_y == (-1.0, 1.0)
+    assert provider._ang_z == (-2.0, 2.0)
+
