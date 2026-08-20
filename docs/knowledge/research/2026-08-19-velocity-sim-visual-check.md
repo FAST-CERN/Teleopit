@@ -79,7 +79,7 @@ On Windows, the interpreter path is typically `C:/Users/user/.conda/envs/teleopi
 - [ ] Gait terminates, robot settles to pose B without stumbling
 
 ### Safety drills
-- [ ] **Tilt observation sanity:** While walking, manually push the robot in sim (apply external force via MuJoCo viewer ctrl-drag) beyond the tilt threshold → auto-returns to STANDING, does not keep walking while falling
+- [x] **Tilt observation sanity (unit-test covered; not reachable by push):** The tilt→STANDING path is locked by `tests/test_velocity_session.py` (`test_tilt_triggers_return_to_standing`). Live-triggering it was attempted via the T-key perturbation with a force sweep (220–1200 N, bursts up to 12 steps): the policy absorbs pelvis pushes — peak tilt 2-28° vs the 57.3° (1.0 rad) threshold — and the knee joint-velocity check fires first every time (see 2026-08-20 calibration in the SDD ledger). Verified INSTEAD at runtime: joint-vel → STOP (live, T×7 in the operator run). Tilt channel live verification deferred to Phase B hardware where real falls occur.
 - [ ] **Esc emergency stop:** Pressing Esc stops stepping immediately; robot state frozen consistent with damping semantics (no drift, no continued actuation)
 
 ### Metrics cross-check
@@ -87,16 +87,16 @@ On Windows, the interpreter path is typically `C:/Users/user/.conda/envs/teleopi
   - `max_target_jump_rad` — the 0.25 bound applies ONLY to the STANDING→VELOCITY hand-off moment (the automated gate measures exactly that seam in pytest: `tests/test_velocity_integration.py::test_transition_jump_bounded`). **Do NOT fail the run on this console value:** it accumulates over the WHOLE session, and during active gait a 50 Hz walking policy legitimately moves knee/ankle targets by 0.3-0.85 rad per step — so after any walking the session-cumulative value is EXPECTED to exceed 0.25 and that is not a failure. Use the hand-off checklist item above (watch the switch instant: single smooth weight shift, no visible jump/spasm) as the observational criterion; the numeric 0.25 check is done by the pytest gate.
   - `cmd_track_err_mps < 0.35` (measured 0.159 m/s in Task 8)
   - Standing height > 0.6 m (measured 0.758 m — pose B is upright)
-- [ ] Record actual values here:
-  - `max_target_jump_rad` = ___
-  - `cmd_track_err_mps` = ___
-  - `standing_height_m` = ___
+- [x] Record actual values here (operator run 2026-08-20 12:05, 545 steps):
+  - `max_target_jump_rad` = 0.865 (session-cumulative incl. perturbation stagger — expected >0.25 after walking; hand-off seam itself gated by pytest at 0.211/0.25)
+  - `cmd_track_err_mps` = 0.0 (no move commands issued during this run; pytest gate measured 0.159 at [1,0,0])
+  - `standing_height_m` = 0.758 (min_root_height_m)
 
 ---
 
 ## Outcome
 
-**Result:** PASS / FAIL
+**Result:** PASS (user-accepted 2026-08-20 12:12)
 
 **Notes (if FAIL):**
 - Describe what failed and any console errors or warnings
