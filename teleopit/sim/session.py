@@ -180,7 +180,13 @@ class SimLoopSession:
         if loop._playback_keyboard_enabled and self.offline_reference is not None:
             keyboard_reader = TerminalKeyboardReader()
         elif loop._realtime_keyboard_enabled and self.realtime_interpolated_input:
-            keyboard_reader = TerminalKeyboardReader()
+            # Shared-reader path: when the keyboard twist fallback is active,
+            # TeleopPipeline already wrapped ONE TerminalKeyboardReader in a
+            # KeyboardTee and parked it on the loop; polling that tee (not a
+            # private second reader) keeps the session's mode keys and the
+            # twist provider's WASD/QE from racing on the console buffer.
+            shared = getattr(loop, "_velocity_keyboard_reader", None)
+            keyboard_reader = cast(TerminalKeyboardReader, shared) if shared is not None else TerminalKeyboardReader()
         if keyboard_reader is not None and not keyboard_reader.active:
             keyboard_reader.close()
             keyboard_reader = None

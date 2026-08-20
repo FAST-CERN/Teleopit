@@ -90,18 +90,29 @@ class TeleopPipeline:
                 deadzone=float(cfg_get(joystick_cfg, "deadzone", 0.15)),
                 max_age_s=float(cfg_get(joystick_cfg, "max_age_s", 0.5)),
             )
+            keyboard_tee = None
         else:
+            from teleopit.commands import KeyboardTee
             from teleopit.runtime.terminal_keyboard import TerminalKeyboardReader
 
             speeds = cfg_get(cfg_get(command_cfg, "keyboard", {}), "speeds", None)
-            # Own reader (WASD/QE keys are disjoint from the session's mode
-            # keys): the pico entry keeps one session reader; the bvh/udp
-            # fallback gets this second reader instead of a tee.
+            # ONE shared reader (Task 6 fix): the session's mode keys and the
+            # twist provider's WASD/QE both consume the same console buffer.
+            # Two readers race — the session polls first and drains (and
+            # drops) w/s/d/e before the provider ever sees them — so wrap the
+            # single reader in a KeyboardTee and hand the SAME tee to both:
+            # the twist provider here, SimLoopSession via attach_velocity_stack
+            # (it polls that tee instead of building its own reader).
             keyboard = TerminalKeyboardReader()
             if not keyboard.active:
                 keyboard.close()
                 keyboard = None
-            cmd_provider = KeyboardTwistProvider(speeds=speeds, keyboard=keyboard)
+            keyboard_tee = (
+                KeyboardTee(keyboard, refresh_s=1.0 / self.loop.policy_hz)
+                if keyboard is not None
+                else None
+            )
+            cmd_provider = KeyboardTwistProvider(speeds=speeds, keyboard=keyboard_tee)
         safety_cfg = cfg_get(cfg, "safety", {}) or {}
         self.loop.attach_velocity_stack(
             velocity_controller=velocity_controller,
@@ -113,6 +124,7 @@ class TeleopPipeline:
             joint_vel_limit=float(cfg_get(safety_cfg, "joint_vel_limit", 12.0)),
             tilt_threshold_rad=float(cfg_get(safety_cfg, "tilt_threshold_rad", 1.0)),
             pose_b=np.asarray(velocity_obs_builder.default_dof_pos, dtype=np.float64),
+            keyboard_reader=keyboard_tee,
         )
 
     def run(self, num_steps: int) -> dict[str, float | int | str]:

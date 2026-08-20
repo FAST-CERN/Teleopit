@@ -97,6 +97,9 @@ class SimulationLoop:
         self._velocity_controller: object | None = None
         self._velocity_obs_builder: object | None = None
         self._velocity_step_controller: object | None = None
+        # Shared keyboard reader (KeyboardTee) when the keyboard twist
+        # fallback is active; None => SimLoopSession builds its own reader.
+        self._velocity_keyboard_reader: object | None = None
         self.last_session: object | None = None
 
     def attach_velocity_stack(
@@ -109,10 +112,20 @@ class SimulationLoop:
         joint_vel_limit: float,
         tilt_threshold_rad: float,
         pose_b: Float64Array,
+        keyboard_reader: object | None = None,
     ) -> object:
         """Build the twist-policy runner + shared step controller (task #6).
 
         Optional: without this call the loop behaves exactly as before.
+
+        ``keyboard_reader`` (optional) shares ONE terminal reader between the
+        session's mode keys and the keyboard twist provider: TeleopPipeline
+        wraps its reader in a KeyboardTee and passes the tee here, so
+        SimLoopSession polls that same tee instead of constructing (and
+        draining) a second, private TerminalKeyboardReader — two readers race
+        on the same console buffer and whichever polls first drops the other
+        consumer's keys. None (default): the session builds its own reader,
+        as before.
         """
         if self._velocity_step_controller is not None:
             raise RuntimeError("velocity stack already attached")
@@ -142,6 +155,8 @@ class SimulationLoop:
         self._velocity_controller = velocity_controller
         self._velocity_obs_builder = velocity_obs_builder
         self._velocity_step_controller = step_controller
+        if keyboard_reader is not None:
+            self._velocity_keyboard_reader = keyboard_reader
         return step_controller
 
     def _init_reference_config(self) -> None:

@@ -1182,3 +1182,114 @@ def test_simulation_loop_realtime_keyboard_mode_keeps_standing_when_input_not_re
     assert len(obs_builder.mimic_obs_calls) == 2
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[0], np.array([0.0], dtype=np.float32), atol=1e-6)
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[1], np.array([0.0], dtype=np.float32), atol=1e-6)
+
+
+@requires_mujoco
+def test_session_uses_shared_keyboard_reader_when_velocity_stack_attachs_one(monkeypatch) -> None:
+    """Keyboard-twist fallback input race fix (Task 6 Part B).
+
+    TeleopPipeline wraps ONE TerminalKeyboardReader in a KeyboardTee and
+    passes it to attach_velocity_stack; SimLoopSession must poll THAT tee
+    (self.keyboard_reader is the tee) instead of constructing a private
+    second TerminalKeyboardReader. Two readers race on the console buffer:
+    the session polls first and would drain (and drop) the twist keys
+    before KeyboardTwistProvider ever saw them. Here one physical batch
+    carries both a mode key (v) and a twist key (w) and BOTH consumers act.
+    """
+    from teleopit.commands import KeyboardTee, KeyboardTwistProvider
+    from teleopit.sim.loop import SimulationMode, SimulationLoop
+
+    constructed = []
+
+    def _fail_if_constructed():
+        constructed.append(True)
+
+        class _PrivateReaderProbe:
+            active = False
+
+            def poll(self):
+                return ()
+
+            def close(self):
+                pass
+
+        return _PrivateReaderProbe()
+
+    monkeypatch.setattr("teleopit.sim.session.TerminalKeyboardReader", _fail_if_constructed)
+
+    class _RealtimeProvider:
+        fps = 1
+
+        def has_frame(self):
+            return True
+
+        def get_realtime_input_packet(self):
+            return RealtimeInputPacket(
+                frame={"Pelvis": (np.zeros(3, dtype=np.float32), np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))},
+                timestamp_s=0.0, seq=0, control_events=(),
+            )
+
+    class _ScriptedReader:
+        """The single physical reader the tee wraps (v enters, w is twist)."""
+
+        def __init__(self):
+            self._batches = [
+                (TerminalKeyEvent("v"), TerminalKeyEvent("w")),
+            ]
+            self.polls = 0
+
+        @property
+        def active(self):
+            return True
+
+        def poll(self):
+            self.polls += 1
+            return self._batches.pop(0) if self._batches else ()
+
+        def close(self):
+            pass
+
+    loop = SimulationLoop(
+        robot=_VelocityDummyRobot(),
+        controller=_DummyController(),
+        obs_builder=_DummyObsBuilder(),
+        bus=InProcessBus(),
+        cfg={"policy_hz": 50.0, "pd_hz": 50.0, "realtime": False,
+             "retarget_buffer_enabled": False, "keyboard": {"enabled": True}},
+        viewers=set(),
+    )
+
+    shared_reader = _ScriptedReader()
+    # refresh_s huge: one drained batch is cached and redelivered to both
+    # consumers' polls within this run, mirroring one policy period.
+    tee = KeyboardTee(shared_reader, refresh_s=1000.0)
+    twist_builder = _DummyTwistBuilder()
+    loop.attach_velocity_stack(
+        velocity_controller=_DummyVelocityController(),
+        velocity_obs_builder=twist_builder,
+        cmd_provider=KeyboardTwistProvider(
+            speeds={"lin_x": 1.0, "lin_y": 0.5, "ang_z": 1.0}, keyboard=tee, alpha=1.0,
+        ),
+        transition_duration_s=1.0,
+        joint_vel_limit=10.0,
+        tilt_threshold_rad=1.0,
+        pose_b=np.zeros(29, dtype=np.float64),
+        keyboard_reader=tee,
+    )
+
+    result = loop.run(input_provider=_RealtimeProvider(), retargeter=_DummyRetargeter(), num_steps=3)
+
+    assert result["steps"] == 3
+    assert constructed == []  # session never built a private second reader
+    session = loop.last_session
+    assert session.keyboard_reader is tee  # session polls the shared tee
+    assert session.simulation_mode == SimulationMode.VELOCITY  # v acted on
+    assert shared_reader.polls == 1         # reader drained exactly once
+    # w survived the session's first poll and reached the twist provider:
+    # v flips the mode at the top of iteration 1, so every one of the 3
+    # iterations is a VELOCITY step whose cmd carried the latched w
+    # (release_after_s default holds it across this fast headless run).
+    assert len(twist_builder.cmds) == 3
+    for cmd in twist_builder.cmds:
+        np.testing.assert_allclose(cmd[:3], [1.0, 0.0, 0.0])  # lin_x = w held
+
