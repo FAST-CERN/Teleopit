@@ -60,3 +60,16 @@ def test_keyboard_no_keyboard_returns_zeros():
 def test_command_provider_isinstance_runtime_checkable():
     p = KeyboardTwistProvider(keyboard=None)
     assert isinstance(p, CommandProvider)
+
+
+class TestTerminalKeyboardReaderPlatforms:
+    """Cross-platform reader contract: inactive without a tty, no-raise close."""
+
+    def test_reader_inactive_without_tty(self):
+        # pytest runs with piped stdin on CI — isatty() False everywhere,
+        # and on Windows the msvcrt backend still requires a tty check first.
+        from teleopit.runtime.terminal_keyboard import TerminalKeyboardReader
+        reader = TerminalKeyboardReader()
+        assert reader.active is False
+        assert reader.poll() == ()
+        reader.close()  # must not raise in either state
