@@ -69,6 +69,12 @@ class VelocitySimSession:
 
         self._pose_b = np.asarray(cfg_get(cfg, "pose_b"), dtype=np.float64).reshape(-1)
         self._pose_b_qpos = self._standing_qpos_of_pose(self._pose_b)
+        # Standing reference actually held by the STANDING step. Starts at the
+        # identity-yaw pose B; each VELOCITY->STANDING transition replaces it
+        # with the yaw-aligned endpoint of the hand-off interpolator, so the
+        # reference never snaps the robot's heading back to world yaw 0 after
+        # the robot walked and turned.
+        self._standing_ref_qpos: np.ndarray = self._pose_b_qpos.copy()
 
         self.mode = VelocityMode.STANDING
         self._pending_mode: VelocityMode | None = None
@@ -229,12 +235,19 @@ class VelocitySimSession:
 
     def _standing_step(self) -> None:
         state = self._robot.get_state()
-        qpos = self._pose_b_qpos
+        qpos = self._standing_ref_qpos
         if self._interpolator is not None:
             t_s = self._steps_in_mode * (1.0 / self._policy_hz)
             qpos = self._interpolator.sample(t_s)
             if self._interpolator.finished(t_s):
+                # Adopt the interpolator endpoint (pose B yaw-aligned to the
+                # hand-off heading) as the standing reference for as long as
+                # this STANDING stint lasts — do NOT fall back to the fixed
+                # identity-yaw _pose_b_qpos, which would command a 180° turn
+                # back to world yaw 0 after a walk.
+                self._standing_ref_qpos = np.asarray(qpos, dtype=np.float64).copy()
                 self._interpolator = None
+                qpos = self._standing_ref_qpos
         prep = self._mimic_runner.prepare_static_motion_command(qpos)
         obs = self._mimic_runner_build_obs(state, prep)
         action = np.asarray(

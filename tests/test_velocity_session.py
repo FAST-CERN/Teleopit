@@ -101,12 +101,22 @@ class _StubRobot:
         self.steps = 0
         self.qpos = np.zeros(29)
         self.tilted = False
+        self.quat_override: np.ndarray | None = None
+        self.base_pos_override: np.ndarray | None = None
 
     def get_state(self):
-        quat = (
-            np.array([0.5, 0.5, 0.5, 0.5], dtype=np.float64)
-            if self.tilted
-            else np.array([1.0, 0.0, 0.0, 0.0])
+        if self.quat_override is not None:
+            quat = np.asarray(self.quat_override, dtype=np.float64)
+        else:
+            quat = (
+                np.array([0.5, 0.5, 0.5, 0.5], dtype=np.float64)
+                if self.tilted
+                else np.array([1.0, 0.0, 0.0, 0.0])
+            )
+        base_pos = (
+            np.asarray(self.base_pos_override, dtype=np.float64)
+            if self.base_pos_override is not None
+            else np.array([0.0, 0.0, 0.75])
         )
         return RobotState(
             qpos=self.qpos,
@@ -114,7 +124,7 @@ class _StubRobot:
             quat=quat,
             ang_vel=np.zeros(3),
             timestamp=float(self.steps),
-            base_pos=np.array([0.0, 0.0, 0.75]),
+            base_pos=base_pos,
             base_lin_vel=np.array([1.0, 0.0, 0.0]),
         )
 
@@ -576,3 +586,30 @@ def test_cmd_tracking_error_metric():
     summary = session.run(num_steps=2)
     # actual base_lin_vel_b[:2] = [1, 0], cmd[:2] = [1.5, 0] -> |err| = 0.5
     np.testing.assert_allclose(summary["cmd_track_err_mps"], 0.5, atol=1e-6)
+
+
+class TestStandingReferenceYawRetention:
+    """Q1 (visual-check finding): after walking+turning 180° and pressing b,
+    the standing reference must keep the robot's heading — not snap back to
+    world yaw 0 once the 1 s interpolation ends."""
+
+    def test_standing_ref_adopts_yaw_aligned_interpolator_endpoint(self):
+        robot, mimic_runner, vel_runner = _components()
+        yaw = np.pi
+        robot.quat_override = np.array([np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)])
+        robot.base_pos_override = np.array([1.0, 0.5, 0.75])
+        session = VelocitySimSession(
+            robot=robot, mimic_runner=mimic_runner, velocity_runner=vel_runner,
+            command_provider=_StubCmd([0, 0, 0, 0, 0, 0]), cfg=_cfg(),
+        )
+        session.mode = VelocityMode.VELOCITY
+        session._pending_mode = VelocityMode.STANDING
+        session._apply_pending_mode(robot.get_state())
+        assert session._interpolator is not None
+        # Run past transition_duration_s: the step body adopts the endpoint.
+        session._steps_in_mode = int(session._transition_duration_s * session._policy_hz) + 1
+        session._standing_step()
+        assert session._interpolator is None
+        ref = session._standing_ref_qpos
+        ref_yaw = 2.0 * np.arctan2(ref[6], ref[3])
+        assert abs(ref_yaw - yaw) < 1e-6, "standing ref must retain the walked-to heading"
