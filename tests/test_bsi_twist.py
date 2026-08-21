@@ -136,3 +136,84 @@ def test_idle_enters_after_two_packets():
     clock.advance(0.1)
     after = p.get_cmd()
     assert after[0] < mid[0] < 0.6  # decaying
+
+
+def test_silence_falls_to_idle_within_1s_and_zero_by_1_5s():
+    # A source that goes permanently quiet after its script ends (Task 2's
+    # end-of-script semantics): link loss -> provider falls to IDLE.
+    class _QuietAfter:
+        """Emits FORWARD at 10Hz for 2s, then never again (link lost)."""
+
+        def __init__(self, clock):
+            self._clock = clock
+            self._last = None
+
+        def poll(self):
+            now = self._clock()
+            if now >= 2.0:
+                return None
+            if self._last is not None and now - self._last < 0.1:
+                return None
+            self._last = now
+            from teleopit.commands.bsi_twist import DiscreteIntent
+            return DiscreteIntent(command=INTENT_FORWARD, rx_time_s=now)
+
+        def close(self):
+            return None
+
+    clock = ManualClock()
+    p = BsiTwistProvider(_QuietAfter(clock), clock=clock)
+    for _ in range(100):  # 2.0s: settle into FORWARD at 0.6
+        p.get_cmd()
+        clock.advance(0.02)
+    assert p.get_cmd()[0] == pytest.approx(0.6, abs=0.01)
+    clock.advance(1.1)  # past the 1.0s silence timeout since the last packet
+    cmd = p.get_cmd()
+    assert cmd[0] < 0.6  # intent already fell to IDLE on this first call
+    for _ in range(60):  # 1.2s decay pump: smoothed output reaches ~0
+        cmd = p.get_cmd()
+        clock.advance(0.02)
+    assert cmd[0] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_mute_forces_idle_next_cycle_and_unmute_restores():
+    clock = ManualClock()
+    p = BsiTwistProvider(
+        ScriptedIntentSource([(INTENT_FORWARD, 60.0)], clock=clock),
+        clock=clock,
+    )
+    for _ in range(200):
+        p.get_cmd()
+        clock.advance(0.02)
+    assert p.get_cmd()[0] == pytest.approx(0.6, abs=0.01)
+    assert p.toggle_mute() is True
+    decaying = p.get_cmd()[0]
+    assert decaying < 0.6  # next cycle already decaying toward zero
+    for _ in range(200):
+        p.get_cmd()
+        clock.advance(0.02)
+    assert p.get_cmd()[0] == pytest.approx(0.0, abs=1e-3)
+    assert p.toggle_mute() is False  # unmute
+    for _ in range(200):  # intent stream still FORWARD -> recovers
+        p.get_cmd()
+        clock.advance(0.02)
+    assert p.get_cmd()[0] == pytest.approx(0.6, abs=0.01)
+
+
+def test_mute_survives_reset():
+    p, _ = _provider([(INTENT_FORWARD, 60.0)])
+    p.toggle_mute()
+    p.reset()
+    assert p.muted is True
+
+
+def test_unknown_command_value_fails_safe_to_idle():
+    clock = ManualClock()
+    p = BsiTwistProvider(
+        ScriptedIntentSource([(99, 60.0)], clock=clock),
+        clock=clock,
+    )
+    for _ in range(300):
+        p.get_cmd()
+        clock.advance(0.02)
+    np.testing.assert_allclose(p.get_cmd(), np.zeros(6, dtype=np.float32))
