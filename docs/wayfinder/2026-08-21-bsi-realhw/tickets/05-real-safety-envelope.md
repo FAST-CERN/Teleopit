@@ -3,7 +3,7 @@ id: bsi-realhw-05
 title: "真机安全包络与分层急停落地"
 labels: [wayfinder:grilling]
 status: open
-assignee: ""
+assignee: "claude/main"
 blocked-by: [bsi-realhw-04]
 created: 2026-08-21
 ---
