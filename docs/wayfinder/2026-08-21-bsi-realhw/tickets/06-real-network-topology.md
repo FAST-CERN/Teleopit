@@ -46,4 +46,4 @@ created: 2026-08-21
 4. **Orin 跑 mp 栈**：`run_sim2real.py --config-name pico4_sim2real` 在 Orin 起得来（eth0 桥接正常）；BSI 就绪后换 pico4_sim2real_bsi。
 5. **同进程双 DDS 共存**：robot_control 内 BSI cyclonedds（domain 0/wlan0）与 g1_bridge_sdk 的 unitree DDS（eth0）并存互不干扰——各绑各的网卡，验证发现流量不串。
 
-**遗留发现（另行处置）**：`run_velocity_sim.py:204` 硬编码 KeyboardTwistProvider、未接 `merged_bsi`（Phase-2 只接了 run_sim.py 入径；BSI 验收走 run_sim.py 未踩到）——待用户定是否开 fix ticket。
+**遗留发现（已裁定，2026-08-21 用户）**：`run_velocity_sim.py:204` 硬编码 KeyboardTwistProvider 为**设计而非缺陷**——该入口本就用于键盘控制验证；不开 fix ticket。
