@@ -352,6 +352,16 @@ pip install -e .
 pytest tests/ -v
 ```
 
+## Subagent Execution Policy
+
+- When dispatching subagents (implementers, reviewers, researchers) from a
+  controller session, dispatch them in the BACKGROUND (`run_in_background`)
+  by default, then continue with other work (ledger bookkeeping, next-task
+  prep) and consume the result when the notification arrives.
+- Sequential dispatch remains correct for implementation tasks that touch the
+  same files — background does not mean parallel implementation; it means the
+  controller does not block idle.
+
 ## Known Issues
 
 1. `lafan1-resolved` retargeting is still broken because it uses a different BVH skeleton layout.
