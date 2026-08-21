@@ -737,11 +737,12 @@ def test_toggle_in_velocity_engages_ramp_then_latch():
     estop = EstopController(clock=clock)
     assert estop.toggle(in_velocity=True) == "estop"
     assert estop.state == EstopState.RAMPING
+    clock.advance(0.02)  # one policy tick after toggle
     first = estop.apply(_CMD)
     assert 0.0 < first[0] < 0.6  # decaying, not stepped
-    # Ramp is 0.3s of exponential decay: well under the 0.8s gate at half.
-    half_seen = None
+    # Ramp is 0.3s of exponential decay: well under the 0.8s gate at <0.1.
     t_start = clock.t
+    half_seen = None
     while clock.t - t_start < 1.0:
         clock.advance(0.02)
         v = estop.apply(_CMD)[0]
@@ -749,6 +750,10 @@ def test_toggle_in_velocity_engages_ramp_then_latch():
             half_seen = clock.t - t_start
             break
     assert half_seen is not None and half_seen <= 0.8
+    # Continue past the ramp end (0.3s) -> LATCHED.
+    while clock.t - t_start < 1.0:
+        clock.advance(0.02)
+        estop.apply(_CMD)
     assert estop.state == EstopState.LATCHED
 
 
@@ -826,8 +831,6 @@ from enum import Enum
 from typing import Callable
 
 import numpy as np
-
-_RAMP_ALPHA = 0.35  # per-apply decay step; reaches <0.1x in well under ramp_s
 
 
 class EstopState(Enum):
