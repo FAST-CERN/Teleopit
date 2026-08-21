@@ -163,6 +163,11 @@ class SimLoopSession:
         self.mocap_session: MocapSessionManager = MocapSessionManager()
         self.last_commanded_motion_qpos: Float64Array | None = None
 
+        # VELOCITY-mode state (None stack => mode unreachable)
+        self.velocity_steps = loop._velocity_step_controller
+        self._velocity_interpolator = None
+        self._steps_in_mode = 0
+
         # Frame cache (updated each iteration)
         self.last_bvh_idx: int = -1
         self.cached_human_frame: dict | None = None
@@ -174,7 +179,13 @@ class SimLoopSession:
         if loop._playback_keyboard_enabled and self.offline_reference is not None:
             keyboard_reader = TerminalKeyboardReader()
         elif loop._realtime_keyboard_enabled and self.realtime_interpolated_input:
-            keyboard_reader = TerminalKeyboardReader()
+            # Shared-reader path: when the keyboard twist fallback is active,
+            # TeleopPipeline already wrapped ONE TerminalKeyboardReader in a
+            # KeyboardTee and parked it on the loop; polling that tee (not a
+            # private second reader) keeps the session's mode keys and the
+            # twist provider's WASD/QE from racing on the console buffer.
+            shared = getattr(loop, "_velocity_keyboard_reader", None)
+            keyboard_reader = cast(TerminalKeyboardReader, shared) if shared is not None else TerminalKeyboardReader()
         if keyboard_reader is not None and not keyboard_reader.active:
             keyboard_reader.close()
             keyboard_reader = None
@@ -242,6 +253,11 @@ class SimLoopSession:
         from teleopit.sim.loop import SimulationMode
         self.reset_policy_reference_state()
         self._loop._set_standing_reference(self._loop.robot.get_state())
+        # X from MOCAP/ARMS keeps today's fixed standing reference: drop any
+        # pose-B ramp left over from a previous VELOCITY stint so it cannot
+        # replay stale interpolation on re-entry.
+        self._velocity_interpolator = None
+        self._steps_in_mode = 0
         self.simulation_mode = SimulationMode.STANDING
 
     def enter_mocap_mode(self) -> bool:
@@ -261,6 +277,54 @@ class SimLoopSession:
         self.last_commanded_motion_qpos = start_qpos.copy()
         self.simulation_mode = SimulationMode.MOCAP
         return True
+
+    def enter_velocity_mode(self) -> bool:
+        from teleopit.sim.loop import SimulationMode
+        if self.velocity_steps is None:
+            self._loop._console.key_feedback("V", "velocity", result="no velocity stack")
+            return False
+        if not self._loop._realtime_input_has_frame(self._input_provider):
+            # Same gate as enter_mocap_mode: entering before the provider ever
+            # delivered a frame would make every VELOCITY iteration block up to
+            # the provider timeout inside _fetch_realtime_input_quiet — the
+            # quiet stream must never stall stepping.
+            _logger.warning("Cannot switch to VELOCITY yet: realtime input has no frame available")
+            self._loop._console.key_feedback("V", "velocity", result="waiting for input")
+            return False
+        if self.simulation_mode != SimulationMode.STANDING:
+            # Locked decision 3: STANDING is the only validated hand-off;
+            # MOCAP->VELOCITY direct switching is forbidden.
+            _logger.info(
+                "Ignoring V: VELOCITY entry requires STANDING (current=%s)",
+                self.simulation_mode.value,
+            )
+            self._loop._console.key_feedback("V", "velocity", result="requires STANDING")
+            return False
+        steps = self.velocity_steps
+        hold = steps.current_hold_qpos(self._loop.robot.get_state())
+        steps.begin_velocity_handoff(self._step_runner, hold)
+        self.simulation_mode = SimulationMode.VELOCITY
+        self._steps_in_mode = 0
+        _logger.info("Simulation mode -> VELOCITY")
+        return True
+
+    def exit_velocity_to_standing(self) -> None:
+        from teleopit.sim.loop import SimulationMode
+        steps = self.velocity_steps
+        if steps is None:
+            return
+        hold = steps.current_hold_qpos(self._loop.robot.get_state())
+        # Ramp into pose-B standing, yaw-aligned to the robot's current heading
+        # (NOT the mimic standing reference): the target never snaps back to
+        # world yaw 0 after a walk, and pose B is the velocity policy's home.
+        self._velocity_interpolator = steps.arm_standing_interpolator(
+            hold, steps.pose_b_qpos
+        )
+        self.reset_policy_reference_state(reset_mocap_session=True)
+        self._loop._standing_qpos = steps.pose_b_qpos.copy()
+        self.simulation_mode = SimulationMode.STANDING
+        self._steps_in_mode = 0
+        _logger.info("Simulation mode -> STANDING (from VELOCITY)")
 
     def toggle_arms_mode(self) -> bool:
         from teleopit.sim.loop import SimulationMode
@@ -332,10 +396,32 @@ class SimLoopSession:
                         self._loop._console.key_feedback("Y", "mocap", result="MOCAP")
                     else:
                         self._loop._console.key_feedback("Y", "mocap", result="waiting for input")
+                elif key == "v":
+                    if self.enter_velocity_mode():
+                        self._loop._console.key_feedback("V", "velocity", result="VELOCITY")
+                    # else: enter_velocity_mode already reported the reason
+                    # ("no velocity stack") via the console.
                 continue
+            if self.simulation_mode == SimulationMode.VELOCITY:
+                if key == "x":
+                    self.exit_velocity_to_standing()
+                    self._loop._console.key_feedback("X", "standing", result="STANDING")
+                    continue
+                if key == "a":
+                    self._loop._console.key_feedback("A", "pause/resume", result="ignored (VELOCITY)")
+                    continue
+                if key == "b":
+                    self._loop._console.key_feedback("B", "arms", result="ignored (VELOCITY)")
+                    continue
+                continue  # q/h handled above; VELOCITY has no other keys
             if key == "x":
                 self.enter_standing_mode()
                 self._loop._console.key_feedback("X", "standing", result="STANDING")
+                continue
+            if key == "v":
+                # MOCAP/ARMS: enter_velocity_mode refuses (locked decision 3) and
+                # emits the "requires STANDING" feedback itself; no state change.
+                self.enter_velocity_mode()
                 continue
             if key == "b":
                 if self.toggle_arms_mode():
@@ -409,6 +495,20 @@ class SimLoopSession:
     def _fetch_standing_input(self) -> tuple[bool, ReferenceWindow | None, RealtimeReferenceDiagnostics | None]:
         """Fetch input when in STANDING mode (keyboard). Returns (new_bvh_frame, ref_window, diag)."""
         self.cached_human_frame = None
+        if self._velocity_interpolator is not None:
+            # Pose-B ramp after X-from-VELOCITY: same adoption logic as
+            # VelocityStepController.standing_step. t advances with STANDING
+            # steps only (reset to 0 at every mode entry).
+            t_s = self._steps_in_mode * self.policy_dt
+            qpos = np.asarray(self._velocity_interpolator.sample(t_s), dtype=np.float64)
+            if self._velocity_interpolator.finished(t_s):
+                # Adopt the yaw-aligned endpoint — NOT the identity-yaw
+                # _standing_qpos set at exit — so the hold never commands a
+                # turn back to world yaw 0 after a walk.
+                self._loop._standing_qpos = qpos.copy()
+                self._velocity_interpolator = None
+            self.cached_retargeted = qpos
+            return False, None, None
         if self._loop._standing_qpos is None:
             self.cached_retargeted = self._loop._set_standing_reference(self._loop.robot.get_state())
         else:
@@ -579,6 +679,61 @@ class SimLoopSession:
             self.last_bvh_idx = bvh_idx
         return new_bvh_frame, False
 
+    def _fetch_realtime_input_quiet(self) -> None:
+        """Keep the pico stream warm in VELOCITY (viewer + timeline), no gating.
+
+        Failures are swallowed: a quiet/disconnected stream must never stall
+        the twist step (locked decision 4 — robot stands still, no auto exit).
+        """
+        try:
+            loop = self._loop
+            packet = loop._fetch_realtime_input_packet(
+                self._input_provider, self.last_live_packet_seq
+            )
+            frame_seq = int(packet.seq)
+            if frame_seq != self.last_live_packet_seq:
+                human_frame = cast(dict, packet.frame)
+                retargeted_qpos = self._step_runner._retarget_to_qpos(
+                    self._retargeter.retarget(human_frame)
+                )
+                if self.reference_timeline is not None:
+                    self.reference_timeline.append(retargeted_qpos, float(packet.timestamp_s))
+                    if self.realtime_reference_manager is not None:
+                        self.realtime_reference_manager.note_realtime_frame()
+                self.latest_live_human_frame = human_frame
+                self.latest_live_timestamp = float(packet.timestamp_s)
+                self.last_live_packet_seq = frame_seq
+                self._viewer_manager.write_mocap(
+                    cast(object, self._input_provider), human_frame
+                )
+        except Exception:
+            _logger.debug("velocity-mode input fetch skipped (stream quiet)", exc_info=True)
+
+    def _velocity_safety_and_step(self) -> bool:
+        """One VELOCITY iteration: safety check, twist step, viewer writes.
+
+        Returns True when the session must end (joint-vel safety STOP).
+        """
+        steps = self.velocity_steps
+        assert steps is not None
+        verdict = steps.check_safety(self._loop.robot.get_state())
+        if verdict == "stop":
+            _logger.error("VELOCITY safety stop: joint velocity over limit -> ending session")
+            self._loop._console.key_feedback("SAFETY", "joint-vel", result="session end")
+            self.playback_stop_requested = True
+            return True
+        if verdict == "standing":
+            _logger.error("VELOCITY tilt safety -> STANDING")
+            self.exit_velocity_to_standing()
+            return False
+        _, _, _, final_state = steps.velocity_step(self._loop.robot)
+        self._viewer_manager.write_sim2sim(self._loop.robot)
+        self._viewer_manager.write_camera(self._loop.robot)
+        if self._loop._video_runtime is not None:
+            self._loop._video_runtime.tick()
+        self._steps_in_mode += 1
+        return False
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -626,8 +781,20 @@ class SimLoopSession:
                 reference_window: ReferenceWindow | None = None
                 realtime_reference_diag: RealtimeReferenceDiagnostics | None = None
                 new_bvh_frame = False
+                # VELOCITY runs its own fetch (quiet, never gated on warmup) and
+                # its own step via the shared VelocityStepController; the flag
+                # also keeps this iteration out of the mimic step body below —
+                # even when a tilt-safety exit flips the mode mid-iteration.
+                velocity_iteration = (
+                    self.realtime_keyboard_mode_enabled
+                    and self.simulation_mode == SimulationMode.VELOCITY
+                )
 
-                if self.realtime_keyboard_mode_enabled and self.simulation_mode == SimulationMode.STANDING:
+                if velocity_iteration:
+                    self._fetch_realtime_input_quiet()
+                    if self._velocity_safety_and_step():
+                        break
+                elif self.realtime_keyboard_mode_enabled and self.simulation_mode == SimulationMode.STANDING:
                     new_bvh_frame, reference_window, realtime_reference_diag = self._fetch_standing_input()
                 elif self.offline_reference is not None:
                     if self.offline_playback is None:
@@ -648,69 +815,70 @@ class SimLoopSession:
                     if should_break:
                         break
 
-                # --- Policy step ---
+                # --- Policy step (mimic paths; VELOCITY stepped above) ---
                 state = loop.robot.get_state()
-                if self.realtime_keyboard_mode_enabled and self.simulation_mode == SimulationMode.STANDING:
-                    preparation = self._step_runner.prepare_static_motion_command(self.cached_retargeted)
-                    if obs_builder_requires_reference_window(loop.obs_builder):
-                        reference_window = build_static_reference_window(
-                            self.cached_retargeted,
-                            loop._reference_window_builder,
-                            loop.policy_hz,
-                        )
-                elif self.mocap_session.state == MocapSessionState.PAUSED:
-                    hold_qpos = self.mocap_session.hold_qpos
-                    if hold_qpos is None:
-                        raise RuntimeError("Paused mocap session is missing a hold pose")
-                    preparation = self._step_runner.prepare_static_motion_command(hold_qpos)
-                    if obs_builder_requires_reference_window(loop.obs_builder):
-                        reference_window = build_static_reference_window(
-                            hold_qpos, loop._reference_window_builder, loop.policy_hz,
-                        )
-                else:
-                    preparation = self._step_runner.prepare_motion_command(self.cached_retargeted, state)
+                if not velocity_iteration:
+                    if self.realtime_keyboard_mode_enabled and self.simulation_mode == SimulationMode.STANDING:
+                        preparation = self._step_runner.prepare_static_motion_command(self.cached_retargeted)
+                        if obs_builder_requires_reference_window(loop.obs_builder):
+                            reference_window = build_static_reference_window(
+                                self.cached_retargeted,
+                                loop._reference_window_builder,
+                                loop.policy_hz,
+                            )
+                    elif self.mocap_session.state == MocapSessionState.PAUSED:
+                        hold_qpos = self.mocap_session.hold_qpos
+                        if hold_qpos is None:
+                            raise RuntimeError("Paused mocap session is missing a hold pose")
+                        preparation = self._step_runner.prepare_static_motion_command(hold_qpos)
+                        if obs_builder_requires_reference_window(loop.obs_builder):
+                            reference_window = build_static_reference_window(
+                                hold_qpos, loop._reference_window_builder, loop.policy_hz,
+                            )
+                    else:
+                        preparation = self._step_runner.prepare_motion_command(self.cached_retargeted, state)
 
-                obs = self._step_runner.build_observation(
-                    state, preparation, self._step_runner.last_action, reference_window=reference_window,
-                )
-                policy_obs = self._step_runner.validate_observation_for_policy(obs)
-                action: Float32Array = np.asarray(
-                    loop.controller.compute_action(policy_obs), dtype=np.float32,
-                ).reshape(-1)
-                if action.shape[0] != loop._num_actions:
-                    raise ValueError(f"Controller returned {action.shape[0]} actions, expected {loop._num_actions}")
-
-                target_dof_pos = self._step_runner.compute_target_dof_pos(action)
-                torque, final_state = self._step_runner.apply_control(target_dof_pos)
-                loop._publisher.publish(preparation.mimic_obs, action, final_state)
-                self._viewer_manager.write_sim2sim(loop.robot)
-                self._viewer_manager.write_camera(loop.robot)
-                if loop._video_runtime is not None:
-                    loop._video_runtime.tick()
-                self._viewer_manager.write_retarget(preparation.retarget_viewer_qpos)
-                if self.cached_human_frame is not None and (
-                    self.offline_reference is not None or new_bvh_frame or self.realtime_interpolated_input
-                ):
-                    self._viewer_manager.write_mocap(cast(object, self._input_provider), self.cached_human_frame)
-
-                if self.debug_writer is not None:
-                    loop._write_debug_trace(
-                        debug_writer=self.debug_writer,
-                        steps_done=self.steps_done,
-                        policy_time=policy_time,
-                        frame_f=frame_f,
-                        policy_obs=policy_obs,
-                        action=action,
-                        target_dof_pos=target_dof_pos,
-                        torque=torque,
-                        preparation=preparation,
-                        final_state=final_state,
-                        reference_window=reference_window,
-                        reference_timeline=self.reference_timeline,
-                        realtime_reference_diag=realtime_reference_diag,
+                    obs = self._step_runner.build_observation(
+                        state, preparation, self._step_runner.last_action, reference_window=reference_window,
                     )
+                    policy_obs = self._step_runner.validate_observation_for_policy(obs)
+                    action: Float32Array = np.asarray(
+                        loop.controller.compute_action(policy_obs), dtype=np.float32,
+                    ).reshape(-1)
+                    if action.shape[0] != loop._num_actions:
+                        raise ValueError(f"Controller returned {action.shape[0]} actions, expected {loop._num_actions}")
 
-                # Real-time pacing
+                    target_dof_pos = self._step_runner.compute_target_dof_pos(action)
+                    torque, final_state = self._step_runner.apply_control(target_dof_pos)
+                    loop._publisher.publish(preparation.mimic_obs, action, final_state)
+                    self._viewer_manager.write_sim2sim(loop.robot)
+                    self._viewer_manager.write_camera(loop.robot)
+                    if loop._video_runtime is not None:
+                        loop._video_runtime.tick()
+                    self._viewer_manager.write_retarget(preparation.retarget_viewer_qpos)
+                    if self.cached_human_frame is not None and (
+                        self.offline_reference is not None or new_bvh_frame or self.realtime_interpolated_input
+                    ):
+                        self._viewer_manager.write_mocap(cast(object, self._input_provider), self.cached_human_frame)
+
+                    if self.debug_writer is not None:
+                        loop._write_debug_trace(
+                            debug_writer=self.debug_writer,
+                            steps_done=self.steps_done,
+                            policy_time=policy_time,
+                            frame_f=frame_f,
+                            policy_obs=policy_obs,
+                            action=action,
+                            target_dof_pos=target_dof_pos,
+                            torque=torque,
+                            preparation=preparation,
+                            final_state=final_state,
+                            reference_window=reference_window,
+                            reference_timeline=self.reference_timeline,
+                            realtime_reference_diag=realtime_reference_diag,
+                        )
+
+                # Real-time pacing (shared: VELOCITY iterations are paced too)
                 if self.needs_pacing:
                     sim_time = (self.steps_done + 1) * self.policy_dt
                     wall_elapsed = time.monotonic() - self.wall_start
@@ -718,18 +886,20 @@ class SimLoopSession:
                     if sleep_time > 0:
                         time.sleep(sleep_time)
 
-                self._step_runner.finish_step(action, preparation.qpos)
-                self.last_commanded_motion_qpos = preparation.qpos.copy()
-                if (
-                    self.offline_playback is not None
-                    and self.mocap_session.state != MocapSessionState.PAUSED
-                ):
-                    if self.offline_playback.advance():
-                        if self.offline_playback.pause_on_end:
-                            self.mocap_session.pause(preparation.qpos.copy())
-                        else:
-                            self.steps_done += 1
-                            break
+                if not velocity_iteration:
+                    self._step_runner.finish_step(action, preparation.qpos)
+                    self.last_commanded_motion_qpos = preparation.qpos.copy()
+                    self._steps_in_mode += 1  # advances the pose-B ramp clock
+                    if (
+                        self.offline_playback is not None
+                        and self.mocap_session.state != MocapSessionState.PAUSED
+                    ):
+                        if self.offline_playback.advance():
+                            if self.offline_playback.pause_on_end:
+                                self.mocap_session.pause(preparation.qpos.copy())
+                            else:
+                                self.steps_done += 1
+                                break
                 self.steps_done += 1
         except KeyboardInterrupt:
             pass

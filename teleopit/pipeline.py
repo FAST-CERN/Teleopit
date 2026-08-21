@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 from omegaconf import DictConfig
 
 from teleopit.bus.in_process import InProcessBus
@@ -16,6 +17,11 @@ from teleopit.runtime.common import cfg_get
 from teleopit.runtime.console import PlainConsole
 from teleopit.runtime.factory import build_inference_components
 from teleopit.sim.loop import SimulationLoop
+
+
+def _select_cmd_provider_kind(input_provider_kind: str) -> str:
+    """Joystick when pico drives, keyboard otherwise (locked decision 2)."""
+    return "pico_joystick" if input_provider_kind == "pico4" else "keyboard"
 
 
 class TeleopPipeline:
@@ -54,6 +60,79 @@ class TeleopPipeline:
             viewers=components.viewers,
             video_runtime=self.video_runtime,
             console=console,
+        )
+
+        controllers_cfg = cfg_get(self.cfg, "controllers", None)
+        velocity_cfg = cfg_get(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
+        if velocity_cfg is not None:
+            self._attach_velocity_stack(self.cfg)
+
+    def _attach_velocity_stack(self, cfg: Any) -> None:
+        """Build and attach the VELOCITY-mode stack when the config has one.
+
+        The twist controller/builder pair comes from controllers.velocity
+        (pose B, single-input ONNX); the command provider follows
+        command.provider with a _select_cmd_provider_kind fallback.
+        """
+        from teleopit.commands import KeyboardTwistProvider, PicoJoystickProvider
+        from teleopit.runtime.factory import build_velocity_policy_components
+
+        velocity_controller, velocity_obs_builder = build_velocity_policy_components(
+            cfg, self._project_root
+        )
+        input_provider_kind = str(cfg_get(cfg_get(cfg, "input", {}), "provider", "bvh")).lower()
+        command_cfg = cfg_get(cfg, "command", {}) or {}
+        selected = str(cfg_get(command_cfg, "provider", _select_cmd_provider_kind(input_provider_kind)))
+        if selected == "pico_joystick":
+            joystick_cfg = cfg_get(command_cfg, "joystick", {}) or {}
+            controllers_cfg = cfg_get(cfg, "controllers", None)
+            velocity_cfg = cfg_get(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
+            cmd_limits = cfg_get(velocity_cfg, "cmd_limits", None)
+            # controllers.velocity.cmd_limits is the single source of the stick
+            # -> twist scaling (mirrors the policy's clamp); absent => provider
+            # defaults.
+            cmd_provider = PicoJoystickProvider(
+                self.input_provider,
+                deadzone=float(cfg_get(joystick_cfg, "deadzone", 0.15)),
+                max_age_s=float(cfg_get(joystick_cfg, "max_age_s", 0.5)),
+                cmd_limits=dict(cmd_limits) if cmd_limits is not None else None,
+                max_stick_scale=dict(cfg_get(joystick_cfg, "max_stick_scale", {}) or {}) or None,
+            )
+            keyboard_tee = None
+        else:
+            from teleopit.commands import KeyboardTee
+            from teleopit.runtime.terminal_keyboard import TerminalKeyboardReader
+
+            speeds = cfg_get(cfg_get(command_cfg, "keyboard", {}), "speeds", None)
+            # ONE shared reader (Task 6 fix): the session's mode keys and the
+            # twist provider's WASD/QE both consume the same console buffer.
+            # Two readers race — the session polls first and drains (and
+            # drops) w/s/d/e before the provider ever sees them — so wrap the
+            # single reader in a KeyboardTee and hand the SAME tee to both:
+            # the twist provider here, SimLoopSession via attach_velocity_stack
+            # (it polls that tee instead of building its own reader).
+            keyboard = TerminalKeyboardReader()
+            if not keyboard.active:
+                keyboard.close()
+                keyboard = None
+            keyboard_tee = (
+                KeyboardTee(keyboard, refresh_s=1.0 / self.loop.policy_hz)
+                if keyboard is not None
+                else None
+            )
+            cmd_provider = KeyboardTwistProvider(speeds=speeds, keyboard=keyboard_tee)
+        safety_cfg = cfg_get(cfg, "safety", {}) or {}
+        self.loop.attach_velocity_stack(
+            velocity_controller=velocity_controller,
+            velocity_obs_builder=velocity_obs_builder,
+            cmd_provider=cmd_provider,
+            transition_duration_s=float(
+                cfg_get(cfg_get(cfg, "modes", {}), "transition_duration_s", 1.0)
+            ),
+            joint_vel_limit=float(cfg_get(safety_cfg, "joint_vel_limit", 12.0)),
+            tilt_threshold_rad=float(cfg_get(safety_cfg, "tilt_threshold_rad", 1.0)),
+            pose_b=np.asarray(velocity_obs_builder.default_dof_pos, dtype=np.float64),
+            keyboard_reader=keyboard_tee,
         )
 
     def run(self, num_steps: int) -> dict[str, float | int | str]:

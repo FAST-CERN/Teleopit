@@ -506,3 +506,358 @@ def test_pipeline_dim_match_passes(monkeypatch, tmp_path: Path) -> None:
     cfg = OmegaConf.create(_pipeline_cfg(tmp_path))
     pipeline = TeleopPipeline(cfg)
     assert pipeline.obs_builder.total_obs_size == 167
+
+
+def test_pipeline_keyboard_fallback_shares_one_reader_via_tee(monkeypatch, tmp_path: Path) -> None:
+    """Task 6 Part B: the keyboard twist fallback must share ONE reader.
+
+    With bvh/udp input (keyboard fallback selected), TeleopPipeline wraps a
+    single TerminalKeyboardReader in a KeyboardTee and hands the SAME tee to
+    KeyboardTwistProvider and attach_velocity_stack — never a second private
+    reader (the two-reader race: the session's reader drains the console
+    buffer first and silently drops w/s/d/e).
+    """
+    import numpy as np
+
+    from teleopit.commands import KeyboardTee, KeyboardTwistProvider
+
+    captured: dict[str, object] = {}
+
+    class DummyRobot:
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    class DummyController:
+        _expected_obs_dim = 167
+        _multi_input = True
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+        def reset(self) -> None:
+            pass
+
+    class DummyObsBuilder:
+        total_obs_size = 167
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+        def reset(self) -> None:
+            pass
+
+    class DummyInputProvider:
+        human_format = "lafan1"
+
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    class DummyRetargeter:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    class DummyLoop:
+        policy_hz = 50.0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.attached: dict[str, object] = {}
+
+        def attach_velocity_stack(self, **kwargs: object) -> None:
+            self.attached = kwargs
+
+    class DummyVelocityController:
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    class DummyVelocityObsBuilder:
+        total_obs_size = 6
+        default_dof_pos = np.zeros(29, dtype=np.float64)
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    readers = []
+
+    class DummyReader:
+        def __init__(self) -> None:
+            readers.append(self)
+            self.closed = False
+
+        @property
+        def active(self) -> bool:
+            return True
+
+        def poll(self):
+            return ()
+
+        def close(self) -> None:
+            self.closed = True
+
+    policy_path = tmp_path / "policy.onnx"
+    policy_path.write_bytes(b"dummy")
+    bvh_path = tmp_path / "input.bvh"
+    bvh_path.write_text("HIERARCHY\n", encoding="utf-8")
+    xml_path = tmp_path / "robot.xml"
+    xml_path.write_text("<mujoco model='dummy'/>", encoding="utf-8")
+
+    cfg = OmegaConf.create(
+        {
+            "robot": {
+                "num_actions": 29,
+                "xml_path": str(xml_path),
+                "default_angles": [0.0] * 29,
+            },
+            "controller": {"policy_path": str(policy_path)},
+            "controllers": {
+                "velocity": {
+                    "policy_path": str(policy_path),
+                    "default_dof_pos": [0.0] * 29,
+                }
+            },
+            "input": {"provider": "bvh", "bvh_file": str(bvh_path)},
+            "policy_hz": 50,
+            "pd_hz": 1000,
+            "command": {"provider": "keyboard"},
+        }
+    )
+
+    monkeypatch.setattr("teleopit.pipeline.MuJoCoRobot", DummyRobot)
+    monkeypatch.setattr("teleopit.pipeline.RLPolicyController", DummyController)
+    monkeypatch.setattr("teleopit.runtime.factory.VelCmdObservationBuilder", DummyObsBuilder)
+    monkeypatch.setattr("teleopit.pipeline.BVHInputProvider", DummyInputProvider)
+    monkeypatch.setattr("teleopit.pipeline.RetargetingModule", DummyRetargeter)
+    monkeypatch.setattr("teleopit.pipeline.SimulationLoop", DummyLoop)
+    monkeypatch.setattr("teleopit.runtime.factory.build_velocity_policy_components",
+                        lambda cfg, root: (DummyVelocityController({}), DummyVelocityObsBuilder({})))
+    monkeypatch.setattr("teleopit.runtime.terminal_keyboard.TerminalKeyboardReader", DummyReader)
+
+    pipeline = TeleopPipeline(cfg)
+
+    assert len(readers) == 1  # exactly ONE physical terminal reader
+    provider = pipeline.loop.attached["cmd_provider"]
+    assert isinstance(provider, KeyboardTwistProvider)
+    tee = pipeline.loop.attached["keyboard_reader"]
+    assert isinstance(tee, KeyboardTee)
+    # Both consumers hold the SAME tee: provider's keyboard is the tee the
+    # loop carries for SimLoopSession.
+    assert provider._keyboard is tee
+    assert tee._reader is readers[0]
+
+
+def test_pipeline_pico_joystick_attachs_no_keyboard_reader(monkeypatch, tmp_path: Path) -> None:
+    """Pico entry (joystick): no terminal reader is built or shared."""
+    import numpy as np
+
+    from teleopit.commands import PicoJoystickProvider
+
+    class DummyRobot:
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    class DummyController:
+        _expected_obs_dim = 167
+        _multi_input = True
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+        def reset(self) -> None:
+            pass
+
+    class DummyObsBuilder:
+        total_obs_size = 167
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+        def reset(self) -> None:
+            pass
+
+    class DummyInputProvider:
+        human_format = "lafan1"
+        fps = 60
+
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    class DummyRetargeter:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    class DummyLoop:
+        policy_hz = 50.0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.attached: dict[str, object] = {}
+
+        def attach_velocity_stack(self, **kwargs: object) -> None:
+            self.attached = kwargs
+
+    class DummyVelocityController:
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    class DummyVelocityObsBuilder:
+        total_obs_size = 6
+        default_dof_pos = np.zeros(29, dtype=np.float64)
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    def _reader_must_not_be_built():
+        raise AssertionError("joystick entry must not construct a terminal reader")
+
+    policy_path = tmp_path / "policy.onnx"
+    policy_path.write_bytes(b"dummy")
+    xml_path = tmp_path / "robot.xml"
+    xml_path.write_text("<mujoco model='dummy'/>", encoding="utf-8")
+
+    cfg = OmegaConf.create(
+        {
+            "robot": {
+                "num_actions": 29,
+                "xml_path": str(xml_path),
+                "default_angles": [0.0] * 29,
+            },
+            "controller": {"policy_path": str(policy_path)},
+            "controllers": {
+                "velocity": {
+                    "policy_path": str(policy_path),
+                    "default_dof_pos": [0.0] * 29,
+                }
+            },
+            "input": {"provider": "pico4"},
+            "policy_hz": 50,
+            "pd_hz": 1000,
+            "command": {"provider": "pico_joystick"},
+        }
+    )
+
+    monkeypatch.setattr("teleopit.pipeline.MuJoCoRobot", DummyRobot)
+    monkeypatch.setattr("teleopit.pipeline.RLPolicyController", DummyController)
+    monkeypatch.setattr("teleopit.runtime.factory.VelCmdObservationBuilder", DummyObsBuilder)
+    monkeypatch.setattr("teleopit.pipeline.Pico4InputProvider", DummyInputProvider)
+    monkeypatch.setattr("teleopit.pipeline.RetargetingModule", DummyRetargeter)
+    monkeypatch.setattr("teleopit.pipeline.SimulationLoop", DummyLoop)
+    monkeypatch.setattr("teleopit.runtime.factory.build_velocity_policy_components",
+                        lambda cfg, root: (DummyVelocityController({}), DummyVelocityObsBuilder({})))
+    monkeypatch.setattr("teleopit.runtime.terminal_keyboard.TerminalKeyboardReader", _reader_must_not_be_built)
+
+    pipeline = TeleopPipeline(cfg)
+
+    assert isinstance(pipeline.loop.attached["cmd_provider"], PicoJoystickProvider)
+    assert pipeline.loop.attached["keyboard_reader"] is None
+
+
+def test_pipeline_feeds_joystick_cmd_limits_from_velocity_yaml(monkeypatch, tmp_path: Path) -> None:
+    """Spec integrity: controllers.velocity.cmd_limits is the single source of
+    the stick -> twist scaling — the joystick provider must not silently fall
+    back to its hardcoded defaults when the yaml narrows/widens the ranges.
+    """
+    import numpy as np
+
+    from teleopit.commands import PicoJoystickProvider
+
+    class DummyRobot:
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    class DummyController:
+        _expected_obs_dim = 167
+        _multi_input = True
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+        def reset(self) -> None:
+            pass
+
+    class DummyObsBuilder:
+        total_obs_size = 167
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+        def reset(self) -> None:
+            pass
+
+    class DummyInputProvider:
+        human_format = "lafan1"
+        fps = 60
+
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    class DummyRetargeter:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    class DummyLoop:
+        policy_hz = 50.0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.attached: dict[str, object] = {}
+
+        def attach_velocity_stack(self, **kwargs: object) -> None:
+            self.attached = kwargs
+
+    class DummyVelocityController:
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    class DummyVelocityObsBuilder:
+        total_obs_size = 6
+        default_dof_pos = np.zeros(29, dtype=np.float64)
+
+        def __init__(self, cfg: object) -> None:
+            pass
+
+    policy_path = tmp_path / "policy.onnx"
+    policy_path.write_bytes(b"dummy")
+    xml_path = tmp_path / "robot.xml"
+    xml_path.write_text("<mujoco model='dummy'/>", encoding="utf-8")
+
+    cmd_limits = {
+        "lin_vel_x": [-2.0, 4.0],  # deliberately != provider defaults
+        "lin_vel_y": [-1.0, 1.0],
+        "ang_vel_z": [-2.0, 2.0],
+    }
+    cfg = OmegaConf.create(
+        {
+            "robot": {
+                "num_actions": 29,
+                "xml_path": str(xml_path),
+                "default_angles": [0.0] * 29,
+            },
+            "controller": {"policy_path": str(policy_path)},
+            "controllers": {
+                "velocity": {
+                    "policy_path": str(policy_path),
+                    "default_dof_pos": [0.0] * 29,
+                    "cmd_limits": cmd_limits,
+                }
+            },
+            "input": {"provider": "pico4"},
+            "policy_hz": 50,
+            "pd_hz": 1000,
+            "command": {"provider": "pico_joystick"},
+        }
+    )
+
+    monkeypatch.setattr("teleopit.pipeline.MuJoCoRobot", DummyRobot)
+    monkeypatch.setattr("teleopit.pipeline.RLPolicyController", DummyController)
+    monkeypatch.setattr("teleopit.runtime.factory.VelCmdObservationBuilder", DummyObsBuilder)
+    monkeypatch.setattr("teleopit.pipeline.Pico4InputProvider", DummyInputProvider)
+    monkeypatch.setattr("teleopit.pipeline.RetargetingModule", DummyRetargeter)
+    monkeypatch.setattr("teleopit.pipeline.SimulationLoop", DummyLoop)
+    monkeypatch.setattr("teleopit.runtime.factory.build_velocity_policy_components",
+                        lambda cfg, root: (DummyVelocityController({}), DummyVelocityObsBuilder({})))
+
+    pipeline = TeleopPipeline(cfg)
+
+    provider = pipeline.loop.attached["cmd_provider"]
+    assert isinstance(provider, PicoJoystickProvider)
+    assert provider._lin_x == (-2.0, 4.0)
+    assert provider._lin_y == (-1.0, 1.0)
+    assert provider._ang_z == (-2.0, 2.0)
+

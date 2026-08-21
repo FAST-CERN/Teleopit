@@ -897,6 +897,225 @@ def test_simulation_loop_realtime_keyboard_mode_drains_stale_pause_events(monkey
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[-1], np.array([0.4], dtype=np.float32), atol=1e-6)
 
 
+class _VelocityDummyRobot(_DummyRobot):
+    """_DummyRobot variant with a full-width (29) joint qpos.
+
+    VelocityStepController.current_hold_qpos / standing_qpos_of_pose copy
+    state.qpos into a FULL_QPOS_DIM (36) hold slot; the base _DummyRobot's
+    3-wide qpos cannot fill the 29-wide joint slice.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._qpos = np.zeros(29, dtype=np.float32)
+        self._qpos[2] = 1.0
+        self._qvel = np.zeros(29, dtype=np.float32)
+
+
+class _DummyTwistBuilder:
+    """TwistCmdObservationBuilder stub: build(state, cmd, last_action)."""
+
+    def __init__(self) -> None:
+        self.total_obs_size = 6
+        self.cmds: list[np.ndarray] = []
+        self.reset_called = 0
+
+    def reset(self) -> None:
+        self.reset_called += 1
+
+    def build(self, state, cmd, last_action):
+        self.cmds.append(np.asarray(cmd, dtype=np.float32).copy())
+        return np.zeros(6, dtype=np.float32)
+
+
+class _DummyVelocityController:
+    _expected_obs_dim = 6
+    action_scale = np.ones(2, dtype=np.float32)
+    default_dof_pos = np.zeros(2, dtype=np.float32)
+
+    def __init__(self) -> None:
+        self.compute_called = 0
+        self.reset_called = 0
+
+    def compute_action(self, obs):
+        self.compute_called += 1
+        return np.array([0.05, -0.05], dtype=np.float32)
+
+    def reset(self) -> None:
+        self.reset_called += 1
+
+    def get_target_dof_pos(self, action):
+        return np.asarray(action, dtype=np.float32)
+
+
+class _ConstCmdProvider:
+    def __init__(self, cmd):
+        self._cmd = np.asarray(cmd, dtype=np.float32)
+
+    def get_cmd(self):
+        return self._cmd
+
+    def reset(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _velocity_loop(monkeypatch, keyboard_script):
+    from teleopit.sim.loop import SimulationLoop
+
+    # Constructed by SimLoopSession as TerminalKeyboardReader() with no args
+    # (the real reader's signature), so the script rides in via closure.
+    script_box = [list(keyboard_script)]
+
+    class _KeyboardReader:
+        active = True
+
+        def __init__(self):
+            self._script = script_box[0]
+
+        def poll(self):
+            return self._script.pop(0) if self._script else ()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("teleopit.sim.session.TerminalKeyboardReader", _KeyboardReader)
+
+    class _CountingPicoProvider:
+        fps = 1
+
+        def __init__(self):
+            self.packet_calls = 0
+
+        def get_realtime_input_packet(self):
+            self.packet_calls += 1
+            return RealtimeInputPacket(
+                frame={"Pelvis": (np.zeros(3, dtype=np.float32), np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))},
+                timestamp_s=0.0, seq=0, control_events=(),
+            )
+
+    loop = SimulationLoop(
+        robot=_VelocityDummyRobot(),
+        controller=_DummyController(),
+        obs_builder=_DummyObsBuilder(),
+        bus=InProcessBus(),
+        cfg={"policy_hz": 50.0, "pd_hz": 50.0, "realtime": False,
+             "retarget_buffer_enabled": False, "keyboard": {"enabled": True}},
+        viewers=set(),
+    )
+    twist_builder = _DummyTwistBuilder()
+    vel_controller = _DummyVelocityController()
+    loop.attach_velocity_stack(
+        velocity_controller=vel_controller,
+        velocity_obs_builder=twist_builder,
+        cmd_provider=_ConstCmdProvider([0.5, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        transition_duration_s=1.0,
+        joint_vel_limit=10.0,
+        tilt_threshold_rad=1.0,
+        pose_b=np.zeros(29, dtype=np.float64),
+    )
+    return loop, twist_builder, vel_controller, _CountingPicoProvider()
+
+
+@requires_mujoco
+def test_v_enters_velocity_from_standing_and_steps_twist(monkeypatch) -> None:
+    from teleopit.sim.loop import SimulationMode
+
+    loop, twist_builder, vel_controller, provider = _velocity_loop(
+        monkeypatch, [(TerminalKeyEvent("v"),)]
+    )
+    result = loop.run(input_provider=provider, retargeter=_DummyRetargeter(), num_steps=3)
+    assert result["steps"] == 3
+    assert loop.last_session.simulation_mode == SimulationMode.VELOCITY
+    assert vel_controller.compute_called == 3          # twist policy ran every step
+    assert len(twist_builder.cmds) == 3
+    np.testing.assert_allclose(twist_builder.cmds[0][:3], [0.5, 0.0, 0.0])
+    assert provider.packet_calls >= 3                  # pico stream still consumed
+
+
+@requires_mujoco
+def test_v_rejected_from_mocap(monkeypatch) -> None:
+    from teleopit.sim.loop import SimulationMode
+
+    loop, twist_builder, vel_controller, provider = _velocity_loop(
+        monkeypatch, [(TerminalKeyEvent("y"),), (TerminalKeyEvent("v"),)]
+    )
+    result = loop.run(input_provider=provider, retargeter=_DummyRetargeter(), num_steps=3)
+    assert loop.last_session.simulation_mode == SimulationMode.MOCAP
+    assert vel_controller.compute_called == 0           # no twist step ever ran
+
+
+@requires_mujoco
+def test_x_returns_velocity_to_standing(monkeypatch) -> None:
+    from teleopit.sim.loop import SimulationMode
+
+    loop, _, vel_controller, provider = _velocity_loop(
+        monkeypatch, [(TerminalKeyEvent("v"),), (TerminalKeyEvent("x"),)]
+    )
+    result = loop.run(input_provider=provider, retargeter=_DummyRetargeter(), num_steps=4)
+    assert loop.last_session.simulation_mode == SimulationMode.STANDING
+    assert 0 < vel_controller.compute_called < 4        # twist ran, then stopped
+
+
+@requires_mujoco
+def test_velocity_mode_survives_quiet_input_stream(monkeypatch) -> None:
+    """Warmup gating must not stall the twist step when packets go quiet."""
+    from teleopit.sim.loop import SimulationMode
+
+    class _OneShotProvider:
+        fps = 1
+
+        def __init__(self):
+            self.calls = 0
+
+        def get_realtime_input_packet(self):
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("stream went quiet")  # fetch fails; step must not
+            return RealtimeInputPacket(
+                frame={"Pelvis": (np.zeros(3, dtype=np.float32), np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))},
+                timestamp_s=0.0, seq=0, control_events=(),
+            )
+
+    loop, _, vel_controller, _ = _velocity_loop(monkeypatch, [(TerminalKeyEvent("v"),)])
+    provider = _OneShotProvider()
+    result = loop.run(input_provider=provider, retargeter=_DummyRetargeter(), num_steps=3)
+    assert result["steps"] == 3
+    assert vel_controller.compute_called == 3
+
+
+@requires_mujoco
+def test_v_velocity_refused_before_first_input_frame(monkeypatch) -> None:
+    """V before the pico headset ever sent a frame must not enter VELOCITY.
+
+    Without the has_frame gate each VELOCITY iteration would block up to the
+    provider timeout (60 s default) inside _fetch_realtime_input_quiet; entry
+    is refused instead (same shape as enter_mocap_mode's gate).
+    """
+    from teleopit.sim.loop import SimulationMode
+
+    class _NeverConnectedProvider:
+        fps = 1
+
+        def has_frame(self) -> bool:
+            return False
+
+        def get_realtime_input_packet(self):
+            raise AssertionError("never-connected stream must not be polled for packets")
+
+    loop, twist_builder, vel_controller, _ = _velocity_loop(
+        monkeypatch, [(TerminalKeyEvent("v"),)]
+    )
+    provider = _NeverConnectedProvider()
+    result = loop.run(input_provider=provider, retargeter=_DummyRetargeter(), num_steps=3)
+    assert result["steps"] == 3
+    assert loop.last_session.simulation_mode == SimulationMode.STANDING
+    assert vel_controller.compute_called == 0   # no twist step ever ran
+    assert len(twist_builder.cmds) == 0
+
+
 @requires_mujoco
 def test_simulation_loop_realtime_keyboard_mode_keeps_standing_when_input_not_ready(monkeypatch) -> None:
     from teleopit.sim.loop import SimulationLoop
@@ -963,3 +1182,114 @@ def test_simulation_loop_realtime_keyboard_mode_keeps_standing_when_input_not_re
     assert len(obs_builder.mimic_obs_calls) == 2
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[0], np.array([0.0], dtype=np.float32), atol=1e-6)
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[1], np.array([0.0], dtype=np.float32), atol=1e-6)
+
+
+@requires_mujoco
+def test_session_uses_shared_keyboard_reader_when_velocity_stack_attachs_one(monkeypatch) -> None:
+    """Keyboard-twist fallback input race fix (Task 6 Part B).
+
+    TeleopPipeline wraps ONE TerminalKeyboardReader in a KeyboardTee and
+    passes it to attach_velocity_stack; SimLoopSession must poll THAT tee
+    (self.keyboard_reader is the tee) instead of constructing a private
+    second TerminalKeyboardReader. Two readers race on the console buffer:
+    the session polls first and would drain (and drop) the twist keys
+    before KeyboardTwistProvider ever saw them. Here one physical batch
+    carries both a mode key (v) and a twist key (w) and BOTH consumers act.
+    """
+    from teleopit.commands import KeyboardTee, KeyboardTwistProvider
+    from teleopit.sim.loop import SimulationMode, SimulationLoop
+
+    constructed = []
+
+    def _fail_if_constructed():
+        constructed.append(True)
+
+        class _PrivateReaderProbe:
+            active = False
+
+            def poll(self):
+                return ()
+
+            def close(self):
+                pass
+
+        return _PrivateReaderProbe()
+
+    monkeypatch.setattr("teleopit.sim.session.TerminalKeyboardReader", _fail_if_constructed)
+
+    class _RealtimeProvider:
+        fps = 1
+
+        def has_frame(self):
+            return True
+
+        def get_realtime_input_packet(self):
+            return RealtimeInputPacket(
+                frame={"Pelvis": (np.zeros(3, dtype=np.float32), np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))},
+                timestamp_s=0.0, seq=0, control_events=(),
+            )
+
+    class _ScriptedReader:
+        """The single physical reader the tee wraps (v enters, w is twist)."""
+
+        def __init__(self):
+            self._batches = [
+                (TerminalKeyEvent("v"), TerminalKeyEvent("w")),
+            ]
+            self.polls = 0
+
+        @property
+        def active(self):
+            return True
+
+        def poll(self):
+            self.polls += 1
+            return self._batches.pop(0) if self._batches else ()
+
+        def close(self):
+            pass
+
+    loop = SimulationLoop(
+        robot=_VelocityDummyRobot(),
+        controller=_DummyController(),
+        obs_builder=_DummyObsBuilder(),
+        bus=InProcessBus(),
+        cfg={"policy_hz": 50.0, "pd_hz": 50.0, "realtime": False,
+             "retarget_buffer_enabled": False, "keyboard": {"enabled": True}},
+        viewers=set(),
+    )
+
+    shared_reader = _ScriptedReader()
+    # refresh_s huge: one drained batch is cached and redelivered to both
+    # consumers' polls within this run, mirroring one policy period.
+    tee = KeyboardTee(shared_reader, refresh_s=1000.0)
+    twist_builder = _DummyTwistBuilder()
+    loop.attach_velocity_stack(
+        velocity_controller=_DummyVelocityController(),
+        velocity_obs_builder=twist_builder,
+        cmd_provider=KeyboardTwistProvider(
+            speeds={"lin_x": 1.0, "lin_y": 0.5, "ang_z": 1.0}, keyboard=tee, alpha=1.0,
+        ),
+        transition_duration_s=1.0,
+        joint_vel_limit=10.0,
+        tilt_threshold_rad=1.0,
+        pose_b=np.zeros(29, dtype=np.float64),
+        keyboard_reader=tee,
+    )
+
+    result = loop.run(input_provider=_RealtimeProvider(), retargeter=_DummyRetargeter(), num_steps=3)
+
+    assert result["steps"] == 3
+    assert constructed == []  # session never built a private second reader
+    session = loop.last_session
+    assert session.keyboard_reader is tee  # session polls the shared tee
+    assert session.simulation_mode == SimulationMode.VELOCITY  # v acted on
+    assert shared_reader.polls == 1         # reader drained exactly once
+    # w survived the session's first poll and reached the twist provider:
+    # v flips the mode at the top of iteration 1, so every one of the 3
+    # iterations is a VELOCITY step whose cmd carried the latched w
+    # (release_after_s default holds it across this fast headless run).
+    assert len(twist_builder.cmds) == 3
+    for cmd in twist_builder.cmds:
+        np.testing.assert_allclose(cmd[:3], [1.0, 0.0, 0.0])  # lin_x = w held
+

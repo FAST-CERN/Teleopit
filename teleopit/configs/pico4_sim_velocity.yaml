@@ -1,0 +1,67 @@
+# Pico 4 sim teleop WITH the twist cmd_vel VELOCITY mode (task #6).
+# pico4_sim.yaml + velocity stack. keyboard.enabled=true starts STANDING:
+# Y=mocap, V=velocity (only from STANDING), X=standing, A=pause/resume, B=arms, Q=quit.
+# In VELOCITY: left stick = translate (Y fwd/back, X strafe), right stick X = turn.
+# Joystick comes from the pico controllers (command.provider=pico_joystick);
+# with bvh/udp input the keyboard twist fallback (W/S + J/L + N/M, K zero) applies.
+#
+# The mimic (standing) policy is the legacy `controller` section and ships
+# empty on purpose; supply a real checkpoint on the command line, e.g.
+#   python scripts/run/run_sim.py --config-name pico4_sim_velocity controller.policy_path=ckpt/track_g1.onnx
+#
+# controllers.velocity is the single-source controller/velocity.yaml (twist
+# cmd_vel section, pose B) pulled in via the defaults retarget below. Top-level
+# defaults list ONLY: nested `defaults:` inside the mapping do NOT work here.
+defaults:
+  - robot: g1
+  - controller: rl_policy
+  - controller@controllers.velocity: velocity
+  - input: pico4
+  - _self_
+
+policy_hz: 50.0
+# Physics invariant: decimation(4) * robot.sim_dt(0.005) == 1/policy_hz.
+pd_hz: 200.0
+keyboard:
+  enabled: true
+input:
+  video:
+    source: mujoco
+retarget_buffer_enabled: true
+retarget_buffer_window_s: 0.5
+retarget_buffer_delay_s: null  # null = auto use one input-frame delay for timeline sampling
+realtime_buffer_warmup_steps: 2
+reference_velocity_smoothing_alpha: 0.35
+reference_anchor_velocity_smoothing_alpha: 0.25
+reference_steps: [0]
+reference_debug_log: false
+arm_mocap:
+  controlled_joint_indices: [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+viewers: "all"
+realtime: true
+num_steps: 0          # 0 = infinite loop until Ctrl+C or device disconnect
+
+modes:
+  transition_duration_s: 1.0
+
+safety:
+  joint_vel_limit: 12.0   # ratified scalar (Phase A); per-joint limits = Phase B
+  tilt_threshold_rad: 1.0
+
+command:
+  provider: pico_joystick   # auto by input: pico4 -> joystick; bvh/udp -> keyboard
+  joystick:
+    deadzone: 0.15
+    max_age_s: 0.5
+    # Stick envelope cap: joint-vel safety gate (12.0 rad/s) was calibrated
+    # at 1.0 m/s (knee peak ~10.1); full-forward 2.0 m/s trips it in seconds
+    # (HMD session 2026-08-20). Stick +1 = 1.0 m/s until the gate is
+    # recalibrated per-joint (Phase B). cmd_limits above stay untouched —
+    # they are the policy contract, this is the operator envelope.
+    max_stick_scale: {lin_vel_x: 0.5}
+  keyboard:
+    speeds: {lin_x: 1.0, lin_y: 0.5, ang_z: 1.0}
+
+hydra:
+  run:
+    dir: .

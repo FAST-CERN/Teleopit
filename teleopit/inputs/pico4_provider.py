@@ -63,6 +63,8 @@ class PicoControllerState:
     grip: float
     trigger: float
     present: bool = True
+    axis_x: float = 0.0
+    axis_y: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -616,6 +618,8 @@ class Pico4InputProvider(RealtimeInputProvider):
             grip=float(axis.get("grip", 0.0)),
             trigger=float(axis.get("trigger", 0.0)),
             present=controller is not None,
+            axis_x=float(axis.get("x", 0.0)),
+            axis_y=float(axis.get("y", 0.0)),
         )
 
     @staticmethod

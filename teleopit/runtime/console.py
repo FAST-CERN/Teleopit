@@ -214,13 +214,22 @@ def sim_keyboard_controls(cfg: Any) -> tuple[KeyboardControl, ...]:
         keyboard_cfg = cfg_get(cfg, "keyboard", {}) or {}
         if not bool(cfg_get(keyboard_cfg, "enabled", False)):
             return ()
-        return (
-            KeyboardControl("Y", "mocap"),
-            KeyboardControl("A", "pause/resume"),
-            KeyboardControl("B", "arms"),
-            KeyboardControl("X", "standing"),
-            KeyboardControl("Q", "quit"),
+        # Same detection as run_sim._sim_status: VELOCITY is reachable only
+        # when the cfg carries a controllers.velocity section.
+        controllers_cfg = cfg_get(cfg, "controllers", None)
+        velocity_cfg = cfg_get(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
+        controls = [KeyboardControl("Y", "mocap")]
+        if velocity_cfg is not None:
+            controls.append(KeyboardControl("V", "velocity"))
+        controls.extend(
+            (
+                KeyboardControl("A", "pause/resume"),
+                KeyboardControl("B", "arms"),
+                KeyboardControl("X", "standing"),
+                KeyboardControl("Q", "quit"),
+            )
         )
+        return tuple(controls)
 
     playback_cfg = cfg_get(cfg, "playback", {}) or {}
     keyboard_cfg = cfg_get(playback_cfg, "keyboard", {}) or {}

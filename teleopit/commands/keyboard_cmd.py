@@ -1,9 +1,17 @@
-"""Keyboard twist source: hold-to-move WASD/QE, X latches zero.
+"""Keyboard twist source: hold-to-move W/S + J/L + N/M, K latches zero.
 
 Hold-to-move: the command is active only while the key is (or was very
 recently) seen in poll batches. A key not observed for `release_after_s`
 seconds reads as released, so the command returns to zero when the operator
-lets go — no explicit X needed. X remains as an immediate full stop.
+lets go — no explicit K needed. K remains as an immediate full stop.
+
+Key map (remapped 2026-08-20): the original WASD/QE/x collided with the
+SimLoopSession mode machine on the keyboard-fallback path — the tee hands
+every key to BOTH consumers, so q quit the session (intent: turn left),
+a toggled mocap pause (intent: strafe left), and x exited VELOCITY
+(intent: zero twist). The twist keys now avoid every session key
+(h q y v x a b r space p): W/S forward/back, J/L strafe left/right,
+N/M turn left/right, K immediate zero.
 
 Output is exponentially smoothed toward the target twist (alpha per
 get_cmd call), so direction changes and releases ramp instead of stepping.
@@ -21,10 +29,10 @@ _DEFAULT_SPEEDS = {"lin_x": 1.0, "lin_y": 0.5, "ang_z": 1.0}
 _KEY_MAP: dict[str, tuple[str, float]] = {
     "w": ("lin_x", 1.0),
     "s": ("lin_x", -1.0),
-    "a": ("lin_y", 1.0),
-    "d": ("lin_y", -1.0),
-    "q": ("ang_z", 1.0),
-    "e": ("ang_z", -1.0),
+    "j": ("lin_y", 1.0),
+    "l": ("lin_y", -1.0),
+    "n": ("ang_z", 1.0),
+    "m": ("ang_z", -1.0),
 }
 _AXIS_INDEX = {"lin_x": 0, "lin_y": 1, "ang_z": 5}
 
@@ -63,7 +71,7 @@ class KeyboardTwistProvider:
         now = time.monotonic()
         for event in self._keyboard.poll():
             key = getattr(event, "key", "")
-            if key == "x":
+            if key == "k":
                 self._held.clear()
                 self._last_seen.clear()
             elif key in _KEY_MAP:

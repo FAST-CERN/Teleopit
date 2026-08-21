@@ -491,3 +491,38 @@ def build_velocity_components(
         sim_cfg=sim_cfg,
         command_cfg=command_cfg,
     )
+
+
+
+def build_velocity_policy_components(
+    cfg: Any,
+    project_root: Path,
+) -> tuple[Any, Any]:
+    """Build ONLY the velocity (twist_cmd) controller + obs builder pair.
+
+    Same section resolution and pose-B guard as build_velocity_components,
+    for callers that own their own robot/runner assembly (TeleopPipeline).
+    """
+    robot_cfg = require_section(cfg, "robot")
+    controllers_cfg = cfg_get(cfg, "controllers", None)
+    velocity_cfg = cfg_get(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
+    if velocity_cfg is None:
+        raise ValueError(
+            "cfg must include a 'controllers.velocity' section "
+            "(policy_path, observation_type, default_dof_pos, cmd_limits, ...)."
+        )
+    if cfg_get(velocity_cfg, "default_dof_pos", None) is None:
+        raise ValueError(
+            "controllers.velocity.default_dof_pos must be set explicitly "
+            "(pose B); robot defaults are pose A and must not propagate."
+        )
+    sim_cfg = build_simulation_cfg(cfg)
+    return _build_policy_components(
+        robot_cfg=robot_cfg,
+        controller_cfg=velocity_cfg,
+        sim_cfg=sim_cfg,
+        project_root=project_root,
+        controller_cls=RLPolicyController,
+        single_input_ok=True,
+        propagate_defaults=False,
+    )

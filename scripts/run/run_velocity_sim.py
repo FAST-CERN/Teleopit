@@ -1,7 +1,7 @@
 """Run the STANDING<->VELOCITY twist cmd_vel simulation (G1 sim2sim).
 
 Keys: v = enter VELOCITY, b = back to STANDING, Esc = stop.
-Twist: w/s fwd/back, a/d strafe, q/e turn, x = zero.
+Twist: w/s fwd/back, j/l strafe, n/m turn, k = zero.
 
 Examples:
   python scripts/run/run_velocity_sim.py                       # interactive
@@ -46,7 +46,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class _KeyboardTee:
     """Deliver one physical key batch to every consumer within a step.
 
-    The session (mode keys v/b/Esc) and the twist provider (WASD/QE/x) share
+    The session (mode keys v/b/Esc) and the twist provider (W/S/J/L/N/M/k) share
     one terminal reader and both call poll() per policy step; in VELOCITY mode
     the provider polls first and would otherwise drain and drop the mode keys
     before the session ever sees them. The tee caches one drained batch and
@@ -144,9 +144,9 @@ def _velocity_operator_controls() -> tuple[KeyboardControl, ...]:
         KeyboardControl("B", "standing"),
         KeyboardControl("Esc", "stop"),
         KeyboardControl("W/S", "fwd/back"),
-        KeyboardControl("A/D", "strafe"),
-        KeyboardControl("Q/E", "turn"),
-        KeyboardControl("X", "zero twist"),
+        KeyboardControl("J/L", "strafe left/right"),
+        KeyboardControl("N/M", "turn left/right"),
+        KeyboardControl("K", "zero twist"),
         KeyboardControl("T", "perturb (push left)"),
     )
 

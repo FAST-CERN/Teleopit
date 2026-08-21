@@ -22,6 +22,18 @@ def test_sim_console_shows_only_enabled_keyboard_controls() -> None:
     assert labels == ["Y", "A", "B", "X", "Q"]
 
 
+def test_sim_console_advertises_v_only_with_velocity_section() -> None:
+    cfg = {
+        "input": {"provider": "pico4"},
+        "keyboard": {"enabled": True},
+        "controllers": {"velocity": {"policy_path": "policy.onnx"}},
+    }
+
+    labels = [control.keys for control in sim_keyboard_controls(cfg)]
+
+    assert labels == ["Y", "V", "A", "B", "X", "Q"]
+
+
 def test_sim_console_hides_non_keyboard_controls() -> None:
     cfg = {
         "input": {"provider": "pico4"},
