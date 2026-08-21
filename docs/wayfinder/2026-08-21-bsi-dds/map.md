@@ -2,8 +2,9 @@
 id: bsi-dds-map
 title: "BSI 脑控离散指令接入：DDS 接口 + BSI_DDSInterface handoff + 仿真同源"
 labels: [wayfinder:map]
-status: open
+status: closed
 created: 2026-08-21
+closed: 2026-08-21
 ---
 
 ## Destination
@@ -49,13 +50,11 @@ created: 2026-08-21
 - [急停设计：键位 + 渐0→STANDING 语义 + keymap 影响](tickets/03-estop-key-and-semantics.md) — 会话级全模式；0.3s 渐0→既有 X 退出缓动→STANDING；键盘 E + 右手 menuButton 同键 toggle；锁存抑制全部指令源；控制台+日志反馈。
 - [pico4 仿真接线架构：BSI 与摇杆并联的融合层选择](tickets/04-sim-integration-architecture.md) — 方案 A `MergedTwistProvider`（session 零改动）；整包互斥摇杆优先；无额外切换 ramp；`command.provider: merged_bsi` + `command.bsi.*`；DDS 订阅 provider 内自持；急停抑制在会话层；bvh 通路接口开放先不接。
 - [BSI 模式 keymap 重排：Pico 摇杆/键盘键位分配与冲突排查](tickets/05-keymap-redesign.md) — 键盘 E 急停 + C 哑音（左手区应急动线）；手柄右手 menuButton 急停 + 左手 Y 哑音（右手安全/左手源控制，左手 X 留空避混淆）；哑音 provider 层 toggle 不断订阅；H 帮助+key_feedback 反馈。
+- [验收演示场景：mock BSI 序列驱动的量化指标与行为 checklist](tickets/07-acceptance-demo.md) — 双门制（pytest 指标门+14 行桌面 checklist）；~50s 单段全元素脚本；响应≤1.0s/自然减速≤1.5s/急停≤0.8s/抢夺≤2 周期/孤包滤除/静默 1s/哑音即时；回放复用 mock 脚本格式。
 
 ## Not yet specified
 
-- BSI 实测特性未知（误分类率、指令间隔、标签切换节奏）→ 防抖窗口（3 包/2 包）与前进幅值（0.6）为首发保守值，实测回填后重校，届时或生「特性回填」ticket。（confidence 字段已进 schema，实测后可用于阈值策略）
-- ~~BSI_DDSInterface「通信进程管理」的具体 API 面~~ — T1 已定形态：可选启动/健康检查工具集（非守护进程中继），API 面随骨架 task 细化。
-- bvh/udp 通路要不要 BSI — 先只接 pico4 通路，视经验再议。
-- 验收若暴露响应延迟/抖动问题 → 参数整定（平滑常数、防抖窗口）可能单出 ticket。
+（map 已闭合 2026-08-21，七票全决。残余雾区随实现/实测回填，属后续 plan 与「特性回填」预案，不再挂本图：BSI 实测特性回填（防抖 3/2 包、幅值 0.6 重校）；bvh/udp 通路 BSI 接入（视 pico4 经验再议）；验收暴露延迟/抖动时的参数整定 ticket。）
 
 ## Out of scope
 
