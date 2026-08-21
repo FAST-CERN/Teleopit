@@ -352,11 +352,19 @@ def _configured_open_hand_pose(cfg: Any) -> tuple[np.ndarray, np.ndarray]:
     hands_cfg = cfg_get(cfg, "hands", {}) or {}
     driver = str(cfg_get(hands_cfg, "driver", "linkerhand_l6")).strip().lower()
     if bool(cfg_get(hands_cfg, "enabled", False)):
-        if driver == "linkerhand_o6":
-            hand_cfg = parse_linkerhand_o6_config(cfg)
+        if driver == "inspire_ftp":
+            inspire_cfg = cfg_get(hands_cfg, "inspire_ftp", {}) or {}
+            presets = cfg_get(inspire_cfg, "presets", {}) or {}
+            open_preset = cfg_get(presets, "open", {}) or {}
+            pose = np.asarray(
+                [int(v) for v in cfg_get(open_preset, "angles", ())], dtype=np.float32
+            ).reshape(-1)
         else:
-            hand_cfg = parse_linkerhand_l6_config(cfg)
-        pose = np.asarray(hand_cfg.open_pose, dtype=np.float32).reshape(-1)
+            if driver == "linkerhand_o6":
+                hand_cfg = parse_linkerhand_o6_config(cfg)
+            else:
+                hand_cfg = parse_linkerhand_l6_config(cfg)
+            pose = np.asarray(hand_cfg.open_pose, dtype=np.float32).reshape(-1)
     elif driver == "linkerhand_o6":
         pose = np.array([250, 250, 250, 250, 250, 250], dtype=np.float32)
     else:

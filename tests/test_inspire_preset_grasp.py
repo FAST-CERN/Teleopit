@@ -207,3 +207,12 @@ def test_build_hand_runtime_dispatches_inspire_ftp(monkeypatch) -> None:
     }
     runtime = build_hand_runtime(cfg)
     assert "device" in made and runtime is not None
+
+
+def test_configured_open_hand_pose_inspire_uses_open_preset() -> None:
+    from teleopit.sim2real.mp.runtime import _configured_open_hand_pose
+
+    cfg = {"hands": {"enabled": True, "driver": "inspire_ftp",
+                     "inspire_ftp": {"presets": {"open": {"angles": [1000] * 6}}}}}
+    left, right = _configured_open_hand_pose(cfg)
+    assert left.tolist() == [1000.0] * 6 and right.tolist() == [1000.0] * 6
