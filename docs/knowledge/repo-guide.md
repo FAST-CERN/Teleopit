@@ -33,7 +33,7 @@ Teleopit/
 ├── assets/robots/       机器人模型（gitignored，运行时下载）
 ├── ckpt/                策略 checkpoint（gitignored，运行时下载）
 ├── data/                BVH 样例 / 数据集（数据部分 gitignored）
-├── third_party/         可选硬件 SDK 子模块（g1_bridge / linkerhand / somehand / unitree_sdk2）
+├── third_party/         可选硬件 SDK（g1_bridge vendored；linkerhand / somehand / unitree_sdk2 / BSI_DDSInterface 为 git submodule）
 ├── AGENTS.md            开发硬性规则 + 技术契约（最权威文档）
 ├── CHANGELOG.md         版本记录
 ├── pyproject.toml       包定义 + 依赖组（dev/sim2real/train/pico4/openneck/recording/review/dexhand）
@@ -44,6 +44,44 @@ Teleopit/
 > `scripts/setup/download_assets.py` 从 ModelScope 下载（两个仓库：
 > `BingqianWu/Teleopit-models` 模型类、`BingqianWu/Teleopit-datasets` 数据类）。
 > 推送前跑 `python scripts/dev/check_large_tracked_files.py`。
+
+### third_party 两种来源形态
+
+| 目录 | 形态 | 更新方式 |
+|---|---|---|
+| `g1_bridge_sdk/` | vendored（全量拷贝，受本仓 git 跟踪） | 手动覆盖文件后提交 |
+| `unitree_sdk2_python/`、`linkerhand-python-sdk/`、`somehand/`、`BSI_DDSInterface/` | git submodule（指针，本仓只记 commit hash） | 见下节 |
+
+### git submodule 工作流（与 vendored 的差异）
+
+submodule 目录**不是**本仓文件——主仓只记录「哪个 commit」。 consequences：
+
+```bash
+# 新克隆后 / submodule 目录为空时，先初始化：
+git submodule update --init
+
+# 拉取主仓新提交后（别人 bump 了 submodule 指针），目录可能落后：
+git submodule update --init third_party/BSI_DDSInterface
+
+# 进入 submodule 内部开发（有独立 git 历史）：
+cd third_party/BSI_DDSInterface
+git fetch && git checkout main   # 或目标 commit
+
+# bump 指针：submodule 内 checkout 到新 commit 后，回到主仓把
+# third_party/BSI_DDSInterface 的指针变化作为普通提交提交掉。
+```
+
+- **克隆不带 submodule 也不报错**：目录存在但为空。依赖它的测试必须
+  skip 而非失败（`tests/test_bsi_dds.py` 是参照实现：submodule 未
+  checkout 或依赖缺失时整文件 skip）。
+- **CI/新环境前置条件**：`pip install -e .` 之后按需
+  `git submodule update --init`（不必全初始化，用到哪个初始化哪个）。
+- **不要在主仓 `git add` submodule 内部文件**——那会把 vendored 化；
+  指针变化只体现为目录级一条记录。
+- `BSI_DDSInterface`：BSI 脑控离散指令 DDS 接口库（协议 + 收发 + 健康工
+  具，上位机/下位机双端复用）。协议契约与用法见其仓内
+  `docs/protocol.md` 与 `README.md`；本仓冒烟脚本
+  `scripts/dev/test_bsi_dds.py`。
 
 ## 3. 核心包 `teleopit/` 文件级导览
 
@@ -161,7 +199,7 @@ Teleopit/
 | `render/render_sim.py` | BVH→三段 MuJoCo 视频（mocap / retarget / sim2sim） |
 | `dev/compute_ik_offsets.py` | 新 BVH 格式 IK 偏移标定 |
 | `dev/bench_policy_onnx.py` / `bench_dds.py` | ONNX / DDS 基准 |
-| `dev/test_*.py` | pico_bridge / linkerhand / openneck / g1_bridge 硬件连通测试 |
+| `dev/test_*.py` | pico_bridge / linkerhand / openneck / g1_bridge 硬件连通测试；`test_bsi_dds.py` 为 BSI submodule DDS 回环冒烟 |
 
 ## 5. `train_mimic/` 训练包导览
 

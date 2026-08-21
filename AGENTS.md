@@ -284,6 +284,8 @@ python train_mimic/scripts/save_onnx.py --checkpoint logs/rsl_rl/g1_general_trac
 - `teleopit/retargeting/gmr/assets/` is gitignored; downloaded at runtime
 - `train_mimic/assets/` is no longer tracked; FK tooling uses the robot assets under `assets/robots/`, with `assets/robots/unitree_g1/g1_29dof.xml` as the default G1 model
 - `third_party/linkerhand-python-sdk` and `third_party/somehand` support optional LinkerHand sim2real control
+- `third_party/` mixes vendored copies (`g1_bridge_sdk`) with git submodules (`unitree_sdk2_python`, `linkerhand-python-sdk`, `somehand`, `BSI_DDSInterface`); submodules need `git submodule update --init` after clone, and tests depending on them must skip (not fail) when they are not checked out. See `docs/knowledge/repo-guide.md` for the submodule workflow
+- `third_party/BSI_DDSInterface` is the BSI discrete-command DDS interface (protocol single source + pub/sub + health tools); its contract lives in that repo (`docs/protocol.md`), Teleopit never duplicates the protocol definition. Smoke script: `scripts/dev/test_bsi_dds.py`
 - Run `python scripts/dev/check_large_tracked_files.py` before pushing
 
 Assets are split across two ModelScope repos by type:

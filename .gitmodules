@@ -7,3 +7,6 @@
 [submodule "third_party/somehand"]
 	path = third_party/somehand
 	url = https://github.com/BotRunner64/somehand.git
+[submodule "third_party/BSI_DDSInterface"]
+	path = third_party/BSI_DDSInterface
+	url = https://github.com/FAST-CERN/BSI_DDSInterface.git
