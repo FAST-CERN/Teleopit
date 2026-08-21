@@ -125,3 +125,39 @@ class Sim2RealSafetyManager:
             )
             return True
         return False
+
+
+def velocity_safety_verdict(
+    state: Any,
+    *,
+    joint_vel_limit: float,
+    tilt_graceful_rad: float,
+    tilt_damping_rad: float,
+) -> str | None:
+    """bsi-realhw-05 envelope check for the real-robot VELOCITY mode.
+
+    Returns "damping" (overspeed or falling: enter DAMPING now), "standing"
+    (recoverable tilt: graceful 0.3s-ramp exit to STANDING), or None.
+    Checked once per policy step, VELOCITY mode only — same discipline as the
+    sim's VelocityStepController.check_safety, with the real dual tilt lines.
+    """
+    import numpy as np
+
+    from teleopit.controllers.twist_observation import _quat_rotate_inv_np
+
+    max_vel = float(np.max(np.abs(np.asarray(state.qvel, dtype=np.float64))))
+    if max_vel > float(joint_vel_limit):
+        logger.error(
+            "SAFETY: joint velocity %.2f rad/s exceeds %.2f -> DAMPING", max_vel, joint_vel_limit
+        )
+        return "damping"
+    quat = np.asarray(state.quat, dtype=np.float32)
+    gravity_b = _quat_rotate_inv_np(quat, np.array([0.0, 0.0, -1.0], dtype=np.float32))
+    tilt = float(np.arccos(np.clip(-gravity_b[2], -1.0, 1.0)))
+    if tilt > float(tilt_damping_rad):
+        logger.error("SAFETY: tilt %.2f rad over %.2f -> DAMPING", tilt, tilt_damping_rad)
+        return "damping"
+    if tilt > float(tilt_graceful_rad):
+        logger.error("SAFETY: tilt %.2f rad over %.2f -> STANDING", tilt, tilt_graceful_rad)
+        return "standing"
+    return None
