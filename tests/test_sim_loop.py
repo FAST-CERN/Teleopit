@@ -962,7 +962,7 @@ class _ConstCmdProvider:
         pass
 
 
-def _velocity_loop(monkeypatch, keyboard_script):
+def _velocity_loop(monkeypatch, keyboard_script, *, estop=None):
     from teleopit.sim.loop import SimulationLoop
 
     # Constructed by SimLoopSession as TerminalKeyboardReader() with no args
@@ -1015,8 +1015,52 @@ def _velocity_loop(monkeypatch, keyboard_script):
         joint_vel_limit=10.0,
         tilt_threshold_rad=1.0,
         pose_b=np.zeros(29, dtype=np.float64),
+        estop=estop,
     )
     return loop, twist_builder, vel_controller, _CountingPicoProvider()
+
+
+@requires_mujoco
+def test_estop_latch_blocks_mocap_and_velocity_until_e_release(monkeypatch) -> None:
+    """SimLoopSession estop path: V→VELOCITY→estop→STANDING(latched); Y(mocap)
+    and V refused while latched; E releases; V then re-enters. Regression for
+    the "切不回去 / 可进 mocap" bug (wayfinder bsi-dds-03).
+
+    Distinguishing assertion: with the fix the final state is VELOCITY+INACTIVE
+    (E released, V re-entered). With the old auto-unlatch bug, Y would escape
+    to MOCAP (latch cleared), E would be ignored in MOCAP, V from MOCAP is
+    refused -> final MOCAP+LATCHED, never returning to VELOCITY.
+    """
+    from teleopit.sim.estop import EstopController, EstopState
+    from teleopit.sim.loop import SimulationMode
+
+    class _StepClock:
+        """Deterministic per-call clock: +0.02s each read (one policy tick),
+        so the 0.3s ramp completes in ~15 apply() calls regardless of realtime."""
+        def __init__(self):
+            self.t = 0.0
+        def __call__(self):
+            self.t += 0.02
+            return self.t
+
+    estop = EstopController(clock=_StepClock())
+    script = [
+        (TerminalKeyEvent("v"),),   # step 0: enter VELOCITY
+        (TerminalKeyEvent("e"),),   # step 1: engage estop (RAMPING)
+    ]
+    script += [()] * 20             # steps 2-21: ramp→LATCHED→STANDING
+    script += [
+        (TerminalKeyEvent("y"),),   # step 22: mocap refused (latched)
+        (TerminalKeyEvent("v"),),   # step 23: velocity refused (latched)
+        (TerminalKeyEvent("e"),),   # step 24: release latch
+        (TerminalKeyEvent("v"),),   # step 25: re-enter VELOCITY
+    ]
+    loop, _, vel_controller, provider = _velocity_loop(monkeypatch, script, estop=estop)
+    loop.run(input_provider=provider, retargeter=_DummyRetargeter(), num_steps=26)
+
+    session = loop.last_session
+    assert session.simulation_mode == SimulationMode.VELOCITY  # re-entered after E release
+    assert estop.state == EstopState.INACTIVE
 
 
 @requires_mujoco

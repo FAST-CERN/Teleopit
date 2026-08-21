@@ -697,3 +697,44 @@ def test_estop_key_engages_estop_and_mute_key_delegates():
     session._handle_keyboard()
     assert cmd.mute_calls == 1
     assert cmd.muted is True
+
+
+def test_estop_latch_persists_blocks_v_then_e_releases():
+    """estop -> STANDING latched: V refused, E releases, V then works.
+
+    Regression for the "切不回去 / 可进 mocap" bug: on_standing used to auto-
+    clear the latch, so the robot could re-enter VELOCITY (or escape to mocap
+    on the SimLoopSession path) right after an estop. The latch must persist
+    until the operator presses E again (wayfinder bsi-dds-03: 同键 toggle 解锁).
+    Ramp timing is unit-tested in test_estop.py; here we drive the session
+    with the latch already LATCHED to test the mode-machine guards.
+    """
+    robot, mimic_runner, vel_runner = _components()
+    console = _RecordingConsole()
+    session = _session(robot, mimic_runner, vel_runner, console=console)
+    session.mode = VelocityMode.VELOCITY
+
+    # Simulate the ramp having just completed: LATCHED + exit requested.
+    session.estop._state = EstopState.LATCHED
+    session.estop._exit_requested = True
+    session.estop._exit_consumed = False
+
+    # One step: consume_exit_request -> request STANDING -> _apply_pending_mode
+    # -> on_standing (must PRESERVE the latch) -> STANDING.
+    session.run(num_steps=1)
+    assert session.mode == VelocityMode.STANDING
+    assert session.estop.state == EstopState.LATCHED  # lock persisted
+
+    # V while latched is refused — cannot switch back until E releases.
+    session.request_mode(VelocityMode.VELOCITY)
+    assert session.mode == VelocityMode.STANDING
+    assert session._pending_mode is None
+
+    # E releases the latch (mode stays STANDING).
+    session._keyboard = _ScriptedKeyboard([["e"]])
+    session._handle_keyboard()
+    assert session.estop.state == EstopState.INACTIVE
+
+    # V now queues the VELOCITY entry.
+    session.request_mode(VelocityMode.VELOCITY)
+    assert session._pending_mode == VelocityMode.VELOCITY
