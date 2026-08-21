@@ -49,10 +49,10 @@ created: 2026-08-21
 - [仿真 14 行桌面 checklist 目视验收](tickets/01-sim-desktop-checklist.md) — user-reported 通过（目视 + 活信号复核），无 fix ticket；量化细节由 03 承接。
 - [BSI 真实解码器接入仿真（活信号联调）](tickets/02-live-decoder-sim-hookup.md) — user-reported 通过：解码器→domain 0，仿真零改动被活信号驱动；流率/拓扑量化留 03/06。
 - [真实 BSI 流采数量化与参数复校](tickets/03-bsi-stream-capture-retune.md) — user-reported 通过：真实流复核未报调整，参数按现值沿用；仿真收口门全关，Phase B（04）解锁。
+- [真机 VELOCITY 模式接线设计](tickets/04-real-velocity-mode-design.md) — Sim2RealRuntime 内加 VELOCITY 模式；Pico TOGGLE_VELOCITY 键（仅 STANDING 进、锁存期拒入）；订阅器 + MergedTwistProvider 住 robot_control 进程（CONTROLLER_TOPIC 供摇杆半边）；速度 ONNX 策略与真机状态完全兼容直接复用（single_input_ok，无需 _multi_input 门）；新 pico4_sim2real_bsi.yaml + run_sim2real.py 入口。附带事实喂 05：joint_vel_limit mp 路径未执行、TOGGLE_ESTOP/MUTE 被丢弃（90% 现成急停缝）、L1+R1 遥控器 damping 即硬件级安全底。
 
 ## Not yet specified
 
-- 04 设计定稿后浮出的实现层决策（obs builder 真机输入差异、pd_hz/policy_hz 不变量、动作标定）——届时毕业为新票。
 - L2 慢速门的具体降速幅值与 L3 场地布置（并入 07 规格时定）。
 - 真机联调暴露的整定票（同上张图「特性回填」预案）。
 
