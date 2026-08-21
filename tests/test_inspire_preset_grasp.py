@@ -216,3 +216,47 @@ def test_configured_open_hand_pose_inspire_uses_open_preset() -> None:
                      "inspire_ftp": {"presets": {"open": {"angles": [1000] * 6}}}}}
     left, right = _configured_open_hand_pose(cfg)
     assert left.tolist() == [1000.0] * 6 and right.tolist() == [1000.0] * 6
+
+
+def test_hand_runtime_tick_forwards_speed_force_to_device() -> None:
+    from teleopit.sim2real.hands.base import HandPoseCommand
+    from teleopit.sim2real.hands.worker import HandRuntime
+
+    calls: list[dict] = []
+
+    class _Dev:
+        def connect(self): pass
+        def get_state(self, side): return ()
+        def send_pose(self, side, pose, *, force=False, reason="", speed_set=(), force_set=()):
+            calls.append({"side": side, "speed_set": speed_set, "force_set": force_set})
+        def open_all(self, *, force=False, reason=""): pass
+        def close(self): pass
+
+    class _RichMapper:
+        def start(self): pass
+        def map(self, **kwargs):
+            return (HandPoseCommand("left", (210, 165, 207, 204, 600, 1000), True, "preset:grasp",
+                                    speed_set=(), force_set=(1000,) * 6),)
+        def close(self): pass
+
+    HandRuntime(_Dev(), _RichMapper()).tick(
+        controller_snapshot=None, hand_snapshot=None, active=True, now_s=1.0)
+    assert calls and calls[0]["force_set"] == (1000,) * 6  # rich fields survive the runtime bridge
+
+    class _LegacyDev:
+        def connect(self): pass
+        def get_state(self, side): return ()
+        def send_pose(self, side, pose, *, force=False, reason=""):  # linkerhand strict signature
+            calls.append({"side": side, "legacy": True})
+        def open_all(self, *, force=False, reason=""): pass
+        def close(self): pass
+
+    class _PlainMapper:
+        def start(self): pass
+        def map(self, **kwargs):
+            return (HandPoseCommand("right", (1000,) * 6, False, "grip"),)
+        def close(self): pass
+
+    HandRuntime(_LegacyDev(), _PlainMapper()).tick(
+        controller_snapshot=None, hand_snapshot=None, active=True, now_s=1.0)
+    assert calls[-1].get("legacy") is True  # empty-set commands keep the legacy call form

@@ -60,7 +60,15 @@ class HandRuntime:
             )
             sent: list[HandPoseCommand] = []
             for command in commands:
-                self._device.send_pose(command.side, command.pose, force=command.force, reason=command.reason)
+                if command.speed_set or command.force_set:
+                    # Rich commands (inspire presets) carry angle+force(+speed);
+                    # legacy devices keep the strict legacy call form.
+                    self._device.send_pose(
+                        command.side, command.pose, force=command.force, reason=command.reason,
+                        speed_set=command.speed_set, force_set=command.force_set,
+                    )
+                else:
+                    self._device.send_pose(command.side, command.pose, force=command.force, reason=command.reason)
                 sent.append(command)
             return tuple(sent)
         except Exception:
