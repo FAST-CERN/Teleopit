@@ -1074,3 +1074,28 @@ git commit -m "test(bsi): phase-1 gate — full suite green + headless smoke 50 
 - [ ] **Step 5: Handoff summary (for the phase-2 session)**
 
 Write into the plan file's end (append a `## Phase-1 Completion` section): commit SHA of the gate, test counts, and the phase-2 input pointer (spec `docs/superpowers/specs/2026-08-21-bsi-teleopit-integration-design.md` Handoff 边界 section + `docs/wayfinder/2026-08-21-bsi-dds/tickets/04+05+07` resolutions). The phase-2 session starts from this plan file's completion section, NOT from this conversation.
+
+---
+
+## Phase-1 Completion
+
+**完成 2026-08-21**（worktree `bsi-phase1`，branch `worktree-bsi-phase1`）。
+
+**Commits**（merge-base c794f2e 起）：
+- `3fd2f56` feat(bsi): BsiTwistProvider — debounce/map/smooth pipeline over IntentSource
+- `61faa98` test(bsi): silence/mute/unknown-value metric gates
+- `94ad77a` feat(bsi): MergedTwistProvider — whole-packet joystick priority
+- `44eef7c` feat(bsi): EstopController — latched suppression, 0.3s exp decay, one-shot exit
+- `3117936` feat(bsi): wire EstopController into velocity session — cmd suppression seam + one-shot exit + auto-unlatch
+- `6961163` merge: master plan fixes
+
+**验收（pytest 指标门）**：
+- 新增 24 测试全绿：`test_bsi_twist.py`(11) + `test_merged_twist.py`(4) + `test_estop.py`(7) + `test_velocity_step.py` 追加 seam 测试(2)。
+- 全套 `pytest tests/ -q --continue-on-collection-errors`：**438 passed + 51 skipped**；3 failed（`test_sim2real_multiprocess.py` imageio `quality` kwarg）+ 11 errors（train_mimic 缺 `mjlab`）均为**既有环境问题**，与 BSI 零交集，无新增失败。
+- headless 冒烟 `run_velocity_sim.py controller.policy_path=ckpt/track_g1.onnx num_steps=50`：`steps: 50` 正常退出，无 estop/BSI 输出（默认 provider 路径未被触碰）。
+
+**phase-2 输入指针**（新对话从此冷启动，不依赖本会话）：
+- 规格：`docs/superpowers/specs/2026-08-21-bsi-teleopit-integration-design.md`（Handoff 边界节）
+- 决策：`docs/wayfinder/2026-08-21-bsi-dds/tickets/04-sim-integration-architecture.md`（`merged_bsi` 配置分支 + provider 内自持 DDS 线程）、`05-keymap-redesign.md`（E/C + 右 menuButton/左手Y）、`07-acceptance-demo.md`（14 行桌面 checklist）
+- 待办：`command.provider: merged_bsi` 工厂分支、DDS 意图源实现 `IntentSource`（dds-probe env `C:/Users/user/.conda/envs/dds-probe/python.exe`）、键位接线（键盘 E/C + pico 按钮）、H 帮助文本、桌面 checklist 执行。
+- 一阶段已交付的 handoff 缝：`IntentSource` Protocol + `EstopController`（会话 `self.estop` 句柄，phase-2 键位驱动 `estop.toggle`）。
