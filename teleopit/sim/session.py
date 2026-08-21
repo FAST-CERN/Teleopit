@@ -590,6 +590,19 @@ class SimLoopSession:
                 continue
             if control_event.event_type == ControlEventType.TOGGLE_PAUSE:
                 self.toggle_realtime_mocap_pause()
+                continue
+            if control_event.event_type == ControlEventType.TOGGLE_ESTOP:
+                estop = self._loop._velocity_estop
+                if estop is not None:
+                    from teleopit.sim.loop import SimulationMode
+                    estop.toggle(in_velocity=(self.simulation_mode == SimulationMode.VELOCITY))
+                continue
+            if control_event.event_type == ControlEventType.TOGGLE_MUTE:
+                provider = self._loop._velocity_cmd_provider
+                toggle = getattr(provider, "toggle_mute", None)
+                if callable(toggle):
+                    toggle()
+                continue
         new_bvh_frame = frame_seq != self.last_live_packet_seq
 
         if self.mocap_session.state == MocapSessionState.PAUSED:
