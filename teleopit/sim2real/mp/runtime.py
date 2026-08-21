@@ -158,6 +158,13 @@ class RobotMode(Enum):
     DAMPING = "damping"
 
 
+# Modes already inside the local-ONNX debug loop; entering STANDING from one
+# of these needs no debug-mode re-entry or joint locking.
+_DEBUG_MODES = (RobotMode.STANDING, RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY, RobotMode.VELOCITY)
+# Active modes whose exit ramps the standing reference and kp gains.
+_EXIT_RAMP_MODES = (RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY, RobotMode.VELOCITY)
+
+
 class _LoopTimingReporter:
     def __init__(
         self,
@@ -1462,7 +1469,9 @@ class _RobotControlWorker:
     def shutdown(self) -> None:
         if self.high_level_policy_enabled and self._policy_session_id is not None:
             self._stop_high_level_policy_session()
-        if self.mode in (RobotMode.STANDING, RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY):
+        if self.mode in (
+            RobotMode.STANDING, RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY, RobotMode.VELOCITY
+        ):
             try:
                 self.robot.set_damping()
                 time.sleep(0.5)
@@ -1542,6 +1551,40 @@ class _RobotControlWorker:
                 self._velocity_cmd, max_lin_x=float(forward_cfg.get("max_lin_x", 0.3))
             )
 
+    def _enter_velocity(self) -> None:
+        """STANDING -> VELOCITY (Pico X, bsi-realhw-04 D1).
+
+        Entry gate mirrors the sim V key: only from STANDING, refused while
+        the estop latch holds (05: E is the only release key — damping
+        entries latch it), and needs the velocity stack configured.
+        """
+        if self._velocity_policy is None:
+            operator_logger.warning("TOGGLE_VELOCITY ignored: velocity stack not configured")
+            return
+        if self.mode != RobotMode.STANDING:
+            operator_logger.warning(
+                "TOGGLE_VELOCITY ignored: entry only from STANDING (now %s)", self.mode.value
+            )
+            return
+        if self.estop.state != EstopState.INACTIVE:
+            operator_logger.warning(
+                "TOGGLE_VELOCITY refused: estop latched — press E (left grip) to release"
+            )
+            return
+        self._velocity_obs_builder.reset()
+        self._velocity_policy.reset()
+        self._velocity_cmd.reset()
+        # Action-continuity seeding (sim begin_velocity_handoff semantics):
+        # the first velocity observation must not see a zero action jump.
+        self._velocity_last_action = self._last_action.copy()
+        self.mode = RobotMode.VELOCITY
+        operator_logger.info("mode -> VELOCITY")
+
+    def _exit_velocity_to_standing(self) -> None:
+        """VELOCITY -> STANDING via the standing-return ramp (sim X semantics)."""
+        operator_logger.info("velocity exit -> STANDING (ramp)")
+        self._enter_standing()
+
     def _drain_ipc(self) -> None:
         command = self._command_sub.recv_latest()
         if isinstance(command, CommandPacket) and command.command == "shutdown":
@@ -1578,7 +1621,7 @@ class _RobotControlWorker:
                 self._enter_standing()
         elif self.mode == RobotMode.STANDING:
             reentry_request = self._mocap_reentry_armed and self.remote.Y.pressed
-            if self.remote.Y.on_pressed or reentry_request:
+            if self._mocap_entry_enabled and (self.remote.Y.on_pressed or reentry_request):
                 self._mocap_entry_requested = True
             if self._mocap_entry_requested:
                 self._arm_mocap_reference_if_needed()
@@ -2289,12 +2332,7 @@ class _RobotControlWorker:
         self._mocap_entry_requested = False
         if prev_mode == RobotMode.STANDING:
             return
-        already_in_debug = self.mode in (
-            RobotMode.STANDING,
-            RobotMode.MOCAP,
-            RobotMode.ARMS,
-            RobotMode.POLICY,
-        )
+        already_in_debug = self.mode in _DEBUG_MODES
         if not already_in_debug:
             logger.info("Entering debug mode...")
             ok = self.robot.enter_debug_mode()
@@ -2304,12 +2342,7 @@ class _RobotControlWorker:
             time.sleep(0.5)
 
         state = self.robot.get_state()
-        if prev_mode not in (
-            RobotMode.STANDING,
-            RobotMode.MOCAP,
-            RobotMode.ARMS,
-            RobotMode.POLICY,
-        ):
+        if prev_mode not in _DEBUG_MODES:
             logger.info("Locking joints to current position...")
             self.robot.lock_all_joints()
             time.sleep(0.3)
@@ -2320,7 +2353,7 @@ class _RobotControlWorker:
         self._mocap_session.reset()
         self._last_commanded_motion_qpos = None
         self._set_default_standing_reference(state)
-        if prev_mode in (RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY):
+        if prev_mode in _EXIT_RAMP_MODES:
             # Ramp the reference from where the robot IS (its current physical
             # pose) to the standing pose instead of snapping it: the mimic
             # policy sees a continuous reference, matching the kp ramp that
@@ -2341,11 +2374,7 @@ class _RobotControlWorker:
         else:
             self._standing_ref_interp = None
             self._reset_policy_state()
-        if prev_mode in (
-            RobotMode.MOCAP,
-            RobotMode.ARMS,
-            RobotMode.POLICY,
-        ):
+        if prev_mode in _EXIT_RAMP_MODES:
             self._safety.start_kp_ramp(
                 duration_s=self._standing_return_ramp_duration,
                 floor_ratio=self._standing_return_kp_ramp_floor_ratio,
@@ -2500,6 +2529,22 @@ class _RobotControlWorker:
 
     def _handle_mocap_control_events(self, control_events: tuple[ControlEvent, ...]) -> None:
         for event in control_events:
+            if event.event_type == ControlEventType.TOGGLE_VELOCITY:
+                if self.mode == RobotMode.VELOCITY:
+                    self._exit_velocity_to_standing()
+                else:
+                    self._enter_velocity()
+                continue
+            if event.event_type == ControlEventType.TOGGLE_ESTOP:
+                result = self.estop.toggle(in_velocity=(self.mode == RobotMode.VELOCITY))
+                operator_logger.info("Pico estop toggle: %s", result)
+                continue
+            if event.event_type == ControlEventType.TOGGLE_MUTE:
+                if self._velocity_cmd is not None:
+                    muted = self._velocity_cmd.toggle_mute()
+                    if muted is not None:
+                        operator_logger.info("BSI mute: %s", "muted" if muted else "live")
+                continue
             if event.event_type == ControlEventType.TOGGLE_ARMS:
                 self._toggle_arms_mode()
                 continue

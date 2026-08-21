@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 
 import teleopit.sim2real.mp.runtime as runtime_module
+from teleopit.inputs.realtime_packet import ControlEvent, ControlEventType
+from teleopit.sim.estop import EstopState
 from teleopit.sim2real.mp.runtime import RobotMode, _RobotControlWorker
 
 
@@ -46,6 +48,7 @@ def _make_worker(**overrides) -> _RobotControlWorker:
     worker._velocity_last_action = np.zeros(29, dtype=np.float32)
     worker._last_action = np.zeros(29, dtype=np.float32)
     worker._mocap_entry_enabled = True
+    worker._mocap_entry_requested = False
     worker._velocity_cmd_logger = runtime_module.VelocityCmdLogger(None)
     for key, value in overrides.items():
         setattr(worker, key, value)
@@ -119,3 +122,96 @@ def test_build_velocity_stack_without_restrict_keeps_plain_provider(monkeypatch)
     worker = _make_worker()
     worker._build_velocity_stack({"provider": "merged_bsi"})
     assert not isinstance(worker._velocity_cmd, runtime_module.ForwardOnlyCapProvider)
+
+
+def _velocity_ready_worker(**overrides) -> _RobotControlWorker:
+    worker = _make_worker(**overrides)
+    worker.mode = RobotMode.STANDING
+    worker._velocity_policy = _FakePolicy()
+    worker._velocity_obs_builder = _FakeObsBuilder()
+    worker._velocity_cmd = SimpleNamespace(
+        get_cmd=lambda: np.zeros(6, dtype=np.float32),
+        reset=lambda: None,
+        close=lambda: None,
+        toggle_mute=lambda: True,
+        muted=False,
+    )
+    worker.estop = runtime_module.EstopController()
+    return worker
+
+
+def _send(worker: _RobotControlWorker, event_type: ControlEventType) -> None:
+    worker._handle_mocap_control_events(
+        (ControlEvent(event_type=event_type, source="pico4:test", timestamp_s=1.0),)
+    )
+
+
+def test_toggle_velocity_enters_from_standing() -> None:
+    worker = _velocity_ready_worker()
+    _send(worker, ControlEventType.TOGGLE_VELOCITY)
+    assert worker.mode == RobotMode.VELOCITY
+
+
+def test_toggle_velocity_refused_when_estop_latched() -> None:
+    worker = _velocity_ready_worker()
+    worker.estop.latch()
+    _send(worker, ControlEventType.TOGGLE_VELOCITY)
+    assert worker.mode == RobotMode.STANDING
+
+
+def test_toggle_velocity_ignored_without_stack() -> None:
+    worker = _make_worker()  # _velocity_policy None
+    worker.mode = RobotMode.STANDING
+    _send(worker, ControlEventType.TOGGLE_VELOCITY)
+    assert worker.mode == RobotMode.STANDING
+
+
+def test_toggle_velocity_exits_back_to_standing() -> None:
+    worker = _velocity_ready_worker()
+    _send(worker, ControlEventType.TOGGLE_VELOCITY)
+    exits: list[str] = []
+    worker._exit_velocity_to_standing = lambda: exits.append("exit")  # spy
+    _send(worker, ControlEventType.TOGGLE_VELOCITY)
+    assert exits == ["exit"]
+
+
+def test_toggle_estop_in_velocity_engages_ramp() -> None:
+    worker = _velocity_ready_worker()
+    _send(worker, ControlEventType.TOGGLE_VELOCITY)
+    _send(worker, ControlEventType.TOGGLE_ESTOP)
+    assert worker.estop.state == EstopState.RAMPING
+
+
+def test_toggle_estop_in_standing_is_noop() -> None:
+    worker = _velocity_ready_worker()
+    _send(worker, ControlEventType.TOGGLE_ESTOP)
+    assert worker.estop.state == EstopState.INACTIVE
+    assert worker.mode == RobotMode.STANDING
+
+
+def test_toggle_mute_delegates_to_provider() -> None:
+    worker = _velocity_ready_worker()
+    mute_calls: list[bool] = []
+
+    def _mute() -> bool:
+        mute_calls.append(True)
+        return True
+
+    worker._velocity_cmd = SimpleNamespace(
+        get_cmd=lambda: np.zeros(6, dtype=np.float32),
+        reset=lambda: None, close=lambda: None, toggle_mute=_mute, muted=False,
+    )
+    _send(worker, ControlEventType.TOGGLE_MUTE)
+    assert mute_calls == [True]
+
+
+def test_mocap_entry_gate_blocks_remote_y_when_disabled() -> None:
+    worker = _velocity_ready_worker()
+    worker._mocap_entry_enabled = False
+    worker.remote = SimpleNamespace(
+        Y=SimpleNamespace(on_pressed=True, pressed=False),
+    )
+    worker._mocap_reentry_armed = False
+    # STANDING 分支只触 Y 检查：无其它 remote 属性也必须不炸
+    worker._handle_transitions()
+    assert worker._mocap_entry_requested is False

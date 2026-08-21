@@ -1146,6 +1146,7 @@ def test_robot_worker_checks_pico_reference_arm_while_entry_is_pending() -> None
     worker.mode = RobotMode.STANDING
     worker._mocap_entry_requested = True
     worker._mocap_reentry_armed = False
+    worker._mocap_entry_enabled = True
     worker.remote = SimpleNamespace(Y=SimpleNamespace(on_pressed=False, pressed=False))
     worker._arm_mocap_reference_if_needed = lambda: arm_checks.append("arm")
     worker._can_switch_to_mocap = lambda: False
