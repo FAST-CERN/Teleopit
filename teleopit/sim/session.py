@@ -322,6 +322,9 @@ class SimLoopSession:
         )
         self.reset_policy_reference_state(reset_mocap_session=True)
         self._loop._standing_qpos = steps.pose_b_qpos.copy()
+        estop = self._loop._velocity_estop
+        if estop is not None:
+            estop.on_standing()
         self.simulation_mode = SimulationMode.STANDING
         self._steps_in_mode = 0
         _logger.info("Simulation mode -> STANDING (from VELOCITY)")
@@ -412,6 +415,23 @@ class SimLoopSession:
                     continue
                 if key == "b":
                     self._loop._console.key_feedback("B", "arms", result="ignored (VELOCITY)")
+                    continue
+                if key == "e":
+                    estop = self._loop._velocity_estop
+                    if estop is not None:
+                        result = estop.toggle(in_velocity=True)
+                        self._loop._console.key_feedback("E", "estop", result=result)
+                    else:
+                        self._loop._console.key_feedback("E", "estop", result="no estop")
+                    continue
+                if key == "c":
+                    provider = self._loop._velocity_cmd_provider
+                    toggle = getattr(provider, "toggle_mute", None)
+                    if callable(toggle):
+                        muted = bool(toggle())
+                        self._loop._console.key_feedback("C", "bsi mute", result="muted" if muted else "live")
+                    else:
+                        self._loop._console.key_feedback("C", "bsi mute", result="ignored (no BSI)")
                     continue
                 continue  # q/h handled above; VELOCITY has no other keys
             if key == "x":
@@ -570,6 +590,19 @@ class SimLoopSession:
                 continue
             if control_event.event_type == ControlEventType.TOGGLE_PAUSE:
                 self.toggle_realtime_mocap_pause()
+                continue
+            if control_event.event_type == ControlEventType.TOGGLE_ESTOP:
+                estop = self._loop._velocity_estop
+                if estop is not None:
+                    from teleopit.sim.loop import SimulationMode
+                    estop.toggle(in_velocity=(self.simulation_mode == SimulationMode.VELOCITY))
+                continue
+            if control_event.event_type == ControlEventType.TOGGLE_MUTE:
+                provider = self._loop._velocity_cmd_provider
+                toggle = getattr(provider, "toggle_mute", None)
+                if callable(toggle):
+                    toggle()
+                continue
         new_bvh_frame = frame_seq != self.last_live_packet_seq
 
         if self.mocap_session.state == MocapSessionState.PAUSED:
@@ -727,6 +760,10 @@ class SimLoopSession:
             self.exit_velocity_to_standing()
             return False
         _, _, _, final_state = steps.velocity_step(self._loop.robot)
+        estop = self._loop._velocity_estop
+        if estop is not None and estop.consume_exit_request():
+            self.exit_velocity_to_standing()
+            return False
         self._viewer_manager.write_sim2sim(self._loop.robot)
         self._viewer_manager.write_camera(self._loop.robot)
         if self._loop._video_runtime is not None:

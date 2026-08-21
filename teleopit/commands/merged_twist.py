@@ -31,3 +31,19 @@ class MergedTwistProvider:
     def close(self) -> None:
         self._primary.close()
         self._secondary.close()
+
+    @property
+    def secondary(self):
+        """The secondary (BSI) source — exposed for mute/feedback reachability."""
+        return self._secondary
+
+    def toggle_mute(self) -> bool | None:
+        """Delegate mute to the secondary source; None when it is not mutable."""
+        toggle = getattr(self._secondary, "toggle_mute", None)
+        if callable(toggle):
+            return bool(toggle())
+        return None
+
+    @property
+    def muted(self) -> bool:
+        return bool(getattr(self._secondary, "muted", False))

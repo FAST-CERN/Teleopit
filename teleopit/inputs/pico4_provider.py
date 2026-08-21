@@ -224,6 +224,10 @@ class Pico4InputProvider(RealtimeInputProvider):
         pause_debounce_s: float = 0.25,
         arms_button: str | None = "B",
         arms_debounce_s: float | None = None,
+        estop_button: str | None = None,
+        estop_debounce_s: float = 0.25,
+        mute_button: str | None = None,
+        mute_debounce_s: float | None = None,
         bridge_host: str = "0.0.0.0",
         bridge_port: int = 63901,
         bridge_discovery: bool = True,
@@ -273,6 +277,16 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._last_arms_button_pressed = False
         self._last_pause_toggle_timestamp: float | None = None
         self._last_arms_toggle_timestamp: float | None = None
+        self._estop_button = None if estop_button in (None, "", "null") else str(estop_button)
+        self._mute_button = None if mute_button in (None, "", "null") else str(mute_button)
+        self._estop_debounce_s = max(float(estop_debounce_s), 0.0)
+        self._mute_debounce_s = self._estop_debounce_s if mute_debounce_s is None else max(float(mute_debounce_s), 0.0)
+        self._estop_button_path = self._resolve_button_path(self._estop_button)
+        self._mute_button_path = self._resolve_button_path(self._mute_button)
+        self._last_estop_button_pressed = False
+        self._last_mute_button_pressed = False
+        self._last_estop_toggle_timestamp: float | None = None
+        self._last_mute_toggle_timestamp: float | None = None
         self._last_raw_body_joints: NDArray[np.float64] | None = None
         self._last_frame_timestamp: float | None = None
         self._last_source_seq: int | None = None
@@ -562,6 +576,26 @@ class Pico4InputProvider(RealtimeInputProvider):
             last_pressed_attr="_last_arms_button_pressed",
             last_toggle_attr="_last_arms_toggle_timestamp",
             debounce_s=self._arms_debounce_s,
+        ) or emitted
+        emitted = self._poll_button_control_event(
+            frame,
+            timestamp=timestamp,
+            button_path=self._estop_button_path,
+            button_label=self._estop_button,
+            event_type=ControlEventType.TOGGLE_ESTOP,
+            last_pressed_attr="_last_estop_button_pressed",
+            last_toggle_attr="_last_estop_toggle_timestamp",
+            debounce_s=self._estop_debounce_s,
+        ) or emitted
+        emitted = self._poll_button_control_event(
+            frame,
+            timestamp=timestamp,
+            button_path=self._mute_button_path,
+            button_label=self._mute_button,
+            event_type=ControlEventType.TOGGLE_MUTE,
+            last_pressed_attr="_last_mute_button_pressed",
+            last_toggle_attr="_last_mute_toggle_timestamp",
+            debounce_s=self._mute_debounce_s,
         ) or emitted
         return emitted
 

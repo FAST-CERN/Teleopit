@@ -280,6 +280,8 @@ def _build_input_provider(
             timestamp_gap_reset_s=float(cfg_get(input_cfg, "pico4_timestamp_gap_reset_s", 0.15)),
             pause_button=cfg_get(input_cfg, "pause_button", "A"),
             pause_debounce_s=float(cfg_get(input_cfg, "pause_debounce_s", 0.25)),
+            estop_button=cfg_get(input_cfg, "estop_button", None),
+            mute_button=cfg_get(input_cfg, "mute_button", None),
             bridge_host=str(cfg_get(input_cfg, "bridge_host", "0.0.0.0")),
             bridge_port=int(cfg_get(input_cfg, "bridge_port", 63901)),
             bridge_discovery=bool(cfg_get(input_cfg, "bridge_discovery", True)),

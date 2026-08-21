@@ -147,6 +147,8 @@ def _velocity_operator_controls() -> tuple[KeyboardControl, ...]:
         KeyboardControl("J/L", "strafe left/right"),
         KeyboardControl("N/M", "turn left/right"),
         KeyboardControl("K", "zero twist"),
+        KeyboardControl("E", "estop (toggle)"),
+        KeyboardControl("C", "BSI mute (toggle)"),
         KeyboardControl("T", "perturb (push left)"),
     )
 
@@ -237,12 +239,12 @@ def main(cfg: DictConfig) -> None:
             ("Viewers", str(cfg_get(cfg, "viewers", "none"))),
         ),
         controls=_velocity_operator_controls(),
-        events=("v enters VELOCITY; b returns to STANDING; Esc stops",),
+        events=("v enters VELOCITY; b returns to STANDING; Esc stops; e toggles estop; c mutes BSI",),
         control_section="Controls",
         show_help_key=False,
     )
     logger.info(
-        "sim ready | initial=STANDING | v=VELOCITY b=STANDING Esc=stop | WASD/QE twist, x=zero"
+        "sim ready | initial=STANDING | v=VELOCITY b=STANDING Esc=stop | WASD/QE twist, x=zero | e=estop c=mute"
     )
 
     # Single-run contract: run() closes the command provider in its finally.

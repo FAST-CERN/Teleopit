@@ -221,6 +221,8 @@ def sim_keyboard_controls(cfg: Any) -> tuple[KeyboardControl, ...]:
         controls = [KeyboardControl("Y", "mocap")]
         if velocity_cfg is not None:
             controls.append(KeyboardControl("V", "velocity"))
+            controls.append(KeyboardControl("E", "estop"))
+            controls.append(KeyboardControl("C", "bsi mute"))
         controls.extend(
             (
                 KeyboardControl("A", "pause/resume"),

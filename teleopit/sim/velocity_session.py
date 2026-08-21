@@ -240,6 +240,16 @@ class VelocitySimSession:
                 self._key_feedback("B", "standing", "STANDING")
             elif key == "t":
                 self._request_perturbation()
+            elif key == "e":
+                result = self.estop.toggle(in_velocity=(self.mode == VelocityMode.VELOCITY))
+                self._key_feedback("E", "estop", result=result)
+            elif key == "c":
+                toggle = getattr(self._cmd, "toggle_mute", None)
+                if callable(toggle):
+                    muted = bool(toggle())
+                    self._key_feedback("C", "bsi mute", result="muted" if muted else "live")
+                else:
+                    self._key_feedback("C", "bsi mute", result="ignored (no BSI)")
             elif key in _STOP_KEY_NAMES:
                 self.request_mode(VelocityMode.STOP)
                 self._key_feedback("Esc", "stop", "STOP")

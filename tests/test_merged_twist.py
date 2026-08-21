@@ -68,3 +68,19 @@ def test_reset_and_close_delegate_to_both():
     m.close()
     assert a.reset_calls == 1 and a.close_calls == 1
     assert b.reset_calls == 1 and b.close_calls == 1
+
+
+def test_toggle_mute_none_when_secondary_unmutable():
+    m = MergedTwistProvider(_JOY_ZERO, _BSI)  # _BSI has no toggle_mute
+    assert m.toggle_mute() is None
+    assert m.muted is False
+
+
+def test_toggle_mute_delegates_and_exposes_secondary():
+    bsi = _Vec([0.6, 0, 0, 0, 0, 0])
+    bsi.toggle_mute = lambda: True
+    bsi.muted = True
+    m = MergedTwistProvider(_JOY_ZERO, bsi)
+    assert m.secondary is bsi
+    assert m.toggle_mute() is True
+    assert m.muted is True
