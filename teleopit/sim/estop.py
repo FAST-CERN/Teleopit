@@ -79,6 +79,18 @@ class EstopController:
             return True
         return False
 
+    def latch(self) -> None:
+        """Force LATCHED without an exit request (damping entry, bsi-realhw-05).
+
+        Any DAMPING entry locks VELOCITY re-entry until the operator's E
+        toggle releases it. No ramp/exit semantics: the caller has already
+        left VELOCITY by harder means.
+        """
+        self._state = EstopState.LATCHED
+        self._ramp_start = None
+        self._exit_requested = False
+        self._exit_consumed = True
+
     def on_standing(self) -> None:
         # Landing in STANDING aborts an in-progress ramp (operator X'd out
         # mid-decay) but PRESERVES a completed latch: the latch is the

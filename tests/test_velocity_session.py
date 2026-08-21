@@ -738,3 +738,19 @@ def test_estop_latch_persists_blocks_v_then_e_releases():
     # V now queues the VELOCITY entry.
     session.request_mode(VelocityMode.VELOCITY)
     assert session._pending_mode == VelocityMode.VELOCITY
+
+
+def test_estop_latch_forces_latched_and_releases_by_toggle() -> None:
+    from teleopit.sim.estop import EstopState, EstopController
+
+    clock = [0.0]
+    estop = EstopController(clock=lambda: clock[0])
+
+    estop.latch()
+    assert estop.state == EstopState.LATCHED
+    np.testing.assert_allclose(estop.apply(np.ones(6, dtype=np.float32)), np.zeros(6, dtype=np.float32))
+    # latch 不产生退出请求（damping 场景无需渐0 退出路径）
+    assert estop.consume_exit_request() is False
+    # 同键 toggle 解锁
+    assert estop.toggle(in_velocity=False) == "released"
+    assert estop.state == EstopState.INACTIVE
