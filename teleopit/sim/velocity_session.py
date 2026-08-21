@@ -19,6 +19,7 @@ import numpy as np
 
 from teleopit.commands.base import CommandProvider
 from teleopit.runtime.common import cfg_get
+from teleopit.sim.estop import EstopController
 from teleopit.sim.reference_interpolation import StandingReferenceInterpolator
 from teleopit.sim.runtime_components import PolicyStepRunner
 from teleopit.sim.velocity_step import VelocityStepController
@@ -68,6 +69,7 @@ class VelocitySimSession:
         self._transition_duration_s = float(cfg_get(modes_cfg, "transition_duration_s", 1.0))
         self._realtime = bool(cfg_get(cfg, "realtime", False))
 
+        self.estop = EstopController()
         self._steps = VelocityStepController(
             velocity_runner=velocity_runner,
             cmd_provider=command_provider,
@@ -76,6 +78,7 @@ class VelocitySimSession:
             transition_duration_s=self._transition_duration_s,
             joint_vel_limit=float(cfg_get(safety_cfg, "joint_vel_limit", 10.0)),
             tilt_threshold_rad=float(cfg_get(safety_cfg, "tilt_threshold_rad", 1.0)),
+            estop=self.estop,
         )
 
         # Debug perturbation (key T): lateral pelvis impulse, the substitute
@@ -131,6 +134,7 @@ class VelocitySimSession:
         if target == VelocityMode.STOP:
             self.mode = VelocityMode.STOP
             self._mode_switches += 1
+            self.estop.on_standing()
             logger.warning("VELOCITY session -> STOP")
             return
 
@@ -150,6 +154,7 @@ class VelocitySimSession:
             self._mimic_runner.obs_builder.reset()
             # last_action deliberately kept — the mimic builder consumes the
             # pre-transition action via the standing prepare path.
+            self.estop.on_standing()
         self.mode = target
         self._steps_in_mode = 0
         self._mode_switches += 1
@@ -303,6 +308,10 @@ class VelocitySimSession:
                 # so the flagged step body never executes.
                 self._check_safety(state)
                 self._apply_pending_mode(state)
+                if self.estop.consume_exit_request():
+                    # Estop ramp completed: run the STANDING exit path once.
+                    self.request_mode(VelocityMode.STANDING)
+                    self._apply_pending_mode(state)
                 if self.mode == VelocityMode.STOP:
                     break
 

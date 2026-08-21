@@ -14,7 +14,7 @@ re-deriving them; the core mutates nothing but the runners.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -23,6 +23,9 @@ from teleopit.constants import FULL_QPOS_DIM, ROOT_DIM
 from teleopit.controllers import reference_processing as ref_proc
 from teleopit.sim.reference_interpolation import StandingReferenceInterpolator
 from teleopit.sim.runtime_components import PolicyStepRunner
+
+if TYPE_CHECKING:
+    from teleopit.sim.estop import EstopController
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,7 @@ class VelocityStepController:
         transition_duration_s: float,
         joint_vel_limit: float,
         tilt_threshold_rad: float,
+        estop: EstopController | None = None,
     ) -> None:
         self.velocity_runner = velocity_runner
         self._cmd = cmd_provider
@@ -55,6 +59,7 @@ class VelocityStepController:
         self._transition_duration_s = float(transition_duration_s)
         self._joint_vel_limit = float(joint_vel_limit)
         self._tilt_threshold_rad = float(tilt_threshold_rad)
+        self._estop = estop
 
     # ------------------------------------------------------------------
     # Standing qpos helpers (pose B)
@@ -247,6 +252,8 @@ class VelocityStepController:
         caller-side metrics and perturbation handling."""
         state = robot.get_state()
         cmd = self._cmd.get_cmd()
+        if self._estop is not None:
+            cmd = self._estop.apply(cmd)
         obs = self.velocity_runner.obs_builder.build(
             state, cmd, self.velocity_runner.last_action
         )

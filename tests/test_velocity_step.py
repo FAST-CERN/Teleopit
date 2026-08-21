@@ -286,3 +286,26 @@ def test_standing_step_interpolates_then_adopts_endpoint():
     )
     assert interp is None  # 100 steps * 0.02 s = 2 s > 1 s duration: finished
     assert not np.array_equal(ref, standing_ref)
+
+
+def test_velocity_step_estop_none_is_passthrough():
+    """estop=None (default) leaves velocity_step cmd untouched (zero regression)."""
+    from teleopit.sim.estop import EstopController, EstopState
+
+    ctrl, robot, _ = _controller(cmd_provider=_StubCmd([0.6, 0, 0, 0, 0, 0]))
+    cmd, _action, _target, _state = ctrl.velocity_step(robot)
+    np.testing.assert_allclose(cmd[0], 0.6)  # no estop wrapper: raw cmd reaches downstream
+
+
+def test_velocity_step_applies_estop_when_engaged():
+    """velocity_step consults estop.apply() after get_cmd — latched estop zeroes it."""
+    from teleopit.sim.estop import EstopController, EstopState
+
+    estop = EstopController(clock=lambda: 0.0)
+    estop.toggle(in_velocity=True)
+    estop._state = EstopState.LATCHED  # skip the 0.3s ramp for determinism
+    ctrl, robot, _ = _controller(
+        cmd_provider=_StubCmd([0.6, 0, 0, 0, 0, 0]), estop=estop
+    )
+    cmd, _action, _target, _state = ctrl.velocity_step(robot)
+    assert not np.any(cmd)  # estop latched: downstream sees zero twist
