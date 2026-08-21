@@ -88,3 +88,95 @@ class PresetToggleMapper:
 
     def close(self) -> None:
         pass
+
+
+import dataclasses
+
+
+@dataclasses.dataclass(frozen=True)
+class InspireCtrlMessage:
+    angle_set: tuple[int, ...]
+    speed_set: tuple[int, ...]
+    force_set: tuple[int, ...]
+    mode: int
+
+
+class _RealInspirePublisher:
+    """cyclonedds ctrl publisher — created only via the default factory."""
+
+    def __init__(self, cfg: dict) -> None:
+        from cyclonedds.domain import DomainParticipant
+        from cyclonedds.pub import DataWriter
+        from cyclonedds.topic import Topic
+
+        from teleopit.sim2real.hands.inspire_dds_types import InspireHandCtrl
+
+        self._idl = InspireHandCtrl
+        domain = int(cfg.get("domain_id", 0))
+        prefix = str(cfg.get("ctrl_topic_prefix", "rt/inspire_hand/ctrl"))
+        self._participant = DomainParticipant(domain)
+        self._writers = {
+            "left": DataWriter(Topic(self._participant, f"{prefix}/l", InspireHandCtrl)),
+            "right": DataWriter(Topic(self._participant, f"{prefix}/r", InspireHandCtrl)),
+        }
+
+    def publish(self, side: str, message: InspireCtrlMessage) -> None:
+        self._writers[side].write(self._idl(
+            pos_set=[0] * 6,
+            angle_set=[int(v) for v in message.angle_set],
+            force_set=[int(v) for v in message.force_set],
+            speed_set=[int(v) for v in message.speed_set],
+            mode=int(message.mode),
+        ))
+
+    def close(self) -> None:
+        self._writers = {}
+
+
+class InspireFtpDevice:
+    """HandDevice publishing preset ctrl messages; thumb-rotation pinned here."""
+
+    def __init__(self, cfg: dict, *, publisher_factory=None) -> None:
+        self._cfg = cfg
+        self._presets = cfg["presets"]
+        self._publisher = None
+        self._factory = publisher_factory or _RealInspirePublisher
+        self._last_pose: dict[str, tuple[int, ...]] = {}
+
+    def connect(self) -> None:
+        if self._publisher is None:
+            self._publisher = self._factory(self._cfg)
+
+    def get_state(self, side: str) -> tuple[float, ...]:
+        return ()  # v1 write-only; state topic subscription is future work
+
+    def _compose(self, pose, speed_set, force_set) -> InspireCtrlMessage:
+        angles = [THUMB_ROTATION_HOLD if i == 5 else int(v) for i, v in enumerate(pose[:6])]
+        mode = MODE_BIT_ANGLE
+        if force_set:
+            mode |= MODE_BIT_FORCE
+        if speed_set:
+            mode |= MODE_BIT_SPEED
+        return InspireCtrlMessage(tuple(angles), tuple(speed_set), tuple(force_set), mode)
+
+    def send_pose(self, side, pose, *, force=False, reason="", speed_set=(), force_set=()) -> None:
+        pose_t = tuple(int(v) for v in pose[:6])
+        if not force and self._last_pose.get(side) == (pose_t, tuple(speed_set), tuple(force_set)):
+            return
+        self._last_pose[side] = (pose_t, tuple(speed_set), tuple(force_set))
+        self.connect()
+        self._publisher.publish(side, self._compose(pose_t, speed_set, force_set))
+
+    def open_all(self, *, force=False, reason="") -> None:
+        open_preset = self._presets["open"]
+        for side in ("left", "right"):
+            self.send_pose(
+                side, open_preset["angles"], force=True, reason=reason or "open_all",
+                speed_set=tuple(open_preset.get("speed") or ()),
+                force_set=tuple(open_preset.get("force") or ()),
+            )
+
+    def close(self) -> None:
+        if self._publisher is not None:
+            self._publisher.close()
+            self._publisher = None

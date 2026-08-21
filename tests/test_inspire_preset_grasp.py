@@ -60,3 +60,84 @@ def test_absent_controller_side_is_silent() -> None:
     mapper = PresetToggleMapper(PRESETS, ["left"])
     snap = SimpleNamespace(left=SimpleNamespace(trigger=0.9, present=False, timestamp_s=100.0), right=None, timestamp_s=100.0)
     assert mapper.map(controller_snapshot=snap, hand_snapshot=None, active=True, now_s=100.0) == ()
+
+
+import pytest
+
+from teleopit.sim2real.hands.inspire_ftp import (
+    InspireCtrlMessage, InspireFtpDevice, MODE_BIT_ANGLE, MODE_BIT_FORCE, MODE_BIT_SPEED,
+)
+
+DEV_CFG = {
+    "domain_id": 0,
+    "ctrl_topic_prefix": "rt/inspire_hand/ctrl",
+    "presets": {
+        "open": {"angles": [1000] * 6, "speed": [500] * 6, "force": [300] * 6},
+        "grasp": {"angles": [0, 0, 0, 0, 300, 800], "speed": [500] * 6, "force": [300] * 6},
+    },
+}
+
+
+class FakeInspirePublisher:
+    def __init__(self, cfg: dict) -> None:
+        self.cfg = cfg
+        self.published: list[tuple[str, InspireCtrlMessage]] = []
+
+    def publish(self, side: str, message: InspireCtrlMessage) -> None:
+        self.published.append((side, message))
+
+    def close(self) -> None:
+        pass
+
+
+def _device() -> tuple[InspireFtpDevice, FakeInspirePublisher]:
+    fake = FakeInspirePublisher(DEV_CFG)
+    device = InspireFtpDevice(DEV_CFG, publisher_factory=lambda cfg: fake)
+    device.connect()
+    return device, fake
+
+
+def test_send_pose_composes_angle_force_speed_mode() -> None:
+    device, fake = _device()
+    device.send_pose("left", (0, 0, 0, 0, 300, 800), force=True, reason="preset:grasp",
+                     speed_set=(500,) * 6, force_set=(300,) * 6)
+    side, msg = fake.published[-1]
+    assert side == "left"
+    assert tuple(msg.angle_set) == (0, 0, 0, 0, 300, 1000)  # index 5 pinned per thumb-rotation hold
+    assert msg.mode == MODE_BIT_ANGLE | MODE_BIT_FORCE | MODE_BIT_SPEED  # 0b1101
+
+
+def test_mode_drops_speed_bit_without_speed_array() -> None:
+    device, fake = _device()
+    device.send_pose("right", (1000,) * 6, force=True, reason="preset:open",
+                     speed_set=(), force_set=(300,) * 6)
+    assert fake.published[-1][1].mode == MODE_BIT_ANGLE | MODE_BIT_FORCE  # 0b0101
+
+
+def test_thumb_rotation_pinned_open_on_every_send() -> None:
+    device, fake = _device()
+    device.send_pose("left", (0, 0, 0, 0, 0, 0), force=True, reason="preset:grasp",
+                     speed_set=(), force_set=())
+    assert fake.published[-1][1].angle_set[5] == 1000
+
+
+def test_open_all_uses_open_preset_for_all_sides() -> None:
+    device, fake = _device()
+    device.open_all(force=True, reason="damping")
+    sides = sorted(side for side, _ in fake.published[-2:])
+    assert sides == ["left", "right"]
+    assert all(tuple(m.angle_set) == (1000,) * 6 for _, m in fake.published[-2:])
+
+
+def test_duplicate_pose_skipped_without_force() -> None:
+    device, fake = _device()
+    device.send_pose("left", (1000,) * 6, force=True, reason="preset:open")
+    n = len(fake.published)
+    device.send_pose("left", (1000,) * 6, force=False, reason="dup")
+    assert len(fake.published) == n
+
+
+def test_module_imports_without_cyclonedds() -> None:
+    import subprocess, sys
+    code = "import teleopit.sim2real.hands.inspire_ftp; import teleopit.sim2real.hands.worker"
+    assert subprocess.run([sys.executable, "-c", code]).returncode == 0
