@@ -37,7 +37,11 @@ command:
   joystick:
     deadzone: 0.15
     max_age_s: 0.5
-    max_stick_scale: {lin_vel_x: 0.5}   # 1.0 m/s cap (Phase A envelope)
+    # Unified with the BSI envelope (L3 field finding 2026-08-22): forward tops
+    # at 0.3*2.0 = 0.6 m/s (was 1.0 — "slightly fast"); unscaled ang_z (±1.0
+    # rad/s) produced a joint-9 transient at 10.23 rad/s > 10.0 line -> cap
+    # turn/lateral authority to soften stick-step transients.
+    max_stick_scale: {lin_vel_x: 0.3, lin_vel_y: 0.4, ang_vel_z: 0.4}
   bsi:
     domain_id: 0
     silence_timeout_s: 1.0
