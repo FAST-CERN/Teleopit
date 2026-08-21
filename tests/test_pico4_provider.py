@@ -70,6 +70,19 @@ def _make_provider() -> Pico4InputProvider:
     provider._last_arms_button_pressed = False
     provider._last_pause_toggle_timestamp = None
     provider._last_arms_toggle_timestamp = None
+    # Estop/mute buttons default disabled (None) — _poll_button_control_event
+    # returns False immediately when button_path is None, so these polls are
+    # no-ops unless a test opts in. Mirrors the __init__ defaults.
+    provider._estop_button = None
+    provider._mute_button = None
+    provider._estop_debounce_s = 0.0
+    provider._mute_debounce_s = 0.0
+    provider._estop_button_path = None
+    provider._mute_button_path = None
+    provider._last_estop_button_pressed = False
+    provider._last_mute_button_pressed = False
+    provider._last_estop_toggle_timestamp = None
+    provider._last_mute_toggle_timestamp = None
     provider._last_raw_body_joints = None
     provider._last_frame_timestamp = None
     provider._last_source_seq = None

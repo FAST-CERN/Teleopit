@@ -1,0 +1,63 @@
+# pico4_sim_velocity.yaml + merged_bsi: BSI brain source secondary, joystick primary.
+# Launch: python scripts/run/run_sim.py --config-name pico4_sim_bsi controller.policy_path=ckpt/track_g1.onnx
+# In a second terminal (dds-probe env):
+#   C:/Users/user/.conda/envs/dds-probe/python.exe -m bsi_dds.cli mock --script "idle:3,forward:5,left:3,forward:5,right:3,idle:3,forward:5,idle:3"
+defaults:
+  - robot: g1
+  - controller: rl_policy
+  - controller@controllers.velocity: velocity
+  - input: pico4
+  - _self_
+
+policy_hz: 50.0
+# Physics invariant: decimation(4) * robot.sim_dt(0.005) == 1/policy_hz.
+pd_hz: 200.0
+keyboard:
+  enabled: true
+input:
+  video:
+    source: mujoco
+  estop_button: right_menu_button   # right hand = safety (estop)
+  mute_button: Y                     # left hand = source control (BSI mute)
+retarget_buffer_enabled: true
+retarget_buffer_window_s: 0.5
+retarget_buffer_delay_s: null  # null = auto use one input-frame delay for timeline sampling
+realtime_buffer_warmup_steps: 2
+reference_velocity_smoothing_alpha: 0.35
+reference_anchor_velocity_smoothing_alpha: 0.25
+reference_steps: [0]
+reference_debug_log: false
+arm_mocap:
+  controlled_joint_indices: [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+viewers: "all"
+realtime: true
+num_steps: 0          # 0 = infinite loop until Ctrl+C or device disconnect
+
+modes:
+  transition_duration_s: 1.0
+
+safety:
+  joint_vel_limit: 12.0   # ratified scalar (Phase A); per-joint limits = Phase B
+  tilt_threshold_rad: 1.0
+
+command:
+  provider: merged_bsi   # joystick (pico) primary, BSI secondary; lazy bsi_dds import
+  joystick:
+    deadzone: 0.15
+    max_age_s: 0.5
+    # Stick envelope cap: joint-vel safety gate (12.0 rad/s) was calibrated
+    # at 1.0 m/s (knee peak ~10.1); full-forward 2.0 m/s trips it in seconds.
+    max_stick_scale: {lin_vel_x: 0.5}
+  keyboard:
+    speeds: {lin_x: 1.0, lin_y: 0.5, ang_z: 1.0}
+  bsi:
+    domain_id: 0
+    silence_timeout_s: 1.0
+    debounce_packets: 3
+    idle_debounce_packets: 2
+    alpha: 0.3
+    speeds: {forward: 0.6, turn: 0.6}
+
+hydra:
+  run:
+    dir: .
