@@ -8,19 +8,19 @@ controllers on, three viewers open, console in STANDING.
 
 | # | Check | Expected | Result |
 |---|-------|----------|--------|
-| 1 | Launch | Console shows STANDING; G1 stands at pose B | |
-| 2 | V (from STANDING) | Mode -> VELOCITY log; robot stays standing, no visible jump | |
-| 3 | Left stick forward | Robot walks forward; speed follows stick | |
-| 4 | Left stick L/R; right stick X | Strafes; turns in place | |
-| 5 | Release sticks | Decelerates to standing still | |
-| 6 | X | Ramps back to pose-B STANDING; heading preserved (no snap to yaw 0) | |
-| 7 | Y then V | V rejected: "requires STANDING" (MOCAP direct switch forbidden) | |
-| 8 | X from MOCAP, then V | Returns to STANDING; V now works | |
-| 9 | Bridge disconnect mid-VELOCITY | Robot stands still (joystick zero); NO auto mode-exit | |
-| 10 | Reconnect + Y | MOCAP resumes without re-warmup stall | |
-| 11 | Skeleton viewer during VELOCITY | Operator skeleton keeps animating | |
-| 12 | T-style tilt probe (optional) | Tilt past threshold returns STANDING | |
-| 13 | Keyboard fallback walk (bvh/udp_bvh input only; optional) | V then W: robot walks forward while mode keys (X to return) keep working — requires the shared keyboard-reader tee, fixed in Task 6 | |
+| 1 | Launch | Console shows STANDING; G1 stands at pose B | PASS |
+| 2 | V (from STANDING) | Mode -> VELOCITY log; robot stays standing, no visible jump | PASS |
+| 3 | Left stick forward | Robot walks forward; speed follows stick | PASS |
+| 4 | Left stick L/R; right stick X | Strafes; turns in place | PASS |
+| 5 | Release sticks | Decelerates to standing still | PASS |
+| 6 | X | Ramps back to pose-B STANDING; heading preserved (no snap to yaw 0) | PASS |
+| 7 | Y then V | V rejected: "requires STANDING" (MOCAP direct switch forbidden) | PASS |
+| 8 | X from MOCAP, then V | Returns to STANDING; V now works | PASS |
+| 9 | Bridge disconnect mid-VELOCITY | Robot stands still (joystick zero); NO auto mode-exit | PASS |
+| 10 | Reconnect + Y | MOCAP resumes without re-warmup stall | PASS |
+| 11 | Skeleton viewer during VELOCITY | Operator skeleton keeps animating | PASS |
+| 12 | T-style tilt probe (optional) | Tilt past threshold returns STANDING | PASS |
+| 13 | Keyboard fallback walk | Not applicable in pico session (pico4 input = joystick provider, no keyboard twist by design). Verified by design review 2026-08-21; dedicated entry run_velocity_sim.py covers the keyboard path (unit+integration tested) | N/A (by design) |
 
 Notes for the operator (updated after the 2026-08-20 HMD session):
 
