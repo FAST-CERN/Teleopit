@@ -187,3 +187,23 @@ def test_hand_runtime_open_all_delegates_to_device() -> None:
     runtime = HandRuntime(_Dev(), _Map())
     runtime.open_all(force=True, reason="mode:damping")
     assert calls == [(True, "mode:damping")]
+
+
+def test_build_hand_runtime_dispatches_inspire_ftp(monkeypatch) -> None:
+    import teleopit.sim2real.hands.inspire_ftp as inspire_module
+    from teleopit.sim2real.hands.worker import build_hand_runtime
+
+    made: dict = {}
+    monkeypatch.setattr(
+        inspire_module, "InspireFtpDevice",
+        lambda cfg, publisher_factory=None: made.setdefault("device", FakeInspirePublisher(cfg)) and made["device"],
+    )
+    cfg = {
+        "hands": {
+            "enabled": True, "driver": "inspire_ftp", "mode": "preset_toggle",
+            "sides": ["left", "right"],
+            "inspire_ftp": dict(DEV_CFG),
+        }
+    }
+    runtime = build_hand_runtime(cfg)
+    assert "device" in made and runtime is not None

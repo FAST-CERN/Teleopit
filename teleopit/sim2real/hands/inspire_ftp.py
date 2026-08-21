@@ -180,3 +180,21 @@ class InspireFtpDevice:
         if self._publisher is not None:
             self._publisher.close()
             self._publisher = None
+
+
+def build_inspire_ftp(cfg: Any):
+    from teleopit.sim2real.hands.worker import HandRuntime
+
+    hands_cfg = cfg.get("hands", {}) if isinstance(cfg, dict) else getattr(cfg, "hands", {})
+    dev_cfg = dict(hands_cfg.get("inspire_ftp", {}) or {})
+    dev_cfg.setdefault("presets", {
+        "open": {"angles": [1000] * 6, "speed": None, "force": None},
+        "grasp": {"angles": [0, 0, 0, 0, 300, 1000], "speed": None, "force": None},
+    })
+    device = InspireFtpDevice(dev_cfg)
+    mapper = PresetToggleMapper(
+        dev_cfg["presets"], list(hands_cfg.get("sides", ["left", "right"])),
+        trigger_threshold=float(dev_cfg.get("trigger_threshold", 0.6)),
+        trigger_debounce_s=float(dev_cfg.get("trigger_debounce_s", 0.25)),
+    )
+    return HandRuntime(device=device, mapper=mapper)

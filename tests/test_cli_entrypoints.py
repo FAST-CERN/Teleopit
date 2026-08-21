@@ -194,3 +194,19 @@ def test_pico4_sim2real_bsi_l2_config_restricts_forward() -> None:
     assert float(cfg.command.bsi.speeds.forward) == 0.3
     assert float(cfg.command.bsi.speeds.turn) == 0.3
     assert str(cfg.velocity_cmd_log.path) == "data/velocity_cmd_l2.jsonl"
+
+
+def test_pico4_sim2real_bsi_hands_section_loads() -> None:
+    from hydra import compose, initialize_config_dir
+
+    with initialize_config_dir(config_dir=str(_CONFIG_DIR), version_base=None):
+        cfg = compose(config_name="pico4_sim2real_bsi")
+    assert bool(cfg.hands.enabled) is True
+    assert str(cfg.hands.driver) == "inspire_ftp"
+    assert str(cfg.hands.mode) == "preset_toggle"
+    assert [str(s) for s in cfg.hands.sides] == ["left", "right"]
+    assert [str(m) for m in cfg.hands.trigger_modes] == ["standing", "mocap", "arms"]
+    assert [str(m) for m in cfg.hands.open_modes] == ["idle", "damping"]
+    assert float(cfg.hands.inspire_ftp.trigger_threshold) == 0.6
+    assert [int(v) for v in cfg.hands.inspire_ftp.presets.grasp.angles] == [0, 0, 0, 0, 300, 1000]
+    assert cfg.hands.inspire_ftp.presets.grasp.angles[5] == 1000  # thumb-rotation held

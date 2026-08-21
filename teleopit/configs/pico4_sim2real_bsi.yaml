@@ -51,3 +51,20 @@ command:
     idle_debounce_packets: 2
     alpha: 0.3
     speeds: {forward: 0.6, turn: 0.6}
+
+# ── Inspire 预制抓取（grilling 2026-08-22；Orin 侧需先起 driver_double_wlan0）──
+hands:
+  enabled: true
+  driver: inspire_ftp
+  mode: preset_toggle
+  sides: [left, right]
+  trigger_modes: [standing, mocap, arms]   # 扳机活跃域；velocity=hold，其余见 open_modes
+  open_modes: [idle, damping]               # 进入即张开兜底
+  inspire_ftp:
+    domain_id: 0
+    ctrl_topic_prefix: rt/inspire_hand/ctrl
+    trigger_threshold: 0.6
+    trigger_debounce_s: 0.25
+    presets:                                # 数值为占位——执行会话从 manus server 实跑取数回填
+      open:   {angles: [1000, 1000, 1000, 1000, 1000, 1000], speed: [500, 500, 500, 500, 500, 500], force: [300, 300, 300, 300, 300, 300]}
+      grasp:  {angles: [0, 0, 0, 0, 300, 1000], speed: [500, 500, 500, 500, 500, 500], force: [300, 300, 300, 300, 300, 300]}

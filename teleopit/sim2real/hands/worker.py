@@ -130,8 +130,14 @@ def build_hand_runtime(cfg: Any) -> HandRuntime | DisabledHandRuntime:
         device, mapper = build_linkerhand_l6(cfg)
     elif driver == "linkerhand_o6":
         device, mapper = build_linkerhand_o6(cfg)
+    elif driver == "inspire_ftp":
+        from teleopit.sim2real.hands.inspire_ftp import build_inspire_ftp
+
+        return build_inspire_ftp(cfg)
     else:
-        raise ValueError(f"Unsupported hands.driver={driver!r}; supported drivers: linkerhand_l6, linkerhand_o6")
+        raise ValueError(
+            f"Unsupported hands.driver={driver!r}; supported drivers: linkerhand_l6, linkerhand_o6, inspire_ftp"
+        )
     return HandRuntime(device, mapper, open_commands=_open_commands_from_device(device))
 
 
