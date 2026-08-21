@@ -1,8 +1,8 @@
 """Pico 侧新键位：X=TOGGLE_VELOCITY（本文件 Task1）、左 grip=TOGGLE_ESTOP（Task2）。"""
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 from teleopit.inputs.pico4_provider import Pico4InputProvider
 from teleopit.inputs.realtime_packet import ControlEvent, ControlEventType
@@ -19,6 +19,13 @@ class _StubPicoBridge:
 
     def stop(self):
         self._started = False
+
+    def wait_frame(self, timeout: float | None = None, after_seq: int | None = None):
+        # The provider's poll loop treats TimeoutError as normal idle; block
+        # like the real bridge first, so its daemon thread neither spams
+        # tracebacks nor busy-spins the CPU.
+        time.sleep(0.1 if timeout is None else timeout)
+        raise TimeoutError
 
 
 def _frame_with_buttons(side: str, buttons: dict[str, bool], *, timestamp: float = 100.0):

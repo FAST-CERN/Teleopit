@@ -13,7 +13,12 @@ import numpy as np
 
 
 class ForwardOnlyCapProvider:
-    """Wrap a CommandProvider with the L2 forward-only envelope."""
+    """Wrap a CommandProvider with the L2 forward-only envelope.
+
+    A command shorter than 6 elements passes through uncapped: the envelope
+    assumes the 6D twist contract, so shorter output is treated as
+    malformed-but-harmless rather than raising.
+    """
 
     def __init__(self, inner: Any, *, max_lin_x: float) -> None:
         if float(max_lin_x) <= 0.0:

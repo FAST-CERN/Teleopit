@@ -156,6 +156,16 @@ def test_toggle_velocity_enters_from_standing() -> None:
     assert worker.mode == RobotMode.VELOCITY
 
 
+def test_enter_velocity_clears_pending_mocap_entry() -> None:
+    # Y pressed (mocap entry requested) then X before the reference armed:
+    # the stale request must not survive into VELOCITY.
+    worker = _velocity_ready_worker()
+    worker._mocap_entry_requested = True
+    _send(worker, ControlEventType.TOGGLE_VELOCITY)
+    assert worker.mode == RobotMode.VELOCITY
+    assert worker._mocap_entry_requested is False
+
+
 def test_toggle_velocity_refused_when_estop_latched() -> None:
     worker = _velocity_ready_worker()
     worker.estop.latch()

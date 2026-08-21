@@ -1,6 +1,7 @@
 """Test that the mp runtime correctly wires button configs to Pico4InputProvider."""
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 from teleopit.inputs.pico4_provider import Pico4InputProvider
@@ -18,6 +19,13 @@ class _StubPicoBridge:
 
     def stop(self):
         self._started = False
+
+    def wait_frame(self, timeout: float | None = None, after_seq: int | None = None):
+        # The provider's poll loop treats TimeoutError as normal idle; block
+        # like the real bridge first, so its daemon thread neither spams
+        # tracebacks nor busy-spins the CPU.
+        time.sleep(0.1 if timeout is None else timeout)
+        raise TimeoutError
 
 
 def _minimal_video_cfg():

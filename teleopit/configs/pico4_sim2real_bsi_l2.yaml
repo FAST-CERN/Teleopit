@@ -12,4 +12,7 @@ command:
     forward_only:
       max_lin_x: 0.3
   bsi:
+    # BSI left/right intents are zeroed immediately by the forward-only
+    # wrapper (NOT idle-decayed); the joystick's lateral/turn axes are
+    # zeroed the same way.
     speeds: {forward: 0.3, turn: 0.3}

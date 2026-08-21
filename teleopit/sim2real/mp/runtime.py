@@ -1576,6 +1576,9 @@ class _RobotControlWorker:
         self._velocity_obs_builder.reset()
         self._velocity_policy.reset()
         self._velocity_cmd.reset()
+        # A pending mocap entry must not survive into VELOCITY (Y pressed
+        # then X before the reference armed).
+        self._mocap_entry_requested = False
         # Action-continuity seeding (sim begin_velocity_handoff semantics):
         # the first velocity observation must not see a zero action jump.
         self._velocity_last_action = self._last_action.copy()
