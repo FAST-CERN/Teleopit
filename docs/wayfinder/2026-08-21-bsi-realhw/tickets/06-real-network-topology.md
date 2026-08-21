@@ -47,3 +47,11 @@ created: 2026-08-21
 5. **同进程双 DDS 共存**：robot_control 内 BSI cyclonedds（domain 0/wlan0）与 g1_bridge_sdk 的 unitree DDS（eth0）并存互不干扰——各绑各的网卡，验证发现流量不串。
 
 **遗留发现（已裁定，2026-08-21 用户）**：`run_velocity_sim.py:204` 硬编码 KeyboardTwistProvider 为**设计而非缺陷**——该入口本就用于键盘控制验证；不开 fix ticket。
+
+**验证结果回填（2026-08-22 真机会话，详见 `docs/knowledge/research/2026-08-22-bsi-realhw-l1-l3-acceptance.md`）**：
+
+1. 解码器机器对齐：**挂起**（机器当日离线）。
+2. Orin 本机栈：**过**（doctor 9.9Hz 0 gaps；wlan0 组播 join 239.255.0.1）。
+3. 跨机端到端：**机制过**——PC（dds-probe env，Ethernet0 默认配置）顶替解码器发 mock，Orin echo 收到 IDLE/FORWARD 流；Windows 按名钉接口报 DDS_RETCODE_ERROR，默认配置可用。解码器机器自身对齐待其在线。
+4. Orin 跑 mp 栈：**过**（基线 IDLE 起栈 + LowState 流动 + L1 起立 exercised；需 `controller.policy_path=ckpt/track_g1.onnx` override）。
+5. 双 DDS 共存：**过**（探针 + 整场 L1-L3 约 1h 双总线并行无串扰）。附带根因修复：bashrc `CYCLONEDDS_HOME` 会造成同进程双 libddsc 实例 → BSI Topic 创建 BAD_PARAMETER，已修 `e5dbd4a`。
