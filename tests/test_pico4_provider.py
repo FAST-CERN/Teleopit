@@ -89,6 +89,11 @@ def _make_provider() -> Pico4InputProvider:
     provider._velocity_button_path = None
     provider._last_velocity_button_pressed = False
     provider._last_velocity_toggle_timestamp = None
+    # Estop grip defaults disabled (estop_button not a grip) — mirrors __init__ defaults.
+    provider._estop_grip_threshold = 0.6
+    provider._estop_is_grip = False
+    provider._estop_grip_side = "right"
+    provider._last_grip_pressed = False
     provider._last_raw_body_joints = None
     provider._last_frame_timestamp = None
     provider._last_source_seq = None

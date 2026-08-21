@@ -227,6 +227,7 @@ class Pico4InputProvider(RealtimeInputProvider):
         velocity_button: str | None = None,
         velocity_debounce_s: float | None = None,
         estop_button: str | None = None,
+        estop_grip_threshold: float = 0.6,
         estop_debounce_s: float = 0.25,
         mute_button: str | None = None,
         mute_debounce_s: float | None = None,
@@ -298,6 +299,10 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._velocity_button_path = self._resolve_button_path(self._velocity_button)
         self._last_velocity_button_pressed = False
         self._last_velocity_toggle_timestamp: float | None = None
+        self._estop_grip_threshold = float(estop_grip_threshold)
+        self._estop_is_grip = estop_button in ("left_grip", "right_grip")
+        self._estop_grip_side = "left" if estop_button == "left_grip" else "right"
+        self._last_grip_pressed = False
         self._last_raw_body_joints: NDArray[np.float64] | None = None
         self._last_frame_timestamp: float | None = None
         self._last_source_seq: int | None = None
@@ -588,16 +593,19 @@ class Pico4InputProvider(RealtimeInputProvider):
             last_toggle_attr="_last_arms_toggle_timestamp",
             debounce_s=self._arms_debounce_s,
         ) or emitted
-        emitted = self._poll_button_control_event(
-            frame,
-            timestamp=timestamp,
-            button_path=self._estop_button_path,
-            button_label=self._estop_button,
-            event_type=ControlEventType.TOGGLE_ESTOP,
-            last_pressed_attr="_last_estop_button_pressed",
-            last_toggle_attr="_last_estop_toggle_timestamp",
-            debounce_s=self._estop_debounce_s,
-        ) or emitted
+        if self._estop_is_grip:
+            emitted = self._poll_grip_control_event(frame, timestamp=timestamp) or emitted
+        else:
+            emitted = self._poll_button_control_event(
+                frame,
+                timestamp=timestamp,
+                button_path=self._estop_button_path,
+                button_label=self._estop_button,
+                event_type=ControlEventType.TOGGLE_ESTOP,
+                last_pressed_attr="_last_estop_button_pressed",
+                last_toggle_attr="_last_estop_toggle_timestamp",
+                debounce_s=self._estop_debounce_s,
+            ) or emitted
         emitted = self._poll_button_control_event(
             frame,
             timestamp=timestamp,
@@ -657,6 +665,36 @@ class Pico4InputProvider(RealtimeInputProvider):
                 setattr(self, last_toggle_attr, float(timestamp))
                 emitted = True
         setattr(self, last_pressed_attr, pressed)
+        return emitted
+
+    def _poll_grip_control_event(self, frame: Any, *, timestamp: float) -> bool:
+        """Analog grip edge detector: threshold crossing == button press.
+
+        The bridge reports grip only as an analog axis (0..1), never in the
+        buttons dict, so the estop seam maps the threshold crossing onto the
+        same edge+debounce discipline as digital buttons.
+        """
+        controllers = getattr(frame, "controllers", None)
+        controller = None if controllers is None else getattr(controllers, self._estop_grip_side, None)
+        axis = {} if controller is None else getattr(controller, "axis", {}) or {}
+        pressed = float(axis.get("grip", 0.0)) >= self._estop_grip_threshold
+        last_pressed = self._last_grip_pressed
+        emitted = False
+        if pressed and not last_pressed:
+            last_toggle = self._last_estop_toggle_timestamp
+            if last_toggle is None or timestamp - float(last_toggle) >= self._estop_debounce_s - 1e-9:
+                with self._lock:
+                    self._pending_control_events.append(
+                        ControlEvent(
+                            event_type=ControlEventType.TOGGLE_ESTOP,
+                            source="pico4:left_grip" if self._estop_grip_side == "left" else "pico4:right_grip",
+                            timestamp_s=float(timestamp),
+                        )
+                    )
+                logger.info("Pico control event: toggle_estop from grip (side=%s)", self._estop_grip_side)
+                setattr(self, "_last_estop_toggle_timestamp", float(timestamp))
+                emitted = True
+        self._last_grip_pressed = pressed
         return emitted
 
     @staticmethod
