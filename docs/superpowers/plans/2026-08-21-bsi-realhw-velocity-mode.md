@@ -64,7 +64,7 @@
 **Interfaces:**
 - Produces: `ControlEventType.TOGGLE_VELOCITY = "toggle_velocity"`；`Pico4InputProvider.__init__(..., velocity_button: str | None = None, velocity_debounce_s: float | None = None, ...)`。按钮名走 `_PAUSE_BUTTON_MAP`（"X" → ("left", "primaryButton")）。Task 2/8 依赖此事件类型与参数名。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_pico_velocity_grip_buttons.py
@@ -101,12 +101,12 @@ def test_velocity_button_x_emits_toggle_velocity_event() -> None:
     assert events[0].source == "pico4:X"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_pico_velocity_grip_buttons.py -v`
 Expected: FAIL（`TypeError: unexpected keyword 'velocity_button'`）
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `teleopit/inputs/realtime_packet.py`：
 
@@ -153,12 +153,12 @@ class ControlEventType(str, Enum):
         ) or emitted
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_pico_velocity_grip_buttons.py -v`
 Expected: PASS
 
-- [ ] **Step 5: 回归 + 提交**
+- [x] **Step 5: 回归 + 提交**
 
 Run: `python -m pytest tests/ -k "pico" -q`
 Expected: 全 PASS（既有 pico 测试不受影响）
@@ -183,7 +183,7 @@ git commit -m "feat(pico): TOGGLE_VELOCITY control event + X button polling"
 
 **背景**：grip 不在 buttons 字典（数字量缺失），但 `controller.axis["grip"]`（0..1 模拟量）保证存在（`_read_controller_state` 652 行在读）。阈值 + 边沿检测 = 数字键等价行为，无需改 Unity 桥。
 
-- [ ] **Step 1: 写失败测试（追加到 tests/test_pico_velocity_grip_buttons.py）**
+- [x] **Step 1: 写失败测试（追加到 tests/test_pico_velocity_grip_buttons.py）**
 
 ```python
 def _frame_with_grip(side: str, grip: float, *, timestamp: float = 100.0):
@@ -209,12 +209,12 @@ def test_left_grip_below_threshold_is_silent() -> None:
     assert provider.pop_control_events() == ()
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_pico_velocity_grip_buttons.py -v`
 Expected: 新增两测 FAIL（`left_grip` 不在 `_PAUSE_BUTTON_MAP`，path 为 None → 无事件）
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `teleopit/inputs/pico4_provider.py` `__init__` 加参数 `estop_grip_threshold: float = 0.6` 与状态位：
 
@@ -287,12 +287,12 @@ Expected: 新增两测 FAIL（`left_grip` 不在 `_PAUSE_BUTTON_MAP`，path 为 
             velocity_debounce_s=float(cfg_get(input_cfg, "velocity_debounce_s", 0.25)),
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_pico_velocity_grip_buttons.py -v`
 Expected: PASS（3 测）
 
-- [ ] **Step 5: 回归 + 提交**
+- [x] **Step 5: 回归 + 提交**
 
 Run: `python -m pytest tests/ -k "pico or realtime" -q`
 Expected: 全 PASS
@@ -313,7 +313,7 @@ git commit -m "feat(pico): analog left-grip estop edge detect + wire estop/mute/
 **Interfaces:**
 - Produces: `EstopController.latch() -> None`——任意状态强制 LATCHED 且**不**置 exit 请求（damping 场景不需要渐0 退出，只要锁）；随后 `toggle()` 照常释放。Task 8/9 的「凡进 DAMPING 必锁」依赖它。
 
-- [ ] **Step 1: 写失败测试（追加到 tests/test_velocity_session.py，numpy/np 已有导入）**
+- [x] **Step 1: 写失败测试（追加到 tests/test_velocity_session.py，numpy/np 已有导入）**
 
 ```python
 def test_estop_latch_forces_latched_and_releases_by_toggle() -> None:
@@ -332,12 +332,12 @@ def test_estop_latch_forces_latched_and_releases_by_toggle() -> None:
     assert estop.state == EstopState.INACTIVE
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_velocity_session.py::test_estop_latch_forces_latched_and_releases_by_toggle -v`
 Expected: FAIL（`AttributeError: 'EstopController' object has no attribute 'latch'`）
 
-- [ ] **Step 3: 最小实现（teleopit/sim/estop.py，`consume_exit_request` 之后）**
+- [x] **Step 3: 最小实现（teleopit/sim/estop.py，`consume_exit_request` 之后）**
 
 ```python
     def latch(self) -> None:
@@ -353,12 +353,12 @@ Expected: FAIL（`AttributeError: 'EstopController' object has no attribute 'lat
         self._exit_consumed = True
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_velocity_session.py -v`
 Expected: 全 PASS（既有 estop 测试不受影响）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/sim/estop.py tests/test_velocity_session.py
@@ -376,7 +376,7 @@ git commit -m "feat(estop): latch() for damping-entry lock (bsi-realhw-05)"
 **Interfaces:**
 - Produces: `velocity_safety_verdict(state, *, joint_vel_limit: float, tilt_graceful_rad: float, tilt_damping_rad: float) -> str | None`，返回 `"damping" | "standing" | None`。joint-vel 超 → "damping"；tilt ≥ 跌倒线 → "damping"；tilt ≥ 优雅线 → "standing"。tilt 数学复用 `teleopit.controllers.twist_observation._quat_rotate_inv_np`（纯 numpy，无 mujoco 依赖）。Task 9 的 `_velocity_step` 消费。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_sim2real_velocity_safety.py
@@ -428,12 +428,12 @@ def test_joint_vel_wins_over_tilt_when_both_exceeded() -> None:
     )
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_sim2real_velocity_safety.py -v`
 Expected: FAIL（ImportError：函数不存在）
 
-- [ ] **Step 3: 最小实现（teleopit/sim2real/safety.py 文件尾）**
+- [x] **Step 3: 最小实现（teleopit/sim2real/safety.py 文件尾）**
 
 ```python
 def velocity_safety_verdict(
@@ -472,12 +472,12 @@ def velocity_safety_verdict(
     return None
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_sim2real_velocity_safety.py -v`
 Expected: PASS（5 测）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/sim2real/safety.py tests/test_sim2real_velocity_safety.py
@@ -496,7 +496,7 @@ git commit -m "feat(safety): velocity_safety_verdict — real dual tilt lines + 
 - Consumes: 任意 `CommandProvider`（`get_cmd/reset/close`）。
 - Produces: `ForwardOnlyCapProvider(inner, *, max_lin_x: float)`——`get_cmd()` 返回 6D：`out[0] = clip(cmd[0], 0.0, max_lin_x)`（负值=后退也压 0），`out[1] = 0.0`，`out[5] = 0.0`，其余照抄；`reset()/close()` 委托。Task 7 的 restrict 装配消费。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_forward_only_provider.py
@@ -535,12 +535,12 @@ def test_zero_command_passes_through() -> None:
     np.testing.assert_allclose(capped.get_cmd(), np.zeros(6, dtype=np.float32))
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_forward_only_provider.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 ```python
 # teleopit/commands/forward_only.py
@@ -591,7 +591,7 @@ class ForwardOnlyCapProvider:
         return bool(toggle()) if callable(toggle) else None
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_forward_only_provider.py -v`
 Expected: PASS（4 测）
@@ -616,7 +616,7 @@ def test_mute_delegates_through_the_cap() -> None:
     assert capped.muted is False
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/commands/forward_only.py tests/test_forward_only_provider.py
@@ -634,7 +634,7 @@ git commit -m "feat(commands): ForwardOnlyCapProvider — L2 forward-only envelo
 **Interfaces:**
 - Produces: `VelocityCmdLogger(path: str | None)`——`log(*, cmd, estop_state: str, mode: str, muted: bool) -> None` 追加一行 JSON（`{"t": <monotonic 秒>, "cmd": [6 floats], "estop": ..., "mode": ..., "muted": ...}`）；`path=None` 为空操作（默认不开日志）；`close()` 关文件。07 的时序指标表（意图→cmd ≤1.0s、E→cmd0 ≤0.8s、抢夺 ≤2 周期）全部由此文件事后分析。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_velocity_cmd_log.py
@@ -665,12 +665,12 @@ def test_none_path_is_a_noop() -> None:
     logger.close()  # 不抛即过
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_velocity_cmd_log.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 ```python
 # teleopit/sim2real/mp/cmd_log.py
@@ -717,12 +717,12 @@ class VelocityCmdLogger:
             self._fh = None
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_velocity_cmd_log.py -v`
 Expected: PASS（2 测）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/sim2real/mp/cmd_log.py tests/test_velocity_cmd_log.py
@@ -746,7 +746,7 @@ git commit -m "feat(mp): VelocityCmdLogger jsonl per-step command log (bsi-realh
   - `_build_velocity_stack(command_cfg: dict, *, reader_factory=None) -> None`
   - 配置键：`command.provider == "merged_bsi"` 触发构建；`safety.joint_vel_limit/tilt_graceful_rad/tilt_damping_rad`；`mocap_entry_enabled`；`velocity_cmd_log.path`；`command.restrict.forward_only.max_lin_x`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_sim2real_velocity_mode.py
@@ -872,12 +872,12 @@ def test_build_velocity_stack_without_restrict_keeps_plain_provider(monkeypatch)
     assert not isinstance(worker._velocity_cmd, runtime_module.ForwardOnlyCapProvider)
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_sim2real_velocity_mode.py -v`
 Expected: FAIL（`RobotMode.VELOCITY` 不存在 + `_build_velocity_stack` 缺失）
 
-- [ ] **Step 3: 最小实现（runtime.py 四处）**
+- [x] **Step 3: 最小实现（runtime.py 四处）**
 
 (a) `RobotMode` 加成员：
 
@@ -993,12 +993,12 @@ class _ControllerSnapshotProxy:
 
 注意：`__init__` 里 `self.estop` 也可被既有代码占用名——若重名改用 `self.velocity_estop`（当前代码无 estop 属性，可直接用）。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_sim2real_velocity_mode.py -v`
 Expected: PASS（3 测）
 
-- [ ] **Step 5: 回归（worker 全套）+ 提交**
+- [x] **Step 5: 回归（worker 全套）+ 提交**
 
 Run: `python -m pytest tests/test_sim2real_multiprocess.py -q`
 Expected: 全 PASS（`__init__` 新增段不破坏既有构造路径——无 command 段时零副作用）
@@ -1020,7 +1020,7 @@ git commit -m "feat(mp): assemble in-process velocity stack — RobotMode.VELOCI
 - Consumes: Task 1 `TOGGLE_VELOCITY` 事件、Task 3 `EstopController.latch/toggle`、Task 7 worker 属性。
 - Produces（Task 9 依赖）：`_enter_velocity()`（仅 STANDING 且未锁存且栈已配置；reset 栈 + 播种 last_action）、`_exit_velocity_to_standing()`（= X 语义，走 `_enter_standing`）；模块常量 `_EXIT_RAMP_MODES = (MOCAP, ARMS, POLICY, VELOCITY)`、`_DEBUG_MODES = (STANDING, MOCAP, ARMS, POLICY, VELOCITY)`。
 
-- [ ] **Step 1: 写失败测试（追加）**
+- [x] **Step 1: 写失败测试（追加）**
 
 ```python
 from teleopit.inputs.realtime_packet import ControlEvent, ControlEventType
@@ -1122,12 +1122,12 @@ def test_mocap_entry_gate_blocks_remote_y_when_disabled() -> None:
 
 （`_handle_transitions` STANDING 分支还会走 `self.remote.start`？不会——start 仅 IDLE/DAMPING 分支读。STANDING 只读 Y 与 reentry。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_sim2real_velocity_mode.py -v`
 Expected: 新增 8 测 FAIL（事件被丢弃 / 方法缺失）
 
-- [ ] **Step 3: 最小实现（runtime.py 五处）**
+- [x] **Step 3: 最小实现（runtime.py 五处）**
 
 (a) `_handle_mocap_control_events` 加三个分支（TOGGLE_ARMS 块之前）：
 
@@ -1219,12 +1219,12 @@ _EXIT_RAMP_MODES = (RobotMode.MOCAP, RobotMode.ARMS, RobotMode.POLICY, RobotMode
         ):
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_sim2real_velocity_mode.py tests/test_sim2real_multiprocess.py -v`
 Expected: 全 PASS（`_enter_standing` 重构不改变既有模式行为）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/sim2real/mp/runtime.py tests/test_sim2real_velocity_mode.py
@@ -1243,7 +1243,7 @@ git commit -m "feat(mp): VELOCITY mode machine — X/grip event handling, latch-
 - Consumes: Task 4 `velocity_safety_verdict`、Task 3 `estop.apply/consume_exit_request/latch`、Task 7 栈属性、Task 8 `_exit_velocity_to_standing`。
 - Produces: `_velocity_step() -> None`——每 policy step：`proxy.poll() → get_cmd → estop.apply → 安全判定（damping/standing 分岔）→ obs.build(state, cmd, velocity_last_action) → compute_action → clip → safety.send_positions → cmd 日志`。estop 渐0 完成后自动走退出路径。
 
-- [ ] **Step 1: 写失败测试（追加）**
+- [x] **Step 1: 写失败测试（追加）**
 
 ```python
 def _step_ready_worker(**overrides) -> _RobotControlWorker:
@@ -1335,12 +1335,12 @@ def test_enter_damping_latches_estop() -> None:
     assert worker.estop.state == EstopState.LATCHED
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_sim2real_velocity_mode.py -v`
 Expected: 新增 6 测 FAIL（`_velocity_step` 不存在）
 
-- [ ] **Step 3: 最小实现（runtime.py 三处）**
+- [x] **Step 3: 最小实现（runtime.py 三处）**
 
 (a) 主循环分发（1394-1399 的 elif 链）加一行：
 
@@ -1419,12 +1419,12 @@ import 区补：`from teleopit.sim2real.safety import Sim2RealSafetyManager, vel
         if bool(getattr(self, "high_level_policy_enabled", False)) and (
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_sim2real_velocity_mode.py -v`
 Expected: 全 PASS（含 Task 7/8 的 11 测）
 
-- [ ] **Step 5: 全量回归 + 提交**
+- [x] **Step 5: 全量回归 + 提交**
 
 Run: `python -m pytest tests/ -q`
 Expected: 全 PASS（457+ 新增）
@@ -1447,7 +1447,7 @@ git commit -m "feat(mp): _velocity_step — merged cmd + estop decay + dual-tilt
 - Consumes: Task 1/2 的 input 键（velocity_button/estop_button/estop_grip_threshold/mute_button）、Task 7 的 command/safety/mocap_entry_enabled/velocity_cmd_log 键、既有组 `controller@controllers.velocity: velocity`、基线 `pico4_sim2real`。
 - Produces: 两个可用 `--config-name`。L2 相对主配置仅三处覆盖：restrict 段、bsi speeds forward 降 0.3、velocity_cmd_log 文件名带 `_l2`。
 
-- [ ] **Step 1: 写失败测试（追加到 tests/test_cli_entrypoints.py，复用 `_CONFIG_DIR`）**
+- [x] **Step 1: 写失败测试（追加到 tests/test_cli_entrypoints.py，复用 `_CONFIG_DIR`）**
 
 ```python
 # ── pico4_sim2real_bsi.yaml (bsi-realhw Phase B real VELOCITY mode) ────────
@@ -1478,12 +1478,12 @@ def test_pico4_sim2real_bsi_l2_config_restricts_forward() -> None:
     assert float(cfg.command.bsi.speeds.forward) == 0.3
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_cli_entrypoints.py -k bsi_sim2real -v`（匹配名 `test_pico4_sim2real_bsi*`）
 Expected: FAIL（config 不存在，compose 报错）
 
-- [ ] **Step 3: 写配置**
+- [x] **Step 3: 写配置**
 
 `teleopit/configs/pico4_sim2real_bsi.yaml`：
 
@@ -1554,12 +1554,12 @@ command:
     speeds: {forward: 0.3, turn: 0.3}
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_cli_entrypoints.py -v`
 Expected: 全 PASS（含既有配置测试——defaults 链不破坏 `pico4_sim2real` 本身）
 
-- [ ] **Step 5: 全量回归 + 提交**
+- [x] **Step 5: 全量回归 + 提交**
 
 Run: `python -m pytest tests/ -q`
 Expected: 全 PASS
@@ -1576,17 +1576,17 @@ git commit -m "feat(configs): pico4_sim2real_bsi + L2 preset — real BSI walk c
 **Files:**
 - Modify: 本 plan 文件（勾选执行完的步骤框）
 
-- [ ] **Step 1: 全量测试**
+- [x] **Step 1: 全量测试**
 
 Run: `python -m pytest tests/ -q`
 Expected: 全 PASS，零 skip 新增（cyclonedds 相关零导入）
 
-- [ ] **Step 2: 冒烟检查 import 面（teleopit env 无 DDS 泄漏）**
+- [x] **Step 2: 冒烟检查 import 面（teleopit env 无 DDS 泄漏）**
 
 Run: `python -c "import teleopit.sim2real.mp.runtime"`
 Expected: 无 ImportError（若 `build_merged_bsi_provider` 顶层 import 触发 bsi_dds，回到 Task 7 修 import——bsi_factory 顶层只 import teleopit.commands.*，不应发生）
 
-- [ ] **Step 3: 提交 plan 勾选**
+- [x] **Step 3: 提交 plan 勾选**
 
 ```bash
 git add docs/superpowers/plans/2026-08-21-bsi-realhw-velocity-mode.md
