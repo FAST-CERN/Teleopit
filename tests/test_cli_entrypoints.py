@@ -164,7 +164,8 @@ def test_pico4_sim2real_bsi_config_loads() -> None:
     assert float(cfg.safety.joint_vel_limit) == 10.0
     assert float(cfg.safety.tilt_graceful_rad) == 0.524
     assert float(cfg.safety.tilt_damping_rad) == 0.785
-    assert bool(cfg.mocap_entry_enabled) is False
+    # flipped 2026-08-22 for mixed walk->mocap sessions; entry stays STANDING-only
+    assert bool(cfg.mocap_entry_enabled) is True
     assert cfg.controllers.velocity.policy_path is not None
     assert float(cfg.real_robot.kp_real[0]) == 40.2  # 继承自 pico4_sim2real 基线
     assert float(cfg.command.joystick.deadzone) == 0.15

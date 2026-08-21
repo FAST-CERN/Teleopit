@@ -18,8 +18,10 @@ input:
   estop_grip_threshold: 0.6
   mute_button: Y              # BSI mute (source control)
 
-# bsi-realhw-07: caretaker holds the G1 remote; Y must not hijack a BSI walk.
-mocap_entry_enabled: false
+# bsi-realhw-07 anti-hijack default was false; flipped 2026-08-22 at operator
+# request for mixed sessions (walk -> X -> STANDING -> remote Y -> mocap arms).
+# Entry stays STANDING-only, so Y cannot interrupt an active walk.
+mocap_entry_enabled: true
 
 safety:
   joint_vel_limit: 10.0       # bsi-realhw-05 scalar (L2/L3 proven envelope)
