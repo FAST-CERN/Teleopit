@@ -43,12 +43,12 @@ created: 2026-08-21
 
 ## Decisions so far
 
-（无 — charting 2026-08-21）
+- [BSI 离散指令 DDS 协议设计](tickets/01-discrete-command-protocol.md) — domain 0 同域 + `bsi/cmd_discrete`；持续意图流 ≥10Hz；best-effort+deadline 0.5s；IDL 源+idlc 生成；schema = stamp_ns/seq/command/confidence，IDLE=0 故障安全；静默 1s 归 idle；点对点直连无中继。
 
 ## Not yet specified
 
-- BSI 实测特性未知（误分类率、指令间隔、标签切换节奏）→ 映射 ticket 的防抖/缓冲策略可能需要实测回填后重校，届时或生「特性回填」ticket。
-- BSI_DDSInterface「通信进程管理」的具体 API 面 — 骨架 task 时随上位机侧需求细化。
+- BSI 实测特性未知（误分类率、指令间隔、标签切换节奏）→ 映射 ticket 的防抖/缓冲策略可能需要实测回填后重校，届时或生「特性回填」ticket。（confidence 字段已进 schema，实测后可用于阈值策略）
+- ~~BSI_DDSInterface「通信进程管理」的具体 API 面~~ — T1 已定形态：可选启动/健康检查工具集（非守护进程中继），API 面随骨架 task 细化。
 - bvh/udp 通路要不要 BSI — 先只接 pico4 通路，视经验再议。
 - 验收若暴露响应延迟/抖动问题 → 参数整定（平滑常数、防抖窗口）可能单出 ticket。
 
