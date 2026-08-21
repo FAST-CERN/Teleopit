@@ -159,12 +159,25 @@ def test_pico4_sim2real_bsi_config_loads() -> None:
     assert str(cfg.command.provider) == "merged_bsi"
     assert str(cfg.input.velocity_button) == "X"
     assert str(cfg.input.estop_button) == "left_grip"
+    assert str(cfg.input.mute_button) == "Y"
+    assert float(cfg.input.estop_grip_threshold) == 0.6
     assert float(cfg.safety.joint_vel_limit) == 10.0
     assert float(cfg.safety.tilt_graceful_rad) == 0.524
     assert float(cfg.safety.tilt_damping_rad) == 0.785
     assert bool(cfg.mocap_entry_enabled) is False
     assert cfg.controllers.velocity.policy_path is not None
     assert float(cfg.real_robot.kp_real[0]) == 40.2  # 继承自 pico4_sim2real 基线
+    assert float(cfg.command.joystick.deadzone) == 0.15
+    assert float(cfg.command.joystick.max_age_s) == 0.5
+    assert float(cfg.command.joystick.max_stick_scale.lin_vel_x) == 0.5
+    assert int(cfg.command.bsi.domain_id) == 0
+    assert float(cfg.command.bsi.silence_timeout_s) == 1.0
+    assert int(cfg.command.bsi.debounce_packets) == 3
+    assert int(cfg.command.bsi.idle_debounce_packets) == 2
+    assert float(cfg.command.bsi.alpha) == 0.3
+    assert float(cfg.command.bsi.speeds.forward) == 0.6
+    assert float(cfg.command.bsi.speeds.turn) == 0.6
+    assert str(cfg.velocity_cmd_log.path) == "data/velocity_cmd.jsonl"
 
 
 def test_pico4_sim2real_bsi_l2_config_restricts_forward() -> None:
@@ -174,3 +187,5 @@ def test_pico4_sim2real_bsi_l2_config_restricts_forward() -> None:
         cfg = compose(config_name="pico4_sim2real_bsi_l2")
     assert float(cfg.command.restrict.forward_only.max_lin_x) == 0.3
     assert float(cfg.command.bsi.speeds.forward) == 0.3
+    assert float(cfg.command.bsi.speeds.turn) == 0.3
+    assert str(cfg.velocity_cmd_log.path) == "data/velocity_cmd_l2.jsonl"
