@@ -1,6 +1,6 @@
 # Pico 扳机预制 Inspire 抓取 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** hands worker 新增 `inspire_ftp` driver：左右手柄扳机各自独立边沿 toggle，驱动二态预制抓取（角度+力+速度，拇指转钉住不动），经 DDS `rt/inspire_hand/ctrl/l|r` 下发，由 Orin 上现成的 `driver_double_wlan0.py` 转发到双手 Modbus。
 
@@ -64,7 +64,7 @@
 **Interfaces:**
 - Produces: `HandPoseCommand(side, pose, force=False, reason="", speed_set: tuple[int, ...] = (), force_set: tuple[int, ...] = ())`——Task 3 的 mapper 构造、Task 4 的 device 消费。
 
-- [ ] **Step 1: 写失败测试（追加到 tests/test_dexterous_hand.py）**
+- [x] **Step 1: 写失败测试（追加到 tests/test_dexterous_hand.py）**
 
 ```python
 def test_hand_pose_command_optional_speed_force_default_empty() -> None:
@@ -79,12 +79,12 @@ def test_hand_pose_command_optional_speed_force_default_empty() -> None:
     assert rich.speed_set == (500,) * 6 and rich.force_set == (300,) * 6
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_dexterous_hand.py -k hand_pose_command -v`
 Expected: FAIL（`TypeError: unexpected keyword 'speed_set'`）
 
-- [ ] **Step 3: 最小实现（base.py，dataclass 字段尾加两行）**
+- [x] **Step 3: 最小实现（base.py，dataclass 字段尾加两行）**
 
 ```python
 @dataclass(frozen=True)
@@ -97,12 +97,12 @@ class HandPoseCommand:
     force_set: tuple[int, ...] = ()
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_dexterous_hand.py -q`
 Expected: 全 PASS（既有构造点不传新字段，零破坏）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/sim2real/hands/base.py tests/test_dexterous_hand.py
@@ -121,7 +121,7 @@ git commit -m "feat(hands): HandPoseCommand optional speed_set/force_set arrays"
 - Consumes: Task 1 的 `HandPoseCommand`；既有快照形状（`snapshot.left/.right` 各带 `.trigger: float`、`.present: bool`、`.timestamp_s`）。
 - Produces: `PresetToggleMapper(presets: dict, sides: list[str], *, trigger_threshold: float = 0.6, trigger_debounce_s: float = 0.25)`，`map(*, controller_snapshot, hand_snapshot, active, now_s) -> tuple[HandPoseCommand, ...]`。预设形状 `{name: {"angles": [6 int], "speed": [6 int] | None, "force": [6 int] | None}}`。Task 4 的 device 消费其输出。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_inspire_preset_grasp.py
@@ -187,12 +187,12 @@ def test_absent_controller_side_is_silent() -> None:
     assert mapper.map(controller_snapshot=snap, hand_snapshot=None, active=True, now_s=100.0) == ()
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_inspire_preset_grasp.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 最小实现（teleopit/sim2real/hands/inspire_ftp.py 文件头 + mapper）**
+- [x] **Step 3: 最小实现（teleopit/sim2real/hands/inspire_ftp.py 文件头 + mapper）**
 
 ```python
 """Inspire RH56 (FTP) preset-grasp driver: DDS ctrl publisher side (2026-08-22 grilling).
@@ -283,12 +283,12 @@ class PresetToggleMapper:
 
 （`start/close` 空实现照 `HandInputMapper` Protocol 补上。）
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_inspire_preset_grasp.py -v`
 Expected: PASS（5 测）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/sim2real/hands/inspire_ftp.py tests/test_inspire_preset_grasp.py
@@ -308,7 +308,7 @@ git commit -m "feat(hands): PresetToggleMapper — per-side trigger edge toggle 
 - Consumes: Task 2 常量与 mapper 输出；`HandDevice` Protocol。
 - Produces: `InspireCtrlMessage(angle_set, speed_set, force_set, mode)`（纯 dataclass，无 cyclonedds）；`FakeInspirePublisher`（测试假件，记录 `(side, message)`）；`InspireFtpDevice(cfg: dict, *, publisher_factory=None)`；`build_inspire_ftp(cfg) -> HandRuntime`（Task 5 工厂消费）。真 publisher 构造：`_RealInspirePublisher(cfg)` lazy import cyclonedds + 本仓 `inspire_dds_types.InspireHandCtrl`，按 side 发 `rt/inspire_hand/ctrl/{l|r}`。
 
-- [ ] **Step 1: 写失败测试（追加）**
+- [x] **Step 1: 写失败测试（追加）**
 
 ```python
 import pytest
@@ -392,12 +392,12 @@ def test_module_imports_without_cyclonedds() -> None:
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_inspire_preset_grasp.py -v`
 Expected: 新增 6 测 FAIL（ImportError：名字不存在）
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `teleopit/sim2real/hands/inspire_dds_types.py`（cyclonedds-dependent，只被 lazy import）：
 
@@ -517,12 +517,12 @@ class InspireFtpDevice:
             self._publisher = None
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_inspire_preset_grasp.py -v`
 Expected: PASS（11 测）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/sim2real/hands/inspire_ftp.py teleopit/sim2real/hands/inspire_dds_types.py tests/test_inspire_preset_grasp.py
@@ -541,7 +541,7 @@ git commit -m "feat(hands): InspireFtpDevice — ctrl message compose (angle+for
 - Consumes: 无（读 `hands.trigger_modes: [standing, mocap, arms]` / `hands.open_modes: [idle, damping]` 配置；两键均缺席 = 旧行为）。
 - Produces: 门控语义供 Task 5 的 yaml 消费。**执行前先读 runtime.py:3290-3420**，记下 MODE_TOPIC 包里模式值的字段名/取值（`RobotMode.value` 字符串），下面代码按 `mode_value: str` 写，落码时对齐真实字段。
 
-- [ ] **Step 1: 写失败测试（追加；纯函数级测门控判定）**
+- [x] **Step 1: 写失败测试（追加；纯函数级测门控判定）**
 
 ```python
 def test_active_mode_gate_membership() -> None:
@@ -568,12 +568,12 @@ def test_open_modes_membership() -> None:
     assert _hand_worker_open_on_mode("damping", {"hands": {}}) is False  # 缺席不开
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_inspire_preset_grasp.py -k mode_gate -v`
 Expected: FAIL（签名/函数不存在）
 
-- [ ] **Step 3: 最小实现（runtime.py，`_hand_worker_active_for_mode` 处重写为模块级纯函数 + 循环接线）**
+- [x] **Step 3: 最小实现（runtime.py，`_hand_worker_active_for_mode` 处重写为模块级纯函数 + 循环接线）**
 
 ```python
 def _hand_worker_active_for_mode(mode_value: str, cfg: Any) -> bool:
@@ -595,12 +595,12 @@ def _hand_worker_open_on_mode(mode_value: str, cfg: Any) -> bool:
 
 （第一行 hands_cfg 冗余变量删除，只留 return 链。）`_run_hand_worker` 循环内：拿 MODE_TOPIC 最新包处，把现有 `_hand_worker_active_for_mode(<现参>)` 调用改为传 mode 值 + cfg；并新增转移检测——记 `last_mode_value`，当 `_hand_worker_open_on_mode(new_mode, cfg) and new_mode != last_mode_value` 时调 `runtime.open_all(force=True, reason=f"mode:{new_mode}")`。具体变量名对齐该循环现有代码。
 
-- [ ] **Step 4: 跑测试确认通过 + mp 回归**
+- [x] **Step 4: 跑测试确认通过 + mp 回归**
 
 Run: `python -m pytest tests/test_inspire_preset_grasp.py tests/test_sim2real_multiprocess.py -q`
 Expected: 全 PASS（multiprocess 既有测不破——门控纯函数化不改变缺席配置路径）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add teleopit/sim2real/mp/runtime.py tests/test_inspire_preset_grasp.py
@@ -620,7 +620,7 @@ git commit -m "feat(mp): hand-worker mode gating — trigger_modes active gate +
 - Consumes: Task 2/3 的 `PresetToggleMapper`、`InspireFtpDevice`；Task 4 门控配置键。
 - Produces: `build_hand_runtime` 认 `hands.driver: inspire_ftp`；`build_inspire_ftp(cfg) -> HandRuntime`；可用配置 `pico4_sim2real_bsi`（hands.enabled=true）。
 
-- [ ] **Step 1: 写失败测试（追加）**
+- [x] **Step 1: 写失败测试（追加）**
 
 ```python
 def test_build_hand_runtime_dispatches_inspire_ftp(monkeypatch) -> None:
@@ -662,12 +662,12 @@ def test_pico4_sim2real_bsi_hands_section_loads() -> None:
     assert cfg.hands.inspire_ftp.presets.grasp.angles[5] == 1000  # thumb-rotation held
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `python -m pytest tests/test_inspire_preset_grasp.py tests/test_cli_entrypoints.py -k "inspire or bsi_hands" -v`
 Expected: FAIL（driver 不认识 / hands 段不存在）
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `worker.py` 分发（115-126 处，linkerhand 分支后加）：
 
@@ -723,12 +723,12 @@ hands:
       grasp:  {angles: [0, 0, 0, 0, 300, 1000], speed: [500, 500, 500, 500, 500, 500], force: [300, 300, 300, 300, 300, 300]}
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `python -m pytest tests/test_inspire_preset_grasp.py tests/test_cli_entrypoints.py -q`
 Expected: 全 PASS
 
-- [ ] **Step 5: 全量回归 + 提交**
+- [x] **Step 5: 全量回归 + 提交**
 
 Run: `python -m pytest tests/ -q --ignore=tests/test_train_script.py`（train 系缺依赖模块按既有惯例 ignore）
 Expected: 除既有 3 个 HDF5 recorder 旧失败外全 PASS
@@ -745,19 +745,19 @@ git commit -m "feat(hands): inspire_ftp wiring — factory dispatch + pico4_sim2
 **Files:**
 - Modify: 本 plan 文件（勾选）
 
-- [ ] **Step 1: import 面冒烟**
+- [x] **Step 1: import 面冒烟**
 
 Run: `python -c "import teleopit.sim2real.hands.inspire_ftp, teleopit.sim2real.hands.worker, teleopit.sim2real.mp.runtime"`
 Expected: 无 ImportError（cyclonedds 零泄漏）
 
-- [ ] **Step 2: 提交 plan 勾选**
+- [x] **Step 2: 提交 plan 勾选**
 
 ```bash
 git add docs/superpowers/plans/2026-08-22-inspire-preset-grasp.md
 git commit -m "docs(plan): check off inspire preset-grasp implementation"
 ```
 
-- [ ] **Step 3: Orin 部署（pull 或 patch，同 2026-08-22 惯例）+ 起栈顺序**
+- [x] **Step 3: Orin 部署（pull 或 patch，同 2026-08-22 惯例）+ 起栈顺序**
 
 ```bash
 # Orin, tmux 窗口 A（手驱动，先起）:
