@@ -2,7 +2,7 @@
 id: bsi-realhw-map
 title: "BSI 过渡：mock 仿真收口 → 真实解码器驱动仿真 → 真机 G1 行走"
 labels: [wayfinder:map]
-status: open
+status: closed
 created: 2026-08-21
 ---
 
@@ -52,16 +52,17 @@ created: 2026-08-21
 - [真机 VELOCITY 模式接线设计](tickets/04-real-velocity-mode-design.md) — Sim2RealRuntime 内加 VELOCITY 模式；Pico TOGGLE_VELOCITY 键（仅 STANDING 进、锁存期拒入）；订阅器 + MergedTwistProvider 住 robot_control 进程（CONTROLLER_TOPIC 供摇杆半边）；速度 ONNX 策略与真机状态完全兼容直接复用（single_input_ok，无需 _multi_input 门）；新 pico4_sim2real_bsi.yaml + run_sim2real.py 入口。附带事实喂 05：joint_vel_limit mp 路径未执行、TOGGLE_ESTOP/MUTE 被丢弃（90% 现成急停缝）、L1+R1 遥控器 damping 即硬件级安全底。
 - [真机安全包络与分层急停落地](tickets/05-real-safety-envelope.md) — 两级定型：E 键照搬 sim 优雅急停（0.3s 渐0+锁存）；硬件底 = 看护人持 G1 遥控器 L1+R1 damping（已接线）。真机阈值 joint-vel 10.0 / tilt 30° 优雅 / 45° damping（mp VELOCITY 分支 50Hz 查）；**凡进过 DAMPING 锁 VELOCITY、E 唯一解锁**；恢复 SOP 扶正→START→E 解锁；root-height 真机不可用降指标。
 - [真机运行拓扑确认](tickets/06-real-network-topology.md) — 板载 Orin（仓库惯例 + eth0 机器人总线 + Orin cyclonedds 0.10.5 实测 OK）；三机两总线拓扑定稿；5 步上真机验证清单（解码器机对齐 0.10.x 防 XTypes hash 静默丢包 → doctor → 跨机 echo → Orin 起 mp 栈 → 同进程双 DDS 共存）；run_velocity_sim.py 硬编码键盘 provider 系设计（键盘验证入口），不开 fix ticket。
+- [L1-L3 分级验收规格](tickets/07-real-acceptance-spec.md) — 模式机参照 sim（STANDING 枢纽；Pico X=TOGGLE_VELOCITY、左 grip=TOGGLE_ESTOP 新钉；遥控器 Y 进 mocap 加 BSI 配置门默认关；B/A 域外 no-op 守卫既有）；L1 站立 60s+no-op 三连+damping 演练；L2 挂悬吊全通道限 0.3 m/s 仅 forward+推搡测试；L3 摘悬吊四态报幕穿场、零 threshold 触发=全图验收；时序指标日志测（意图→cmd≤1.0s 等，速度响应降目视）；失败处置=行重试 1 次/级退一级/threshold damping 当日停机。**七票全决，本图收口**——实现交后续 superpowers plan 与硬件会话。
 
 ## Not yet specified
 
-- L2 慢速门的具体降速幅值与 L3 场地布置（并入 07 规格时定）。
-- 真机联调暴露的整定票（同上张图「特性回填」预案）。
+（无——frontier 已空，图收口。）
 
 ## Out of scope
 
 - 上身并轨：Pico 手臂遥操与 BSI 腿同场并发（新控制策略，Q9 明确排除，目标形态另图拼装）。
 - Teleopit 侧编码实现与真机验收执行（04/05/06/07 锁定后走 superpowers plan 与硬件会话）。
+- 真机联调暴露的整定票（执行期「特性回填」，随 plan/硬件会话处理，不在本图）。
 - BSI 解码模型、EEG 采集（BSI 团队侧，同上张图）。
 - `g1_bridge_sdk` C++ 桥扩展（LocoClient velocity API；Q8 弃选，未来要厂商行走再启新图）。
 - bvh/udp 通路 BSI 接入（同上张图）。
