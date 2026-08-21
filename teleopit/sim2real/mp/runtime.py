@@ -124,6 +124,12 @@ from teleopit.sim2real.reference_processor import Sim2RealReferenceProcessor
 from teleopit.sim2real.remote import UnitreeRemote
 from teleopit.sim2real.safety import Sim2RealSafetyManager
 from teleopit.sim2real.unitree_g1 import UnitreeG1Robot
+from teleopit.commands.bsi_factory import build_merged_bsi_provider
+from teleopit.commands.forward_only import ForwardOnlyCapProvider
+from teleopit.commands.pico_joystick import PicoJoystickProvider
+from teleopit.runtime.factory import build_velocity_policy_components
+from teleopit.sim.estop import EstopController, EstopState
+from teleopit.sim2real.mp.cmd_log import VelocityCmdLogger
 
 try:
     from omegaconf import OmegaConf
@@ -148,6 +154,7 @@ class RobotMode(Enum):
     MOCAP = "mocap"
     ARMS = "arms"
     POLICY = "policy"
+    VELOCITY = "velocity"
     DAMPING = "damping"
 
 
@@ -1288,6 +1295,28 @@ class _RobotControlWorker:
         self._mocap_reference_arm_retry_s = float(cfg_get(_mp_cfg(cfg), "mocap_reference_arm_retry_s", 0.1))
         self._mocap_session = MocapSessionManager()
 
+        # BSI velocity stack (wayfinder bsi-realhw-04): assembled only when the
+        # config carries a merged_bsi command section; without it the worker
+        # behaves exactly as before.
+        self.estop = EstopController()
+        self._velocity_policy = None
+        self._velocity_obs_builder = None
+        self._velocity_cmd = None
+        self._controller_proxy = None
+        self._velocity_last_action = np.zeros(self.num_actions, dtype=np.float32)
+        self._mocap_entry_enabled = bool(cfg_get(cfg, "mocap_entry_enabled", True))
+        velocity_safety_cfg = cfg_get(cfg, "safety", {}) or {}
+        self._vel_joint_vel_limit = float(
+            cfg_get(velocity_safety_cfg, "joint_vel_limit", cfg_get(cfg, "joint_vel_limit", 10.0))
+        )
+        self._vel_tilt_graceful_rad = float(cfg_get(velocity_safety_cfg, "tilt_graceful_rad", 0.524))
+        self._vel_tilt_damping_rad = float(cfg_get(velocity_safety_cfg, "tilt_damping_rad", 0.785))
+        cmd_log_cfg = cfg_get(cfg, "velocity_cmd_log", {}) or {}
+        self._velocity_cmd_logger = VelocityCmdLogger(cfg_get(cmd_log_cfg, "path", None))
+        command_cfg = cfg_get(cfg, "command", None)
+        if isinstance(command_cfg, dict) and str(command_cfg.get("provider", "")) == "merged_bsi":
+            self._build_velocity_stack(dict(command_cfg))
+
         self._high_level_policy_cfg = (
             parse_high_level_policy_config(cfg) if self.high_level_policy_enabled else None
         )
@@ -1479,6 +1508,39 @@ class _RobotControlWorker:
         if not bool(getattr(policy, "_multi_input", False)):
             raise ValueError("Sim2real requires an ONNX policy with dual inputs ('obs' and 'obs_history').")
         return policy, obs_builder
+
+    def _build_velocity_stack(
+        self, command_cfg: dict[str, Any], *, reader_factory: Any = None
+    ) -> None:
+        """Assemble the in-process velocity command + policy stack (bsi-realhw-04 D2).
+
+        Joystick half reads CONTROLLER_TOPIC; BSI half subscribes domain-0 DDS
+        via the lazy bsi_dds import. All of it lives in THIS robot_control
+        process — DDS silence decays to IDLE inside the merged provider, so no
+        process isolation is needed.
+        """
+        self._velocity_policy, self._velocity_obs_builder = build_velocity_policy_components(
+            self.cfg, PROJECT_ROOT
+        )
+        self._controller_proxy = _ControllerSnapshotProxy(
+            LatestSubscriber(self.endpoints.controller_pub, CONTROLLER_TOPIC)
+        )
+        joystick_cfg = dict(command_cfg.get("joystick", {}) or {})
+        joystick = PicoJoystickProvider(
+            self._controller_proxy,
+            deadzone=float(joystick_cfg.get("deadzone", 0.15)),
+            max_stick_scale=dict(joystick_cfg.get("max_stick_scale", {}) or {}) or None,
+            max_age_s=float(joystick_cfg.get("max_age_s", 0.5)),
+        )
+        self._velocity_cmd = build_merged_bsi_provider(
+            joystick, dict(command_cfg.get("bsi", {}) or {}), reader_factory=reader_factory
+        )
+        restrict_cfg = command_cfg.get("restrict", None)
+        if isinstance(restrict_cfg, dict) and "forward_only" in restrict_cfg:
+            forward_cfg = dict(restrict_cfg["forward_only"] or {})
+            self._velocity_cmd = ForwardOnlyCapProvider(
+                self._velocity_cmd, max_lin_x=float(forward_cfg.get("max_lin_x", 0.3))
+            )
 
     def _drain_ipc(self) -> None:
         command = self._command_sub.recv_latest()
@@ -3114,6 +3176,28 @@ class _HandSnapshotProxy:
 
     def get_controller_snapshot(self) -> Any | None:
         return self.controller_snapshot
+
+
+class _ControllerSnapshotProxy:
+    """Feed PicoJoystickProvider from the CONTROLLER_TOPIC ZMQ stream.
+
+    The pico worker publishes SnapshotPacket(snapshot=<controller snapshot>);
+    PicoJoystickProvider only needs get_controller_snapshot() returning the
+    latest snapshot object (.left/.right/.timestamp_s), mirroring the sim-side
+    direct-provider access (bsi-realhw-04 D2).
+    """
+
+    def __init__(self, sub: LatestSubscriber) -> None:
+        self._sub = sub
+        self._snapshot: Any = None
+
+    def poll(self) -> None:
+        packet = self._sub.recv_latest()
+        if isinstance(packet, SnapshotPacket):
+            self._snapshot = packet.snapshot
+
+    def get_controller_snapshot(self) -> Any | None:
+        return self._snapshot
 
 
 def _hand_worker_active_for_mode(mode_packet: ModeStatePacket) -> bool:
