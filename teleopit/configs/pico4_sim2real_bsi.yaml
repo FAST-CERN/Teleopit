@@ -65,6 +65,6 @@ hands:
     ctrl_topic_prefix: rt/inspire_hand/ctrl
     trigger_threshold: 0.6
     trigger_debounce_s: 0.25
-    presets:                                # 数值为占位——执行会话从 manus server 实跑取数回填
-      open:   {angles: [1000, 1000, 1000, 1000, 1000, 1000], speed: [500, 500, 500, 500, 500, 500], force: [300, 300, 300, 300, 300, 300]}
-      grasp:  {angles: [0, 0, 0, 0, 300, 1000], speed: [500, 500, 500, 500, 500, 500], force: [300, 300, 300, 300, 300, 300]}
+    presets:                                # 实测回填 2026-08-22（manus C++ 上位机稳定段均值，两侧平均；拇指转钉 1000）
+      open:   {angles: [1000, 1000, 1000, 1000, 1000, 1000], force: [1000, 1000, 1000, 1000, 1000, 1000]}
+      grasp:  {angles: [210, 165, 207, 204, 600, 1000], force: [1000, 1000, 1000, 1000, 1000, 1000]}

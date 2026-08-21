@@ -208,5 +208,5 @@ def test_pico4_sim2real_bsi_hands_section_loads() -> None:
     assert [str(m) for m in cfg.hands.trigger_modes] == ["standing", "mocap", "arms"]
     assert [str(m) for m in cfg.hands.open_modes] == ["idle", "damping"]
     assert float(cfg.hands.inspire_ftp.trigger_threshold) == 0.6
-    assert [int(v) for v in cfg.hands.inspire_ftp.presets.grasp.angles] == [0, 0, 0, 0, 300, 1000]
+    assert [int(v) for v in cfg.hands.inspire_ftp.presets.grasp.angles] == [210, 165, 207, 204, 600, 1000]
     assert cfg.hands.inspire_ftp.presets.grasp.angles[5] == 1000  # thumb-rotation held
