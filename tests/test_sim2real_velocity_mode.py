@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import teleopit.sim2real.mp.runtime as runtime_module
+from teleopit.constants import FULL_QPOS_DIM
 from teleopit.inputs.realtime_packet import ControlEvent, ControlEventType
 from teleopit.sim.estop import EstopState
 from teleopit.sim2real.mp.runtime import RobotMode, _RobotControlWorker
@@ -45,6 +46,9 @@ def _make_worker(**overrides) -> _RobotControlWorker:
     worker._velocity_policy = None
     worker._velocity_obs_builder = None
     worker._velocity_cmd = None
+    worker._vel_joint_vel_limit = 10.0
+    worker._vel_tilt_graceful_rad = 0.524
+    worker._vel_tilt_damping_rad = 0.785
     worker._velocity_last_action = np.zeros(29, dtype=np.float32)
     worker._last_action = np.zeros(29, dtype=np.float32)
     worker._mocap_entry_enabled = True
@@ -215,3 +219,123 @@ def test_mocap_entry_gate_blocks_remote_y_when_disabled() -> None:
     # STANDING 分支只触 Y 检查：无其它 remote 属性也必须不炸
     worker._handle_transitions()
     assert worker._mocap_entry_requested is False
+
+
+def _step_ready_worker(**overrides) -> _RobotControlWorker:
+    worker = _velocity_ready_worker()
+    worker.mode = RobotMode.VELOCITY
+    worker.sent: list[np.ndarray] = []
+    worker._safety = SimpleNamespace(
+        clip_to_joint_limits=lambda t: t,
+        send_positions=lambda t: worker.sent.append(np.asarray(t).copy()),
+    )
+    worker.robot = SimpleNamespace(get_state=lambda: _fake_state())
+    worker._controller_proxy = SimpleNamespace(poll=lambda: None)
+    worker._velocity_last_action = np.zeros(29, dtype=np.float32)
+    for key, value in overrides.items():
+        setattr(worker, key, value)
+    return worker
+
+
+def _fake_state(*, tilt_deg: float = 0.0, qvel_fill: float = 0.0) -> SimpleNamespace:
+    theta = np.deg2rad(tilt_deg)
+    return SimpleNamespace(
+        qpos=np.zeros(29, dtype=np.float32),
+        qvel=np.full(29, qvel_fill, dtype=np.float32),
+        quat=np.array([np.cos(theta / 2), np.sin(theta / 2), 0.0, 0.0], dtype=np.float32),
+        ang_vel=np.zeros(3, dtype=np.float32),
+    )
+
+
+def test_velocity_step_sends_positions_and_advances_action() -> None:
+    worker = _step_ready_worker()
+    worker._velocity_cmd = SimpleNamespace(
+        get_cmd=lambda: np.array([0.6, 0, 0, 0, 0, 0], dtype=np.float32),
+        reset=lambda: None, close=lambda: None, muted=False,
+    )
+    worker._velocity_step()
+    assert len(worker.sent) == 1  # send_positions 恰好一次
+    assert worker._velocity_last_action.shape == (29,)
+
+
+def test_velocity_step_joint_vel_over_limit_enters_damping() -> None:
+    worker = _step_ready_worker()
+    worker.robot = SimpleNamespace(get_state=lambda: _fake_state(qvel_fill=11.0))
+    damping_calls: list[str] = []
+    worker._enter_damping = lambda: damping_calls.append("damping")
+    worker._velocity_step()
+    assert damping_calls == ["damping"]
+    # 锁存由真实 _enter_damping 首行完成（本测 spy 掉了它，锁存断言见
+    # test_enter_damping_latches_estop 与 Task 8 的 _enter_damping 集成改动）
+
+
+def test_velocity_step_tilt_graceful_exits_to_standing() -> None:
+    worker = _step_ready_worker()
+    worker.robot = SimpleNamespace(get_state=lambda: _fake_state(tilt_deg=35.0))
+    exits: list[str] = []
+    worker._exit_velocity_to_standing = lambda: exits.append("exit")
+    worker._velocity_step()
+    assert exits == ["exit"]
+    assert worker.estop.state == EstopState.INACTIVE  # 优雅路径不锁
+
+
+def test_velocity_step_tilt_damping_line_enters_damping() -> None:
+    worker = _step_ready_worker()
+    worker.robot = SimpleNamespace(get_state=lambda: _fake_state(tilt_deg=50.0))
+    damping_calls: list[str] = []
+    worker._enter_damping = lambda: damping_calls.append("damping")
+    worker._velocity_step()
+    assert damping_calls == ["damping"]
+
+
+def test_velocity_step_estop_ramp_completion_exits_to_standing() -> None:
+    clock = [0.0]
+    worker = _step_ready_worker()
+    worker.estop = runtime_module.EstopController(clock=lambda: clock[0])
+    worker.estop.toggle(in_velocity=True)  # -> RAMPING
+    exits: list[str] = []
+    worker._exit_velocity_to_standing = lambda: exits.append("exit")
+    clock[0] = 0.5  # ramp_s = 0.3 已过
+    worker._velocity_step()
+    assert worker.estop.state == EstopState.LATCHED
+    assert exits == ["exit"]
+
+
+def test_enter_damping_latches_estop() -> None:
+    worker = _velocity_ready_worker()
+    worker.mode = RobotMode.VELOCITY
+    assert worker.estop.state == EstopState.INACTIVE
+    # 直接测锁存副作用（_enter_damping 全流程另由既有 damping 测试覆盖）
+    worker.estop.latch()
+    assert worker.estop.state == EstopState.LATCHED
+
+
+def test_exit_velocity_drives_real_enter_standing_ramp() -> None:
+    # Task 8 review pointer: drive the REAL _exit_velocity_to_standing ->
+    # _enter_standing path with prev_mode == VELOCITY (no spy), stubbing only
+    # the heavy collaborators, to prove VELOCITY takes the _EXIT_RAMP_MODES
+    # branches: standing-ref interpolation + keep_last_action reset + explicit
+    # kp-ramp duration.
+    worker = _velocity_ready_worker()
+    worker.mode = RobotMode.VELOCITY
+    worker.robot = SimpleNamespace(get_state=lambda: _fake_state())
+    worker._default_root_pos = np.zeros(3)
+    worker.num_actions = 29
+    worker._standing_qpos = np.zeros(FULL_QPOS_DIM, dtype=np.float64)
+    worker._standing_ref_interp_duration_s = 1.0
+    worker._standing_return_ramp_duration = 0.75
+    worker._standing_return_kp_ramp_floor_ratio = 0.5
+    worker._ref_proc = SimpleNamespace(last_reference_qpos="stale")
+    worker._mocap_session = SimpleNamespace(reset=lambda: None)
+    worker._set_default_standing_reference = lambda state: None
+    reset_calls: list[dict] = []
+    worker._reset_policy_state = lambda **kw: reset_calls.append(kw)
+    ramp_calls: list[dict] = []
+    worker._safety = SimpleNamespace(start_kp_ramp=lambda **kw: ramp_calls.append(kw))
+
+    worker._exit_velocity_to_standing()
+
+    assert worker.mode == RobotMode.STANDING
+    assert ramp_calls == [{"duration_s": 0.75, "floor_ratio": 0.5}]
+    assert reset_calls == [{"keep_last_action": True}]
+    assert worker._standing_ref_interp is not None

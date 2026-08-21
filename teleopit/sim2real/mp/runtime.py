@@ -122,7 +122,7 @@ from teleopit.sim2real.mp.messages import (
 from teleopit.sim2real.mp.shm import SharedFrameRingReader, SharedFrameRingWriter
 from teleopit.sim2real.reference_processor import Sim2RealReferenceProcessor
 from teleopit.sim2real.remote import UnitreeRemote
-from teleopit.sim2real.safety import Sim2RealSafetyManager
+from teleopit.sim2real.safety import Sim2RealSafetyManager, velocity_safety_verdict
 from teleopit.sim2real.unitree_g1 import UnitreeG1Robot
 from teleopit.commands.bsi_factory import build_merged_bsi_provider
 from teleopit.commands.forward_only import ForwardOnlyCapProvider
@@ -1453,6 +1453,8 @@ class _RobotControlWorker:
                         self._mocap_step()
                     elif self.mode == RobotMode.POLICY:
                         self._high_level_policy_step()
+                    elif self.mode == RobotMode.VELOCITY:
+                        self._velocity_step()
 
                 self._publish_mode_state()
                 work_elapsed_s = time.monotonic() - t0
@@ -1584,6 +1586,50 @@ class _RobotControlWorker:
         """VELOCITY -> STANDING via the standing-return ramp (sim X semantics)."""
         operator_logger.info("velocity exit -> STANDING (ramp)")
         self._enter_standing()
+
+    def _velocity_step(self) -> None:
+        """One policy step of real-robot VELOCITY mode (bsi-realhw-04/05).
+
+        Order matches the sim step: merged cmd -> estop suppression -> safety
+        verdict -> ONNX -> LowCmd. The estop's 0.3s exponential decay runs
+        inside apply(); when the ramp completes, consume_exit_request drives
+        the X-exit path into STANDING (NOT damping — bsi-dds-03 semantics).
+        """
+        if self._controller_proxy is not None:
+            self._controller_proxy.poll()
+        state = self.robot.get_state()
+        cmd = np.asarray(self._velocity_cmd.get_cmd(), dtype=np.float32).reshape(-1)
+        cmd = self.estop.apply(cmd)
+
+        verdict = velocity_safety_verdict(
+            state,
+            joint_vel_limit=self._vel_joint_vel_limit,
+            tilt_graceful_rad=self._vel_tilt_graceful_rad,
+            tilt_damping_rad=self._vel_tilt_damping_rad,
+        )
+        if verdict == "damping":
+            self._enter_damping()
+            return
+        if verdict == "standing":
+            self._exit_velocity_to_standing()
+            return
+        if self.estop.consume_exit_request():
+            self._exit_velocity_to_standing()
+            return
+
+        obs = self._velocity_obs_builder.build(state, cmd, self._velocity_last_action)
+        action = self._velocity_policy.compute_action(obs)
+        target_dof_pos = self._safety.clip_to_joint_limits(
+            self._velocity_policy.get_target_dof_pos(action)
+        )
+        self._safety.send_positions(target_dof_pos)
+        self._velocity_last_action = np.asarray(action, dtype=np.float32).reshape(-1)
+        self._velocity_cmd_logger.log(
+            cmd=cmd,
+            estop_state=self.estop.state.value,
+            mode=self.mode.value,
+            muted=bool(getattr(self._velocity_cmd, "muted", False)),
+        )
 
     def _drain_ipc(self) -> None:
         command = self._command_sub.recv_latest()
@@ -2450,6 +2496,9 @@ class _RobotControlWorker:
             self._resume_paused_mocap()
 
     def _enter_damping(self) -> None:
+        # bsi-realhw-05: any DAMPING entry (L1+R1 / joint-vel / tilt fall line)
+        # locks VELOCITY re-entry; E (Pico left grip) is the only release key.
+        self.estop.latch()
         if bool(getattr(self, "high_level_policy_enabled", False)) and (
             self.mode == RobotMode.POLICY or self._policy_entry_pending
         ):

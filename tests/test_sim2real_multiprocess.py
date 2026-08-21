@@ -42,6 +42,7 @@ from teleopit.sim2real.mp.messages import (
     ReferencePacket,
     SharedFrameDescriptor,
 )
+from teleopit.sim.estop import EstopController, EstopState
 from teleopit.sim.reference_timeline import ReferenceSample, ReferenceWindow
 from teleopit.sim2real.mp.runtime import (
     ARM_MOCAP_REFERENCE_COMMAND,
@@ -1464,6 +1465,7 @@ def test_robot_worker_publish_record_step() -> None:
 def test_robot_worker_enter_damping_publishes_non_recordable_packet() -> None:
     worker = object.__new__(_RobotControlWorker)
     worker.mode = RobotMode.MOCAP
+    worker.estop = EstopController()
     worker._mode_seq = 9
     worker._mocap_reentry_armed = True
     worker._last_commanded_motion_qpos = np.ones(36, dtype=np.float64)
@@ -1490,6 +1492,9 @@ def test_robot_worker_enter_damping_publishes_non_recordable_packet() -> None:
     worker._enter_damping()
 
     assert worker.mode == RobotMode.DAMPING
+    # bsi-realhw-05: DAMPING entry latches estop (locks VELOCITY re-entry
+    # until the operator's E toggle releases it).
+    assert worker.estop.state == EstopState.LATCHED
     assert published
     packet = published[-1][1]
     assert isinstance(packet, RecordStepPacket)
