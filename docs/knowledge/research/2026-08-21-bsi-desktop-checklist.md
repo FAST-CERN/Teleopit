@@ -1,5 +1,7 @@
 # BSI desktop acceptance checklist (ticket 07 桌面门)
 
+> **验收结果 2026-08-21：通过**（user 目视 + 真实 BSI 活信号接入复核，bsi-realhw 票 01/02/03）。1~7、10~13 首轮确认；8/9 estop 锁存语义经 3866473 修复后复核通过（锁存保留、锁存期 V/Y 拒、E 释放再 V）；14（H 帮助文本）跳过不查。量化指标由 03 承接（真实流复核未报参数调整）。跨机联调暴露的 DDS 类型 hash 不一致排查记入 BSI_DDSInterface `docs/installation.md` 第六节。
+
 **入口**：`run_sim.py --config-name pico4_sim_bsi` + `bsi_dds mock`（dds-probe env）。
 **脚本**：`idle:3,forward:5,left:3,forward:5,right:3,idle:3,forward:5,idle:3`（~50s）。
 
