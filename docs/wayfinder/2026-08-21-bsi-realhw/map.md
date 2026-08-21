@@ -46,7 +46,8 @@ created: 2026-08-21
 
 ## Decisions so far
 
-（尚无已决票。）
+- [仿真 14 行桌面 checklist 目视验收](tickets/01-sim-desktop-checklist.md) — user-reported 通过（目视 + 活信号复核），无 fix ticket；量化细节由 03 承接。
+- [BSI 真实解码器接入仿真（活信号联调）](tickets/02-live-decoder-sim-hookup.md) — user-reported 通过：解码器→domain 0，仿真零改动被活信号驱动；流率/拓扑量化留 03/06。
 
 ## Not yet specified
 

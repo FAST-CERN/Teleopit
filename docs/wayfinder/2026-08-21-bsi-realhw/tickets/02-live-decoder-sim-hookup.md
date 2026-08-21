@@ -2,8 +2,8 @@
 id: bsi-realhw-02
 title: "BSI 真实解码器接入仿真（活信号联调）"
 labels: [wayfinder:task]
-status: open
-assignee: ""
+status: closed
+assignee: "user"
 blocked-by: []
 created: 2026-08-21
 ---
@@ -17,3 +17,7 @@ BSI 团队把真实解码器发布端指向 DDS domain 0 `bsi/cmd_discrete`（Q3
 3. 网络绑定按 PC↔Orin 验证经验（`--interface` / `CYCLONEDDS_URI` 固定组播接口）。
 
 仿真侧代码零改动（订阅端本就是真的）。产出：联调记录（流率、接口、掉包/静默观察、机器与网络拓扑）——回填本票并供 03/06 引用。
+
+## Resolution
+
+**2026-08-21 user-reported 通过**：真实解码器发布端已接 DDS domain 0，仿真被活信号驱动跑通（与目视验收同场）。流率/接口/掉包等量化观察未落盘——由 03（采数复校）与 06（拓扑）承接。仿真侧代码零改动，与 survey 预期一致。

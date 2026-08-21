@@ -13,6 +13,8 @@ C:/Users/user/.conda/envs/teleopit/python.exe scripts/run/run_sim.py --config-na
 C:/Users/user/.conda/envs/dds-probe/python.exe -m bsi_dds.cli mock --script "idle:3,forward:5,left:3,forward:5,right:3,idle:3,forward:5,idle:3"
 ```
 
+**验收结果（2026-08-21，user-reported）**：通过——目视验收 + 真实 BSI 活信号接入均过，未报 bug；逐行观察与量化记录未落盘（量化由 bsi-realhw-03 承接）。
+
 | # | 观察项 | 期望 |
 |---|---|---|
 | 1 | FORWARD 段 | 机器人平滑前进，lin_x 收敛 ~0.6 m/s |
