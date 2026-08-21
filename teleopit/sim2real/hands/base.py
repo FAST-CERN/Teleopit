@@ -13,6 +13,8 @@ class HandPoseCommand:
     pose: tuple[int, ...]
     force: bool = False
     reason: str = ""
+    speed_set: tuple[int, ...] = ()
+    force_set: tuple[int, ...] = ()
 
 
 class HandDevice(Protocol):

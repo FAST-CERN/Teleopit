@@ -484,3 +484,15 @@ def test_linkerhand_l6_device_wraps_sdk_system_exit_and_cleans_up(monkeypatch) -
 
     assert len(created_hands) == 1
     assert created_hands[0].hand.close_calls == 1
+
+
+def test_hand_pose_command_optional_speed_force_default_empty() -> None:
+    from teleopit.sim2real.hands.base import HandPoseCommand
+
+    plain = HandPoseCommand(side="left", pose=(1, 2, 3, 4, 5, 6))
+    assert plain.speed_set == () and plain.force_set == ()
+    rich = HandPoseCommand(
+        side="right", pose=(0, 0, 0, 0, 300, 1000),
+        speed_set=(500,) * 6, force_set=(300,) * 6, reason="preset:grasp",
+    )
+    assert rich.speed_set == (500,) * 6 and rich.force_set == (300,) * 6
