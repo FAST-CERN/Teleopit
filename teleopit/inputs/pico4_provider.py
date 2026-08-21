@@ -224,6 +224,8 @@ class Pico4InputProvider(RealtimeInputProvider):
         pause_debounce_s: float = 0.25,
         arms_button: str | None = "B",
         arms_debounce_s: float | None = None,
+        velocity_button: str | None = None,
+        velocity_debounce_s: float | None = None,
         estop_button: str | None = None,
         estop_debounce_s: float = 0.25,
         mute_button: str | None = None,
@@ -287,6 +289,15 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._last_mute_button_pressed = False
         self._last_estop_toggle_timestamp: float | None = None
         self._last_mute_toggle_timestamp: float | None = None
+        self._velocity_button = None if velocity_button in (None, "", "null") else str(velocity_button)
+        self._velocity_debounce_s = (
+            float(velocity_debounce_s)
+            if velocity_debounce_s is not None
+            else 0.25
+        )
+        self._velocity_button_path = self._resolve_button_path(self._velocity_button)
+        self._last_velocity_button_pressed = False
+        self._last_velocity_toggle_timestamp: float | None = None
         self._last_raw_body_joints: NDArray[np.float64] | None = None
         self._last_frame_timestamp: float | None = None
         self._last_source_seq: int | None = None
@@ -596,6 +607,16 @@ class Pico4InputProvider(RealtimeInputProvider):
             last_pressed_attr="_last_mute_button_pressed",
             last_toggle_attr="_last_mute_toggle_timestamp",
             debounce_s=self._mute_debounce_s,
+        ) or emitted
+        emitted = self._poll_button_control_event(
+            frame,
+            timestamp=timestamp,
+            button_path=self._velocity_button_path,
+            button_label=self._velocity_button,
+            event_type=ControlEventType.TOGGLE_VELOCITY,
+            last_pressed_attr="_last_velocity_button_pressed",
+            last_toggle_attr="_last_velocity_toggle_timestamp",
+            debounce_s=self._velocity_debounce_s,
         ) or emitted
         return emitted
 

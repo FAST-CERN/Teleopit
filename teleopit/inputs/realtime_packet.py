@@ -19,6 +19,7 @@ class ControlEventType(str, Enum):
     TOGGLE_ARMS = "toggle_arms"
     TOGGLE_ESTOP = "toggle_estop"
     TOGGLE_MUTE = "toggle_mute"
+    TOGGLE_VELOCITY = "toggle_velocity"
 
 
 @dataclass(frozen=True)
