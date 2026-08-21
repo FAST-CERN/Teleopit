@@ -624,6 +624,43 @@ def _recording_command_label(command: str) -> str:
     return command
 
 
+def _build_pico_input_provider(input_cfg: dict[str, Any], video_cfg: Any, bridge_cls: type[Any] | None = None) -> Pico4InputProvider:
+    """Construct a Pico4InputProvider from the input config section.
+
+    This helper is testable in isolation, ensuring the button wiring
+    (estop, mute, velocity) is correctly plumbed from config to provider.
+
+    Args:
+        input_cfg: Input configuration dict from the main config.
+        video_cfg: Parsed video configuration.
+        bridge_cls: Optional bridge class override (for testing).
+    """
+    return Pico4InputProvider(
+        human_format=str(cfg_get(input_cfg, "human_format", "pico_bridge")),
+        timeout=float(cfg_get(input_cfg, "pico4_timeout", 60.0)),
+        buffer_size=int(cfg_get(input_cfg, "pico4_buffer_size", 60)),
+        timestamp_gap_reset_s=float(cfg_get(input_cfg, "pico4_timestamp_gap_reset_s", 0.15)),
+        pause_button=cfg_get(input_cfg, "pause_button", "A"),
+        pause_debounce_s=float(cfg_get(input_cfg, "pause_debounce_s", 0.25)),
+        arms_button=cfg_get(input_cfg, "arms_button", "B"),
+        arms_debounce_s=float(cfg_get(input_cfg, "arms_debounce_s", cfg_get(input_cfg, "pause_debounce_s", 0.25))),
+        estop_button=cfg_get(input_cfg, "estop_button", None),
+        estop_grip_threshold=float(cfg_get(input_cfg, "estop_grip_threshold", 0.6)),
+        mute_button=cfg_get(input_cfg, "mute_button", None),
+        velocity_button=cfg_get(input_cfg, "velocity_button", None),
+        velocity_debounce_s=float(cfg_get(input_cfg, "velocity_debounce_s", 0.25)),
+        bridge_host=str(cfg_get(input_cfg, "bridge_host", "0.0.0.0")),
+        bridge_port=int(cfg_get(input_cfg, "bridge_port", 63901)),
+        bridge_discovery=bool(cfg_get(input_cfg, "bridge_discovery", True)),
+        bridge_advertise_ip=cfg_get(input_cfg, "bridge_advertise_ip", None),
+        bridge_video=bridge_video_source(video_cfg),
+        bridge_video_enabled=video_cfg.enabled,
+        bridge_start_timeout=float(cfg_get(input_cfg, "bridge_start_timeout", 10.0)),
+        bridge_history_size=int(cfg_get(input_cfg, "bridge_history_size", 120)),
+        bridge_cls=bridge_cls,
+    )
+
+
 def _run_pico_io_worker(
     cfg: dict[str, Any],
     endpoints: Sim2RealIpcEndpoints,
@@ -632,29 +669,7 @@ def _run_pico_io_worker(
     def _main() -> None:
         input_cfg = cfg_get(cfg, "input", {}) or {}
         video_cfg = parse_pico_video_config(input_cfg)
-        provider = Pico4InputProvider(
-            human_format=str(cfg_get(input_cfg, "human_format", "pico_bridge")),
-            timeout=float(cfg_get(input_cfg, "pico4_timeout", 60.0)),
-            buffer_size=int(cfg_get(input_cfg, "pico4_buffer_size", 60)),
-            timestamp_gap_reset_s=float(cfg_get(input_cfg, "pico4_timestamp_gap_reset_s", 0.15)),
-            pause_button=cfg_get(input_cfg, "pause_button", "A"),
-            pause_debounce_s=float(cfg_get(input_cfg, "pause_debounce_s", 0.25)),
-            arms_button=cfg_get(input_cfg, "arms_button", "B"),
-            arms_debounce_s=float(cfg_get(input_cfg, "arms_debounce_s", cfg_get(input_cfg, "pause_debounce_s", 0.25))),
-            estop_button=cfg_get(input_cfg, "estop_button", None),
-            estop_grip_threshold=float(cfg_get(input_cfg, "estop_grip_threshold", 0.6)),
-            mute_button=cfg_get(input_cfg, "mute_button", None),
-            velocity_button=cfg_get(input_cfg, "velocity_button", None),
-            velocity_debounce_s=float(cfg_get(input_cfg, "velocity_debounce_s", 0.25)),
-            bridge_host=str(cfg_get(input_cfg, "bridge_host", "0.0.0.0")),
-            bridge_port=int(cfg_get(input_cfg, "bridge_port", 63901)),
-            bridge_discovery=bool(cfg_get(input_cfg, "bridge_discovery", True)),
-            bridge_advertise_ip=cfg_get(input_cfg, "bridge_advertise_ip", None),
-            bridge_video=bridge_video_source(video_cfg),
-            bridge_video_enabled=video_cfg.enabled,
-            bridge_start_timeout=float(cfg_get(input_cfg, "bridge_start_timeout", 10.0)),
-            bridge_history_size=int(cfg_get(input_cfg, "bridge_history_size", 120)),
-        )
+        provider = _build_pico_input_provider(input_cfg, video_cfg)
 
         body_pub = ZmqPublisher(endpoints.body_pub)
         head_pose_pub: ZmqPublisher | None = None

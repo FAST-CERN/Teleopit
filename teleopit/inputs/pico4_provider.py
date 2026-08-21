@@ -291,10 +291,9 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._last_estop_toggle_timestamp: float | None = None
         self._last_mute_toggle_timestamp: float | None = None
         self._velocity_button = None if velocity_button in (None, "", "null") else str(velocity_button)
-        self._velocity_debounce_s = (
-            float(velocity_debounce_s)
-            if velocity_debounce_s is not None
-            else 0.25
+        self._velocity_debounce_s = max(
+            float(velocity_debounce_s) if velocity_debounce_s is not None else 0.25,
+            0.0,
         )
         self._velocity_button_path = self._resolve_button_path(self._velocity_button)
         self._last_velocity_button_pressed = False
