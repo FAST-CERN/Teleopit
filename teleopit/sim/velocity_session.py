@@ -19,7 +19,7 @@ import numpy as np
 
 from teleopit.commands.base import CommandProvider
 from teleopit.runtime.common import cfg_get
-from teleopit.sim.estop import EstopController
+from teleopit.sim.estop import EstopController, EstopState
 from teleopit.sim.reference_interpolation import StandingReferenceInterpolator
 from teleopit.sim.runtime_components import PolicyStepRunner
 from teleopit.sim.velocity_step import VelocityStepController
@@ -116,7 +116,13 @@ class VelocitySimSession:
 
     def request_mode(self, mode: VelocityMode) -> None:
         """Queue a mode change. STOP always applies; a request for the current
-        mode is a no-op."""
+        mode is a no-op. VELOCITY is refused while the estop is latched — the
+        operator must press E to release the lock first (wayfinder bsi-dds-03:
+        同键 toggle 解锁), so the robot cannot re-enter motion right after an
+        estop."""
+        if mode == VelocityMode.VELOCITY and self.estop.state == EstopState.LATCHED:
+            self._key_feedback("V", "velocity", result="estop locked (press E)")
+            return
         if mode == VelocityMode.STOP or mode != self.mode:
             self._pending_mode = mode
 

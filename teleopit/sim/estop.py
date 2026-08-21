@@ -3,8 +3,11 @@
 Locked decisions (wayfinder bsi-dds-03): session-scope (any VELOCITY
 session, all command sources), cmd decays to zero then the session runs its
 X-exit path into STANDING (NOT damping — the joint-vel/overspeed damping
-gates stay as they are). Same key toggles engage/release; landing in
-STANDING auto-releases.
+gates stay as they are). Same key toggles engage/release. The latch PERSISTS
+after the estop-triggered STANDING landing — it is the operator's lock,
+cleared only by the same E toggle (同键 toggle 解锁); landing in STANDING via
+a normal X-exit only aborts an in-progress ramp, it does NOT clear a
+completed latch.
 """
 from __future__ import annotations
 
@@ -77,7 +80,14 @@ class EstopController:
         return False
 
     def on_standing(self) -> None:
-        self._state = EstopState.INACTIVE
-        self._ramp_start = None
-        self._exit_requested = False
-        self._exit_consumed = True
+        # Landing in STANDING aborts an in-progress ramp (operator X'd out
+        # mid-decay) but PRESERVES a completed latch: the latch is the
+        # operator's estop lock, cleared only by the same E toggle. Auto-
+        # clearing here was the bug that made the robot re-enterable right
+        # after an estop ("切不回去" / could escape to mocap).
+        if self._state == EstopState.RAMPING:
+            self._state = EstopState.INACTIVE
+            self._ramp_start = None
+            self._exit_requested = False
+            self._exit_consumed = True
+        # LATCHED and INACTIVE pass through unchanged.

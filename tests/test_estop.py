@@ -92,7 +92,11 @@ def test_toggle_while_standing_is_ignored():
     assert estop.state == EstopState.INACTIVE
 
 
-def test_on_standing_auto_unlatches():
+def test_on_standing_preserves_latched_lock():
+    # Estop -> ramp -> LATCHED -> session lands in STANDING. The latch MUST
+    # persist: it is the operator's lock, cleared only by the same E toggle
+    # (wayfinder bsi-dds-03: 同键 toggle 解锁). Auto-clearing here was the bug
+    # that made estop unlatch immediately on landing — "切不回去".
     clock = ManualClock()
     estop = EstopController(clock=clock)
     estop.toggle(in_velocity=True)
@@ -100,5 +104,34 @@ def test_on_standing_auto_unlatches():
         clock.advance(0.02)
         estop.apply(_CMD)
     assert estop.state == EstopState.LATCHED
+    estop.on_standing()  # session landed in STANDING via the estop exit
+    assert estop.state == EstopState.LATCHED  # lock persists
+    # Same E key releases the lock (operator then presses V to re-enter).
+    assert estop.toggle(in_velocity=False) == "released"
+    assert estop.state == EstopState.INACTIVE
+
+
+def test_on_standing_aborts_in_progress_ramp():
+    # Operator X'd out mid-ramp (RAMPING, not yet LATCHED): landing in STANDING
+    # aborts the ramp so a stale decay cannot resume on next VELOCITY entry.
+    clock = ManualClock()
+    estop = EstopController(clock=clock)
+    estop.toggle(in_velocity=True)
+    clock.advance(0.02)
+    estop.apply(_CMD)  # RAMPING, mid-decay
+    assert estop.state == EstopState.RAMPING
     estop.on_standing()
+    assert estop.state == EstopState.INACTIVE
+
+
+def test_toggle_in_standing_releases_latched_lock():
+    # E pressed in STANDING while LATCHED -> release (the unlock path).
+    clock = ManualClock()
+    estop = EstopController(clock=clock)
+    estop.toggle(in_velocity=True)
+    for _ in range(50):
+        clock.advance(0.02)
+        estop.apply(_CMD)
+    assert estop.state == EstopState.LATCHED
+    assert estop.toggle(in_velocity=False) == "released"
     assert estop.state == EstopState.INACTIVE

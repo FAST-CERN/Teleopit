@@ -17,7 +17,8 @@ keyboard:
 input:
   video:
     source: mujoco
-  estop_button: right_menu_button   # right hand = safety (estop)
+  # estop: keyboard E only — the pico right menuButton is reserved by the
+  # pico system (occupied), so no pico estop button is mapped here.
   mute_button: Y                     # left hand = source control (BSI mute)
 retarget_buffer_enabled: true
 retarget_buffer_window_s: 0.5

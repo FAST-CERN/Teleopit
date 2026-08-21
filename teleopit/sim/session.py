@@ -223,6 +223,12 @@ class SimLoopSession:
     # State-management methods (formerly closures with nonlocal)
     # ------------------------------------------------------------------
 
+    def _estop_latched(self) -> bool:
+        """True while the estop lock is engaged (mode switches are refused)."""
+        from teleopit.sim.estop import EstopState
+        estop = self._loop._velocity_estop
+        return estop is not None and estop.state == EstopState.LATCHED
+
     def reset_runtime_tracking(self) -> None:
         ref_cfg = self._loop._ref_cfg
         if self.reference_timeline is not None:
@@ -263,6 +269,12 @@ class SimLoopSession:
     def enter_mocap_mode(self) -> bool:
         from teleopit.sim.loop import SimulationMode
         loop = self._loop
+        # Estop lock: while latched the operator cannot escape to MOCAP (or any
+        # mode) — press E to release first (wayfinder bsi-dds-03: 同键 toggle
+        # 解锁). Without this guard an estop could be escaped into mocap.
+        if self._estop_latched():
+            loop._console.key_feedback("Y", "mocap", result="estop locked (press E)")
+            return False
         if not loop._realtime_input_has_frame(self._input_provider):
             _logger.warning("Cannot switch to MOCAP yet: realtime input has no frame available")
             return False
@@ -282,6 +294,13 @@ class SimLoopSession:
         from teleopit.sim.loop import SimulationMode
         if self.velocity_steps is None:
             self._loop._console.key_feedback("V", "velocity", result="no velocity stack")
+            return False
+        # Estop lock: V is refused while latched — the operator must press E to
+        # release first, so the robot cannot re-enter motion right after an
+        # estop ("切不回去" regression). wayfinder bsi-dds-03: 同键 toggle 解锁.
+        if self._estop_latched():
+            _logger.info("Ignoring V: estop latched — press E to release")
+            self._loop._console.key_feedback("V", "velocity", result="estop locked (press E)")
             return False
         if not self._loop._realtime_input_has_frame(self._input_provider):
             # Same gate as enter_mocap_mode: entering before the provider ever
@@ -397,13 +416,22 @@ class SimLoopSession:
                 if key == "y":
                     if self.enter_mocap_mode():
                         self._loop._console.key_feedback("Y", "mocap", result="MOCAP")
-                    else:
-                        self._loop._console.key_feedback("Y", "mocap", result="waiting for input")
+                    # else: enter_mocap_mode already reported the reason
+                    # ("estop locked" / "waiting for input") via the console.
                 elif key == "v":
                     if self.enter_velocity_mode():
                         self._loop._console.key_feedback("V", "velocity", result="VELOCITY")
                     # else: enter_velocity_mode already reported the reason
-                    # ("no velocity stack") via the console.
+                    # ("estop locked" / "no velocity stack" / "waiting for
+                    # input") via the console.
+                elif key == "e":
+                    # E in STANDING releases the estop lock if latched (the
+                    # unlock path); ignored when no estop is active. Mode is
+                    # unchanged — the operator then presses V/Y to switch.
+                    estop = self._loop._velocity_estop
+                    if estop is not None:
+                        result = estop.toggle(in_velocity=False)
+                        self._loop._console.key_feedback("E", "estop", result=result)
                 continue
             if self.simulation_mode == SimulationMode.VELOCITY:
                 if key == "x":
