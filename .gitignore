@@ -109,3 +109,5 @@ data/modelscope_upload/
 .code-review-graph/
 # Claude Code per-user local settings
 .claude/settings.local.json
+# MCP server config is machine-local (env paths / dds-probe python exe); not tracked
+.mcp.json
