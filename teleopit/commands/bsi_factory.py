@@ -7,6 +7,9 @@ cyclonedds) can exercise the full assembly with a fake source.
 """
 from __future__ import annotations
 
+import logging
+import os
+import sys
 import time
 from typing import Any, Callable
 
@@ -14,9 +17,36 @@ from teleopit.commands.bsi_dds_source import DdsIntentSource
 from teleopit.commands.bsi_twist import BsiTwistProvider
 from teleopit.commands.merged_twist import MergedTwistProvider
 
+logger = logging.getLogger(__name__)
+
+
+def sanitize_bridge_coexistence_env() -> bool:
+    """Drop CYCLONEDDS_HOME when the C++ bridge is already in-process (Orin field fix).
+
+    The Orin bashrc exports CYCLONEDDS_HOME pointing at a source-build install;
+    cyclonedds-python then loads THAT libddsc as a second, independent
+    CycloneDDS instance beside g1_bridge_sdk's bundled copy. Two live runtimes
+    in one process corrupt handles (Topic init fails with
+    DDS_RETCODE_BAD_PARAMETER — found during bsi-realhw 06-5 verification).
+    With the bridge loaded its soname is already resident, so dropping the env
+    var makes python reuse the bridge's instance. Standalone desktop use (no
+    bridge in sys.modules) keeps the env untouched. Returns True when dropped.
+    """
+    if "g1_bridge_sdk" not in sys.modules:
+        return False
+    dropped = os.environ.pop("CYCLONEDDS_HOME", None)
+    if dropped:
+        logger.info(
+            "dropped CYCLONEDDS_HOME (%s): bridge already in-process, "
+            "keeping a single CycloneDDS instance",
+            dropped,
+        )
+    return bool(dropped)
+
 
 def build_dds_reader(bsi_cfg: dict[str, Any], clock: Callable[[], float]) -> DdsIntentSource:
     """Construct the real bsi_dds reader (lazy cyclonedds import — dds-probe env)."""
+    sanitize_bridge_coexistence_env()
     from bsi_dds import DiscreteCommandSubscriber
 
     reader = DiscreteCommandSubscriber(

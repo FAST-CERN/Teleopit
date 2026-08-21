@@ -1,10 +1,13 @@
 """merged_bsi factory assembly (cyclonedds-free via injected reader_factory)."""
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
-from teleopit.commands.bsi_factory import build_merged_bsi_provider
+from teleopit.commands.bsi_factory import build_merged_bsi_provider, sanitize_bridge_coexistence_env
 from teleopit.commands.bsi_twist import INTENT_FORWARD
 
 
@@ -83,3 +86,34 @@ def test_build_merged_bsi_passes_bsi_params():
         merged.get_cmd()
         clock.advance(0.02)
     assert merged.get_cmd()[0] == pytest.approx(0.3, abs=0.01)
+
+
+# ── Orin dual-DDS coexistence env guard (bsi-realhw 06-5 field finding) ──────
+# The Orin bashrc exports CYCLONEDDS_HOME at a source-build install;
+# cyclonedds-python then loads THAT libddsc as a second, independent
+# CycloneDDS instance beside g1_bridge_sdk's bundled one — two runtimes in
+# one process corrupt handles (Topic init -> DDS_RETCODE_BAD_PARAMETER).
+
+
+def test_sanitize_drops_cyclonedds_home_when_bridge_loaded(monkeypatch) -> None:
+    monkeypatch.setenv("CYCLONEDDS_HOME", "/home/unitree/cyclonedds_ws/install/cyclonedds")
+    monkeypatch.setitem(sys.modules, "g1_bridge_sdk", SimpleNamespace())
+    assert sanitize_bridge_coexistence_env() is True
+    import os
+
+    assert "CYCLONEDDS_HOME" not in os.environ
+
+
+def test_sanitize_keeps_env_without_bridge(monkeypatch) -> None:
+    monkeypatch.setenv("CYCLONEDDS_HOME", "/somewhere/cyclonedds")
+    monkeypatch.delitem(sys.modules, "g1_bridge_sdk", raising=False)
+    assert sanitize_bridge_coexistence_env() is False
+    import os
+
+    assert os.environ["CYCLONEDDS_HOME"] == "/somewhere/cyclonedds"
+
+
+def test_sanitize_noop_without_env(monkeypatch) -> None:
+    monkeypatch.delenv("CYCLONEDDS_HOME", raising=False)
+    monkeypatch.setitem(sys.modules, "g1_bridge_sdk", SimpleNamespace())
+    assert sanitize_bridge_coexistence_env() is False
