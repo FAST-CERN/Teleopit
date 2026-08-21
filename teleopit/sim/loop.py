@@ -97,6 +97,8 @@ class SimulationLoop:
         self._velocity_controller: object | None = None
         self._velocity_obs_builder: object | None = None
         self._velocity_step_controller: object | None = None
+        self._velocity_estop: object | None = None
+        self._velocity_cmd_provider: object | None = None
         # Shared keyboard reader (KeyboardTee) when the keyboard twist
         # fallback is active; None => SimLoopSession builds its own reader.
         self._velocity_keyboard_reader: object | None = None
@@ -113,6 +115,7 @@ class SimulationLoop:
         tilt_threshold_rad: float,
         pose_b: Float64Array,
         keyboard_reader: object | None = None,
+        estop: object | None = None,
     ) -> object:
         """Build the twist-policy runner + shared step controller (task #6).
 
@@ -151,10 +154,13 @@ class SimulationLoop:
             transition_duration_s=transition_duration_s,
             joint_vel_limit=joint_vel_limit,
             tilt_threshold_rad=tilt_threshold_rad,
+            estop=estop,
         )
         self._velocity_controller = velocity_controller
         self._velocity_obs_builder = velocity_obs_builder
         self._velocity_step_controller = step_controller
+        self._velocity_estop = estop
+        self._velocity_cmd_provider = cmd_provider
         if keyboard_reader is not None:
             self._velocity_keyboard_reader = keyboard_reader
         return step_controller

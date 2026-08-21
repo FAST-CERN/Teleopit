@@ -76,6 +76,7 @@ class TeleopPipeline:
         """
         from teleopit.commands import KeyboardTwistProvider, PicoJoystickProvider
         from teleopit.runtime.factory import build_velocity_policy_components
+        from teleopit.sim.estop import EstopController
 
         velocity_controller, velocity_obs_builder = build_velocity_policy_components(
             cfg, self._project_root
@@ -83,22 +84,16 @@ class TeleopPipeline:
         input_provider_kind = str(cfg_get(cfg_get(cfg, "input", {}), "provider", "bvh")).lower()
         command_cfg = cfg_get(cfg, "command", {}) or {}
         selected = str(cfg_get(command_cfg, "provider", _select_cmd_provider_kind(input_provider_kind)))
+        estop = EstopController()
+        keyboard_tee = None
         if selected == "pico_joystick":
-            joystick_cfg = cfg_get(command_cfg, "joystick", {}) or {}
-            controllers_cfg = cfg_get(cfg, "controllers", None)
-            velocity_cfg = cfg_get(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
-            cmd_limits = cfg_get(velocity_cfg, "cmd_limits", None)
-            # controllers.velocity.cmd_limits is the single source of the stick
-            # -> twist scaling (mirrors the policy's clamp); absent => provider
-            # defaults.
-            cmd_provider = PicoJoystickProvider(
-                self.input_provider,
-                deadzone=float(cfg_get(joystick_cfg, "deadzone", 0.15)),
-                max_age_s=float(cfg_get(joystick_cfg, "max_age_s", 0.5)),
-                cmd_limits=dict(cmd_limits) if cmd_limits is not None else None,
-                max_stick_scale=dict(cfg_get(joystick_cfg, "max_stick_scale", {}) or {}) or None,
-            )
-            keyboard_tee = None
+            cmd_provider = self._build_joystick_provider(command_cfg)
+        elif selected == "merged_bsi":
+            from teleopit.commands.bsi_factory import build_merged_bsi_provider
+
+            joystick = self._build_joystick_provider(command_cfg)
+            bsi_cfg = cfg_get(command_cfg, "bsi", {}) or {}
+            cmd_provider = build_merged_bsi_provider(joystick, bsi_cfg)
         else:
             from teleopit.commands import KeyboardTee
             from teleopit.runtime.terminal_keyboard import TerminalKeyboardReader
@@ -133,6 +128,24 @@ class TeleopPipeline:
             tilt_threshold_rad=float(cfg_get(safety_cfg, "tilt_threshold_rad", 1.0)),
             pose_b=np.asarray(velocity_obs_builder.default_dof_pos, dtype=np.float64),
             keyboard_reader=keyboard_tee,
+            estop=estop,
+        )
+
+    def _build_joystick_provider(self, command_cfg: Any) -> "PicoJoystickProvider":
+        from teleopit.commands import PicoJoystickProvider
+
+        joystick_cfg = cfg_get(command_cfg, "joystick", {}) or {}
+        controllers_cfg = cfg_get(self.cfg, "controllers", None)
+        velocity_cfg = cfg_get(controllers_cfg, "velocity", None) if controllers_cfg is not None else None
+        cmd_limits = cfg_get(velocity_cfg, "cmd_limits", None)
+        # controllers.velocity.cmd_limits is the single source of the stick
+        # -> twist scaling (mirrors the policy's clamp); absent => provider defaults.
+        return PicoJoystickProvider(
+            self.input_provider,
+            deadzone=float(cfg_get(joystick_cfg, "deadzone", 0.15)),
+            max_age_s=float(cfg_get(joystick_cfg, "max_age_s", 0.5)),
+            cmd_limits=dict(cmd_limits) if cmd_limits is not None else None,
+            max_stick_scale=dict(cfg_get(joystick_cfg, "max_stick_scale", {}) or {}) or None,
         )
 
     def run(self, num_steps: int) -> dict[str, float | int | str]:
