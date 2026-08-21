@@ -48,11 +48,11 @@ created: 2026-08-21
 
 - [仿真 14 行桌面 checklist 目视验收](tickets/01-sim-desktop-checklist.md) — user-reported 通过（目视 + 活信号复核），无 fix ticket；量化细节由 03 承接。
 - [BSI 真实解码器接入仿真（活信号联调）](tickets/02-live-decoder-sim-hookup.md) — user-reported 通过：解码器→domain 0，仿真零改动被活信号驱动；流率/拓扑量化留 03/06。
+- [真实 BSI 流采数量化与参数复校](tickets/03-bsi-stream-capture-retune.md) — user-reported 通过：真实流复核未报调整，参数按现值沿用；仿真收口门全关，Phase B（04）解锁。
 
 ## Not yet specified
 
 - 04 设计定稿后浮出的实现层决策（obs builder 真机输入差异、pd_hz/policy_hz 不变量、动作标定）——届时毕业为新票。
-- 03 采数若显示真实流与 mock 假设差异大（误分类率高到防抖 3/2 失效等）→「参数重设计」而非微调的新决策。
 - L2 慢速门的具体降速幅值与 L3 场地布置（并入 07 规格时定）。
 - 真机联调暴露的整定票（同上张图「特性回填」预案）。
 
