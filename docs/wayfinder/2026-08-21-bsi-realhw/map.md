@@ -50,6 +50,7 @@ created: 2026-08-21
 - [BSI 真实解码器接入仿真（活信号联调）](tickets/02-live-decoder-sim-hookup.md) — user-reported 通过：解码器→domain 0，仿真零改动被活信号驱动；流率/拓扑量化留 03/06。
 - [真实 BSI 流采数量化与参数复校](tickets/03-bsi-stream-capture-retune.md) — user-reported 通过：真实流复核未报调整，参数按现值沿用；仿真收口门全关，Phase B（04）解锁。
 - [真机 VELOCITY 模式接线设计](tickets/04-real-velocity-mode-design.md) — Sim2RealRuntime 内加 VELOCITY 模式；Pico TOGGLE_VELOCITY 键（仅 STANDING 进、锁存期拒入）；订阅器 + MergedTwistProvider 住 robot_control 进程（CONTROLLER_TOPIC 供摇杆半边）；速度 ONNX 策略与真机状态完全兼容直接复用（single_input_ok，无需 _multi_input 门）；新 pico4_sim2real_bsi.yaml + run_sim2real.py 入口。附带事实喂 05：joint_vel_limit mp 路径未执行、TOGGLE_ESTOP/MUTE 被丢弃（90% 现成急停缝）、L1+R1 遥控器 damping 即硬件级安全底。
+- [真机安全包络与分层急停落地](tickets/05-real-safety-envelope.md) — 两级定型：E 键照搬 sim 优雅急停（0.3s 渐0+锁存）；硬件底 = 看护人持 G1 遥控器 L1+R1 damping（已接线）。真机阈值 joint-vel 10.0 / tilt 30° 优雅 / 45° damping（mp VELOCITY 分支 50Hz 查）；**凡进过 DAMPING 锁 VELOCITY、E 唯一解锁**；恢复 SOP 扶正→START→E 解锁；root-height 真机不可用降指标。
 - [真机运行拓扑确认](tickets/06-real-network-topology.md) — 板载 Orin（仓库惯例 + eth0 机器人总线 + Orin cyclonedds 0.10.5 实测 OK）；三机两总线拓扑定稿；5 步上真机验证清单（解码器机对齐 0.10.x 防 XTypes hash 静默丢包 → doctor → 跨机 echo → Orin 起 mp 栈 → 同进程双 DDS 共存）；run_velocity_sim.py 硬编码键盘 provider 系设计（键盘验证入口），不开 fix ticket。
 
 ## Not yet specified
