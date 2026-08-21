@@ -3299,9 +3299,22 @@ class _ControllerSnapshotProxy:
         return self._snapshot
 
 
-def _hand_worker_active_for_mode(mode_packet: ModeStatePacket) -> bool:
-    del mode_packet
-    return True
+def _hand_worker_active_for_mode(mode_value: str, cfg: Any) -> bool:
+    """trigger 活跃门（grilling 2026-08-22）：配置缺席时保持旧行为恒活跃。"""
+    hands_cfg = cfg_get(cfg, "hands", {}) or {}
+    trigger_modes = cfg_get(hands_cfg, "trigger_modes", None)
+    if trigger_modes is None:
+        return True
+    return str(mode_value) in [str(m) for m in trigger_modes]
+
+
+def _hand_worker_open_on_mode(mode_value: str, cfg: Any) -> bool:
+    """进入即张开兜底（idle/damping）；velocity 是 hold 不在列。"""
+    hands_cfg = cfg_get(cfg, "hands", {}) or {}
+    open_modes = cfg_get(hands_cfg, "open_modes", None)
+    if open_modes is None:
+        return False
+    return str(mode_value) in [str(m) for m in open_modes]
 
 
 def _run_hand_worker(
@@ -3318,6 +3331,7 @@ def _run_hand_worker(
         command_sub = LatestSubscriber(endpoints.command_pub, COMMAND_TOPIC)
         hand_command_pub = ZmqPublisher(endpoints.hand_command_pub)
         active = False
+        last_mode_value: str | None = None
         hz = float(cfg_get(_mp_cfg(cfg), "hand_worker_hz", 120.0))
         sleep_s = 1.0 / max(hz, 1.0)
         hands_cfg = cfg_get(cfg, "hands", {}) or {}
@@ -3398,7 +3412,14 @@ def _run_hand_worker(
                     proxy.controller_snapshot = controller_packet.snapshot
                 mode_packet = mode_sub.recv_latest()
                 if isinstance(mode_packet, ModeStatePacket):
-                    active = _hand_worker_active_for_mode(mode_packet)
+                    mode_value = str(mode_packet.mode)
+                    active = _hand_worker_active_for_mode(mode_value, cfg)
+                    if mode_value != last_mode_value and _hand_worker_open_on_mode(mode_value, cfg):
+                        try:
+                            runtime.open_all(force=True, reason=f"mode:{mode_value}")
+                        except Exception:
+                            logger.exception("Hand worker mode-gated open failed")
+                    last_mode_value = mode_value
                 try:
                     now_s = time.monotonic()
                     commands = runtime.tick(

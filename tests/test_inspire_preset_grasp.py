@@ -141,3 +141,49 @@ def test_module_imports_without_cyclonedds() -> None:
     import subprocess, sys
     code = "import teleopit.sim2real.hands.inspire_ftp; import teleopit.sim2real.hands.worker"
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
+def test_active_mode_gate_membership() -> None:
+    from teleopit.sim2real.mp.runtime import _hand_worker_active_for_mode
+
+    class _Cfg(dict):
+        pass
+
+    cfg = _Cfg(hands={"trigger_modes": ["standing", "mocap", "arms"], "open_modes": ["idle", "damping"]})
+    assert _hand_worker_active_for_mode("standing", cfg) is True
+    assert _hand_worker_active_for_mode("mocap", cfg) is True
+    assert _hand_worker_active_for_mode("velocity", cfg) is False   # hold
+    assert _hand_worker_active_for_mode("damping", cfg) is False
+    legacy = _Cfg(hands={})
+    assert _hand_worker_active_for_mode("velocity", legacy) is True  # 缺席=旧行为恒活跃
+
+
+def test_open_modes_membership() -> None:
+    from teleopit.sim2real.mp.runtime import _hand_worker_open_on_mode
+
+    cfg = {"hands": {"open_modes": ["idle", "damping"]}}
+    assert _hand_worker_open_on_mode("damping", cfg) is True
+    assert _hand_worker_open_on_mode("velocity", cfg) is False       # hold 不是 open
+    assert _hand_worker_open_on_mode("damping", {"hands": {}}) is False  # 缺席不开
+
+
+def test_hand_runtime_open_all_delegates_to_device() -> None:
+    from teleopit.sim2real.hands.worker import HandRuntime
+
+    calls = []
+
+    class _Dev:
+        def connect(self): pass
+        def get_state(self, side): return ()
+        def send_pose(self, side, pose, *, force=False, reason=""): pass
+        def open_all(self, *, force=False, reason=""): calls.append((force, reason))
+        def close(self): pass
+
+    class _Map:
+        def start(self): pass
+        def map(self, **kwargs): return ()
+        def close(self): pass
+
+    runtime = HandRuntime(_Dev(), _Map())
+    runtime.open_all(force=True, reason="mode:damping")
+    assert calls == [(True, "mode:damping")]

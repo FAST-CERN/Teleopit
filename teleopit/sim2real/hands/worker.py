@@ -73,6 +73,11 @@ class HandRuntime:
                 return ()
             return self._open_pose_commands("failure")
 
+    def open_all(self, *, force: bool = True, reason: str = "") -> tuple[HandPoseCommand, ...]:
+        """Safety open (mode gate); delegates straight to the device."""
+        self._device.open_all(force=force, reason=reason or "open_all")
+        return self._open_pose_commands(reason or "open_all")
+
     def close(self) -> tuple[HandPoseCommand, ...]:
         try:
             self._mapper.close()
@@ -106,6 +111,10 @@ class DisabledHandRuntime:
         now_s: float | None = None,
     ) -> tuple[HandPoseCommand, ...]:
         del controller_snapshot, hand_snapshot, active, now_s
+        return ()
+
+    def open_all(self, *, force: bool = True, reason: str = "") -> tuple[HandPoseCommand, ...]:
+        del force, reason
         return ()
 
     def close(self) -> tuple[HandPoseCommand, ...]:

@@ -1406,14 +1406,14 @@ def test_hand_worker_stays_active_in_all_modes(mode: str, mocap_active: bool, mo
         seq=1,
     )
 
-    assert _hand_worker_active_for_mode(packet) is True
+    assert _hand_worker_active_for_mode(packet.mode, {"hands": {}}) is True
 
 
 def test_hand_worker_active_state_only_updates_from_mode_packets() -> None:
     active = False
     mode_packet = None
     if isinstance(mode_packet, ModeStatePacket):
-        active = _hand_worker_active_for_mode(mode_packet)
+        active = _hand_worker_active_for_mode(mode_packet.mode, {"hands": {}})
     assert active is False
 
     mode_packet = ModeStatePacket(
@@ -1424,12 +1424,12 @@ def test_hand_worker_active_state_only_updates_from_mode_packets() -> None:
         seq=1,
     )
     if isinstance(mode_packet, ModeStatePacket):
-        active = _hand_worker_active_for_mode(mode_packet)
+        active = _hand_worker_active_for_mode(mode_packet.mode, {"hands": {}})
     assert active is True
 
     mode_packet = None
     if isinstance(mode_packet, ModeStatePacket):
-        active = _hand_worker_active_for_mode(mode_packet)
+        active = _hand_worker_active_for_mode(mode_packet.mode, {"hands": {}})
     assert active is True
 
 
