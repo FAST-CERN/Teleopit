@@ -146,3 +146,31 @@ def test_velocity_components_wrapper_builds_single_input_pair(
     assert obs_builder.total_obs_size == 98
     assert float(obs_builder.default_dof_pos[3]) == pytest.approx(0.3)
     assert float(obs_builder.default_dof_pos[3]) != pytest.approx(pose_a[3])
+
+
+# ── pico4_sim2real_bsi.yaml (bsi-realhw Phase B real VELOCITY mode) ────────
+
+
+def test_pico4_sim2real_bsi_config_loads() -> None:
+    from hydra import compose, initialize_config_dir
+
+    with initialize_config_dir(config_dir=str(_CONFIG_DIR), version_base=None):
+        cfg = compose(config_name="pico4_sim2real_bsi")
+    assert str(cfg.command.provider) == "merged_bsi"
+    assert str(cfg.input.velocity_button) == "X"
+    assert str(cfg.input.estop_button) == "left_grip"
+    assert float(cfg.safety.joint_vel_limit) == 10.0
+    assert float(cfg.safety.tilt_graceful_rad) == 0.524
+    assert float(cfg.safety.tilt_damping_rad) == 0.785
+    assert bool(cfg.mocap_entry_enabled) is False
+    assert cfg.controllers.velocity.policy_path is not None
+    assert float(cfg.real_robot.kp_real[0]) == 40.2  # 继承自 pico4_sim2real 基线
+
+
+def test_pico4_sim2real_bsi_l2_config_restricts_forward() -> None:
+    from hydra import compose, initialize_config_dir
+
+    with initialize_config_dir(config_dir=str(_CONFIG_DIR), version_base=None):
+        cfg = compose(config_name="pico4_sim2real_bsi_l2")
+    assert float(cfg.command.restrict.forward_only.max_lin_x) == 0.3
+    assert float(cfg.command.bsi.speeds.forward) == 0.3

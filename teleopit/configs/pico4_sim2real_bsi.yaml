@@ -1,0 +1,44 @@
+# BSI real-hardware VELOCITY mode (wayfinder bsi-realhw 04/05/07).
+# Launch (dds-probe env on the robot-control machine, e.g. onboard Orin):
+#   python scripts/run/run_sim2real.py --config-name pico4_sim2real_bsi
+# Optional bench publisher (another terminal, dds-probe env):
+#   python -m bsi_dds.cli mock --script "idle:3,forward:5,left:3,idle:3"
+# Keys: Pico X=enter/exit VELOCITY, left grip=estop, Y=mute;
+#       G1 remote (caretaker) L1+R1=damping, START=recover, Y=mocap (gated OFF here).
+defaults:
+  - pico4_sim2real
+  - controller@controllers.velocity: velocity
+  - _self_
+
+viewers: "none"
+
+input:
+  velocity_button: X          # STANDING -> VELOCITY -> STANDING (operator)
+  estop_button: left_grip     # analog threshold estop (operator, thumb stays on stick)
+  estop_grip_threshold: 0.6
+  mute_button: Y              # BSI mute (source control)
+
+# bsi-realhw-07: caretaker holds the G1 remote; Y must not hijack a BSI walk.
+mocap_entry_enabled: false
+
+safety:
+  joint_vel_limit: 10.0       # bsi-realhw-05 scalar; per-joint array before L3
+  tilt_graceful_rad: 0.524    # 30 deg -> graceful 0.3s ramp back to STANDING
+  tilt_damping_rad: 0.785     # 45 deg -> immediate damping
+
+velocity_cmd_log:
+  path: data/velocity_cmd.jsonl   # 07 timing-metrics source; null to disable
+
+command:
+  provider: merged_bsi
+  joystick:
+    deadzone: 0.15
+    max_age_s: 0.5
+    max_stick_scale: {lin_vel_x: 0.5}   # 1.0 m/s cap (Phase A envelope)
+  bsi:
+    domain_id: 0
+    silence_timeout_s: 1.0
+    debounce_packets: 3
+    idle_debounce_packets: 2
+    alpha: 0.3
+    speeds: {forward: 0.6, turn: 0.6}

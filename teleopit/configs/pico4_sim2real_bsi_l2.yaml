@@ -1,0 +1,15 @@
+# L2 caretaker slow gate (bsi-realhw-07): hoist on, all channels forward-only
+# <=0.3 m/s, lateral/turn forced zero (BSI left/right intents suppressed).
+defaults:
+  - pico4_sim2real_bsi
+  - _self_
+
+velocity_cmd_log:
+  path: data/velocity_cmd_l2.jsonl
+
+command:
+  restrict:
+    forward_only:
+      max_lin_x: 0.3
+  bsi:
+    speeds: {forward: 0.3, turn: 0.3}
