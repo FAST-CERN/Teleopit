@@ -169,7 +169,11 @@ def test_pico4_sim2real_bsi_config_loads() -> None:
     assert float(cfg.real_robot.kp_real[0]) == 40.2  # 继承自 pico4_sim2real 基线
     assert float(cfg.command.joystick.deadzone) == 0.15
     assert float(cfg.command.joystick.max_age_s) == 0.5
-    assert float(cfg.command.joystick.max_stick_scale.lin_vel_x) == 0.5
+    # L3 field finding 2026-08-22: unified with the BSI envelope — forward
+    # 0.3*2.0=0.6 m/s; ang_z/lin_y now explicitly capped (were unscaled).
+    assert float(cfg.command.joystick.max_stick_scale.lin_vel_x) == 0.3
+    assert float(cfg.command.joystick.max_stick_scale.lin_vel_y) == 0.4
+    assert float(cfg.command.joystick.max_stick_scale.ang_vel_z) == 0.4
     assert int(cfg.command.bsi.domain_id) == 0
     assert float(cfg.command.bsi.silence_timeout_s) == 1.0
     assert int(cfg.command.bsi.debounce_packets) == 3
