@@ -16,6 +16,7 @@ import numpy as np
 
 from teleopit.interfaces import RobotState
 from teleopit.sim.velocity_session import VelocityMode, VelocitySimSession
+from teleopit.sim.estop import EstopState
 
 POSE_B = np.array(
     [
@@ -647,3 +648,52 @@ class TestPerturbationKey:
         session._perturb_steps_remaining = 3
         session._apply_perturbation()  # stub has no .data — silently consumed
         assert session._perturb_steps_remaining == 3  # unchanged: no MuJoCo slot
+
+
+class _MuteableCmd:
+    def __init__(self, vec):
+        self._vec = np.asarray(vec, dtype=np.float32)
+        self.mute_calls = 0
+        self._muted = False
+
+    def get_cmd(self):
+        return self._vec.copy()
+
+    def reset(self): ...
+
+    def close(self): ...
+
+    def toggle_mute(self):
+        self.mute_calls += 1
+        self._muted = not self._muted
+        return self._muted
+
+    @property
+    def muted(self):
+        return self._muted
+
+
+def test_estop_key_engages_estop_and_mute_key_delegates():
+    robot, mimic_runner, vel_runner = _components()
+    cmd = _MuteableCmd([0.6, 0, 0, 0, 0, 0])
+    console = _RecordingConsole()
+    # Build the session directly (not via _session) so command_provider is the
+    # muteable fake; _session wraps cmd into _StubCmd which has no toggle_mute.
+    session = VelocitySimSession(
+        robot=robot,
+        mimic_runner=mimic_runner,
+        velocity_runner=vel_runner,
+        command_provider=cmd,
+        cfg=_cfg(),
+        console=console,
+    )
+    session.mode = VelocityMode.VELOCITY  # bypass transition; test key handling only
+
+    session._keyboard = _ScriptedKeyboard([["e"]])
+    session._handle_keyboard()
+    assert session.estop.state == EstopState.RAMPING
+
+    session._keyboard = _ScriptedKeyboard([["c"]])
+    session._handle_keyboard()
+    assert cmd.mute_calls == 1
+    assert cmd.muted is True
