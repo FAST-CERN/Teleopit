@@ -48,6 +48,7 @@ created: 2026-08-21
 - [四态指令 → cmd_vel 目标映射与平滑/防抖策略](tickets/02-command-to-twist-mapping.md) — 前进 0.6 m/s、左右转原地 ±0.6 rad/s（互斥，转弯不带 lin_x）；指数平滑 alpha 0.3 独立参数；防抖 3 包切换/IDLE 2 包不对称；静默 1s 与协议同源（provider 判包年龄）。
 - [急停设计：键位 + 渐0→STANDING 语义 + keymap 影响](tickets/03-estop-key-and-semantics.md) — 会话级全模式；0.3s 渐0→既有 X 退出缓动→STANDING；键盘 E + 右手 menuButton 同键 toggle；锁存抑制全部指令源；控制台+日志反馈。
 - [pico4 仿真接线架构：BSI 与摇杆并联的融合层选择](tickets/04-sim-integration-architecture.md) — 方案 A `MergedTwistProvider`（session 零改动）；整包互斥摇杆优先；无额外切换 ramp；`command.provider: merged_bsi` + `command.bsi.*`；DDS 订阅 provider 内自持；急停抑制在会话层；bvh 通路接口开放先不接。
+- [BSI 模式 keymap 重排：Pico 摇杆/键盘键位分配与冲突排查](tickets/05-keymap-redesign.md) — 键盘 E 急停 + C 哑音（左手区应急动线）；手柄右手 menuButton 急停 + 左手 Y 哑音（右手安全/左手源控制，左手 X 留空避混淆）；哑音 provider 层 toggle 不断订阅；H 帮助+key_feedback 反馈。
 
 ## Not yet specified
 
