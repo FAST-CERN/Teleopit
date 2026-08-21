@@ -47,6 +47,7 @@ created: 2026-08-21
 - [BSI_DDSInterface 仓库骨架 + submodule](tickets/06-bsi-ddsinterface-repo-skeleton.md) — `github.com/FAST-CERN/BSI_DDSInterface`（private）挂 `third_party/` submodule @ ae9b26d；包 `bsi_dds`（cyclonedds 0.10.2，绑定手写落库=idlc v0.11 等价，Windows idlc py 后端不可靠）；mock/echo/doctor CLI；19/19 测试+本机回环 9.3Hz/0 gaps；submodule 工作流文档进 repo-guide（修正：submodule 非本仓首例）。
 - [四态指令 → cmd_vel 目标映射与平滑/防抖策略](tickets/02-command-to-twist-mapping.md) — 前进 0.6 m/s、左右转原地 ±0.6 rad/s（互斥，转弯不带 lin_x）；指数平滑 alpha 0.3 独立参数；防抖 3 包切换/IDLE 2 包不对称；静默 1s 与协议同源（provider 判包年龄）。
 - [急停设计：键位 + 渐0→STANDING 语义 + keymap 影响](tickets/03-estop-key-and-semantics.md) — 会话级全模式；0.3s 渐0→既有 X 退出缓动→STANDING；键盘 E + 右手 menuButton 同键 toggle；锁存抑制全部指令源；控制台+日志反馈。
+- [pico4 仿真接线架构：BSI 与摇杆并联的融合层选择](tickets/04-sim-integration-architecture.md) — 方案 A `MergedTwistProvider`（session 零改动）；整包互斥摇杆优先；无额外切换 ramp；`command.provider: merged_bsi` + `command.bsi.*`；DDS 订阅 provider 内自持；急停抑制在会话层；bvh 通路接口开放先不接。
 
 ## Not yet specified
 
