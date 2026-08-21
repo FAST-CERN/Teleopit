@@ -130,7 +130,7 @@ class Sim2RealSafetyManager:
 def velocity_safety_verdict(
     state: Any,
     *,
-    joint_vel_limit: float,
+    joint_vel_limit: "float | list[float] | Any",
     tilt_graceful_rad: float,
     tilt_damping_rad: float,
 ) -> str | None:
@@ -140,15 +140,33 @@ def velocity_safety_verdict(
     (recoverable tilt: graceful 0.3s-ramp exit to STANDING), or None.
     Checked once per policy step, VELOCITY mode only — same discipline as the
     sim's VelocityStepController.check_safety, with the real dual tilt lines.
+
+    ``joint_vel_limit`` is a scalar OR a per-joint array (length must match
+    ``state.qvel``; bsi-realhw-05 per-joint deliverable). All comparisons are
+    strict ``>``. Log severity: damping-class breaches log ERROR, the 30-45°
+    graceful band logs WARNING so ERROR stays reserved for hard stops.
     """
     import numpy as np
 
     from teleopit.controllers.twist_observation import _quat_rotate_inv_np
 
-    max_vel = float(np.max(np.abs(np.asarray(state.qvel, dtype=np.float64))))
-    if max_vel > float(joint_vel_limit):
+    qvel = np.abs(np.asarray(state.qvel, dtype=np.float64))
+    limits = np.asarray(joint_vel_limit, dtype=np.float64).reshape(-1)
+    if limits.size == 1:
+        over = qvel > limits[0]
+    else:
+        if limits.size != qvel.size:
+            raise ValueError(
+                f"joint_vel_limit has {limits.size} entries but state.qvel has {qvel.size}"
+            )
+        over = qvel > limits
+    if bool(np.any(over)):
+        idx = int(np.argmax(np.where(over, qvel - np.minimum(limits, qvel), -1.0)))
+        max_vel = float(qvel[idx])
+        joint_cap = float(limits[0]) if limits.size == 1 else float(limits[idx])
         logger.error(
-            "SAFETY: joint velocity %.2f rad/s exceeds %.2f -> DAMPING", max_vel, joint_vel_limit
+            "SAFETY: joint %d velocity %.2f rad/s exceeds %.2f -> DAMPING",
+            idx, max_vel, joint_cap,
         )
         return "damping"
     quat = np.asarray(state.quat, dtype=np.float32)
@@ -158,6 +176,6 @@ def velocity_safety_verdict(
         logger.error("SAFETY: tilt %.2f rad over %.2f -> DAMPING", tilt, tilt_damping_rad)
         return "damping"
     if tilt > float(tilt_graceful_rad):
-        logger.error("SAFETY: tilt %.2f rad over %.2f -> STANDING", tilt, tilt_graceful_rad)
+        logger.warning("SAFETY: tilt %.2f rad over %.2f -> STANDING", tilt, tilt_graceful_rad)
         return "standing"
     return None

@@ -1313,8 +1313,10 @@ class _RobotControlWorker:
         self._velocity_last_action = np.zeros(self.num_actions, dtype=np.float32)
         self._mocap_entry_enabled = bool(cfg_get(cfg, "mocap_entry_enabled", True))
         velocity_safety_cfg = cfg_get(cfg, "safety", {}) or {}
-        self._vel_joint_vel_limit = float(
-            cfg_get(velocity_safety_cfg, "joint_vel_limit", cfg_get(cfg, "joint_vel_limit", 10.0))
+        self._vel_joint_vel_limit = cfg_get(
+            velocity_safety_cfg,
+            "joint_vel_limits",  # bsi-realhw-05 per-joint array; falls back to scalar
+            cfg_get(velocity_safety_cfg, "joint_vel_limit", cfg_get(cfg, "joint_vel_limit", 10.0)),
         )
         self._vel_tilt_graceful_rad = float(cfg_get(velocity_safety_cfg, "tilt_graceful_rad", 0.524))
         self._vel_tilt_damping_rad = float(cfg_get(velocity_safety_cfg, "tilt_damping_rad", 0.785))

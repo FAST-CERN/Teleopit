@@ -22,7 +22,10 @@ input:
 mocap_entry_enabled: false
 
 safety:
-  joint_vel_limit: 10.0       # bsi-realhw-05 scalar; per-joint array before L3
+  joint_vel_limit: 10.0       # bsi-realhw-05 scalar (L2/L3 proven envelope)
+  # Per-joint array (bsi-realhw-05 deliverable, mechanism live; values to be
+  # backfilled from the G1 spec or robot telemetry — 29 entries, strict >):
+  # joint_vel_limits: [10.0, 10.0, ... x29]
   tilt_graceful_rad: 0.524    # 30 deg -> graceful 0.3s ramp back to STANDING
   tilt_damping_rad: 0.785     # 45 deg -> immediate damping
 
