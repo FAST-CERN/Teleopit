@@ -116,8 +116,8 @@ class _RealInspirePublisher:
         prefix = str(cfg.get("ctrl_topic_prefix", "rt/inspire_hand/ctrl"))
         self._participant = DomainParticipant(domain)
         self._writers = {
-            "left": DataWriter(Topic(self._participant, f"{prefix}/l", InspireHandCtrl)),
-            "right": DataWriter(Topic(self._participant, f"{prefix}/r", InspireHandCtrl)),
+            "left": DataWriter(self._participant, Topic(self._participant, f"{prefix}/l", InspireHandCtrl)),
+            "right": DataWriter(self._participant, Topic(self._participant, f"{prefix}/r", InspireHandCtrl)),
         }
 
     def publish(self, side: str, message: InspireCtrlMessage) -> None:
