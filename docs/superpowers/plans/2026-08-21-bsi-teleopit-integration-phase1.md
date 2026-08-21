@@ -88,15 +88,16 @@ def test_forward_debounce_three_packets_then_ramps_to_0_6():
         ScriptedIntentSource([(INTENT_FORWARD, 10.0)], clock=clock),
         clock=clock,
     )
-    # Two packets: not yet switched (still IDLE target).
+    # Two packets (t=0.0 and t=0.1): debounce not satisfied -> still IDLE target.
     p.get_cmd(); clock.advance(0.1)
     p.get_cmd(); clock.advance(0.1)
-    before = p.get_cmd().copy()
-    assert before[0] < 0.01  # debounce not satisfied -> target still zero
-    # Third packet: intent switches, smoothing begins.
-    clock.advance(0.1)
+    # t=0.2 is still between packets? No: 0.1s since last emit -> packet 3
+    # arrives ON this call and satisfies debounce, so the ramp starts HERE.
     third = p.get_cmd()
-    assert 0.0 < third[0] < 0.6  # ramping toward 0.6
+    assert 0.0 < third[0] < 0.6  # packet 3 switched intent; ramping toward 0.6
+    clock.advance(0.1)
+    fourth = p.get_cmd()
+    assert fourth[0] > third[0]  # ramp continues monotonically toward 0.6
 
 
 def test_forward_reaches_half_target_within_1s_gate():
@@ -165,18 +166,21 @@ def test_single_misclassified_packet_is_filtered():
 
 def test_idle_enters_after_two_packets():
     clock = ManualClock()
-    script = [(INTENT_FORWARD, 2.0), (INTENT_IDLE, 20.0)]
+    script = [(INTENT_FORWARD, 4.0), (INTENT_IDLE, 20.0)]
     p = BsiTwistProvider(ScriptedIntentSource(script, clock=clock), clock=clock)
-    for _ in range(200):  # settle into FORWARD at 0.6
+    for _ in range(39):  # 3.9s at 0.1s cadence: settle into FORWARD at 0.6
         p.get_cmd()
-        clock.advance(0.02)
+        clock.advance(0.1)
     assert p.get_cmd()[0] == pytest.approx(0.6, abs=0.01)
-    # IDLE: 2 packets to enter (asymmetric, stop-first).
-    p.get_cmd(); clock.advance(0.1)  # packet 1
-    mid = p.get_cmd().copy()
-    p.get_cmd(); clock.advance(0.1)  # packet 2
+    # IDLE: 2 packets to enter (asymmetric, stop-first). Packets land on the
+    # 0.1s cadence: t=4.0 is idle pkt 1, t=4.1 is idle pkt 2 -> switch.
+    clock.advance(0.1)
+    p.get_cmd(); clock.advance(0.1)  # t=4.0: idle pkt 1
+    p.get_cmd()                       # t=4.1: idle pkt 2 -> intent switches
+    mid = p.get_cmd().copy()          # first decaying output
+    clock.advance(0.1)
     after = p.get_cmd()
-    assert after[0] < mid[0]  # decaying
+    assert after[0] < mid[0] < 0.6  # decaying
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -255,16 +259,21 @@ class ScriptedIntentSource:
 
     def poll(self) -> DiscreteIntent | None:
         now = self._clock()
-        if self._last_emit_t is not None and now - self._last_emit_t < self._period:
+        # Epsilon-tolerant rate limit: 0.1s float accumulation (0.1*3 ==
+        # 0.30000000000000004) must not eat an emit slot.
+        if (
+            self._last_emit_t is not None
+            and now - self._last_emit_t < self._period - 1e-9
+        ):
             return None
         for command, start, end in self._segments:
             if start <= now < end:
                 self._last_emit_t = now
-                return DiscreteIntent(command=command, rx_time_s=start)
+                return DiscreteIntent(command=command, rx_time_s=now)
         # Past the script end: hold the last segment forever (tests rely on it).
         command, start, _end = self._segments[-1]
         self._last_emit_t = now
-        return DiscreteIntent(command=command, rx_time_s=start)
+        return DiscreteIntent(command=command, rx_time_s=now)
 
     def close(self) -> None:
         return None
@@ -410,20 +419,41 @@ git commit -m "feat(bsi): BsiTwistProvider — debounce/map/smooth pipeline over
 
 ```python
 def test_silence_falls_to_idle_within_1s_and_zero_by_1_5s():
+    # A source that goes permanently quiet after its script ends (Task 2's
+    # end-of-script semantics): link loss -> provider falls to IDLE.
+    class _QuietAfter:
+        """Emits FORWARD at 10Hz for 2s, then never again (link lost)."""
+
+        def __init__(self, clock):
+            self._clock = clock
+            self._last = None
+
+        def poll(self):
+            now = self._clock()
+            if now >= 2.0:
+                return None
+            if self._last is not None and now - self._last < 0.1:
+                return None
+            self._last = now
+            from teleopit.commands.bsi_twist import DiscreteIntent
+            return DiscreteIntent(command=INTENT_FORWARD, rx_time_s=now)
+
+        def close(self):
+            return None
+
     clock = ManualClock()
-    p = BsiTwistProvider(
-        ScriptedIntentSource([(INTENT_FORWARD, 2.0)], clock=clock),
-        clock=clock,
-    )
-    for _ in range(200):  # settle into FORWARD at 0.6
+    p = BsiTwistProvider(_QuietAfter(clock), clock=clock)
+    for _ in range(100):  # 2.0s: settle into FORWARD at 0.6
         p.get_cmd()
         clock.advance(0.02)
     assert p.get_cmd()[0] == pytest.approx(0.6, abs=0.01)
-    # Script holds FORWARD past its end (source holds last segment), so silence
-    # must be forced: swap in a source that stops emitting.
-    clock.advance(2.5)  # past the 2.0s segment AND past 1s silence from its end
+    clock.advance(1.1)  # past the 1.0s silence timeout since the last packet
     cmd = p.get_cmd()
-    assert cmd[0] == pytest.approx(0.0, abs=1e-6)  # silence -> IDLE -> decayed
+    assert cmd[0] < 0.6  # intent already fell to IDLE on this first call
+    for _ in range(60):  # 1.2s decay pump: smoothed output reaches ~0
+        cmd = p.get_cmd()
+        clock.advance(0.02)
+    assert cmd[0] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_mute_forces_idle_next_cycle_and_unmute_restores():
