@@ -2,7 +2,7 @@
 id: zed-fpv-map
 title: "ZED Mini 立体 FPV：G1 → Pico 4 pico-bridge APK"
 labels: [wayfinder:map]
-status: open
+status: closed
 created: 2026-08-20
 ---
 
@@ -45,6 +45,8 @@ created: 2026-08-20
 - [Jetson 侧基线验证](tickets/04-jetson-baseline.md) — **真机验证通过**：zed_bridge → teleimager WebRTC → Pico 浏览器，720P@30fps 正常，主观无延迟感（未做逐帧精确测量）。结论：网络+编码段余量充足，端到端若超标瓶颈在 Unity 侧。
 - [Unity 沉浸立体渲染设计与原型](tickets/05-unity-stereo-immersive-design.md) — **Pico 4 真机验证通过**（立体深度 + per-eye 正确）。方案：单纹理 StereoSbsQuad shader（unity_StereoEyeIndex 半幅采样）+ 锁头 quad（2m/1.66m/16:9）+ 同场景状态切换 + sbs-test-pattern 视差测试源。四个真机坑已修：shader 剥离→Resources/、Pico 拒 1280x480→2560x720、addTrack 被 answer VP8 零输出→setCodecPreferences(H264)、进沉浸隐藏面板触发 StopPreview 杀流→跳过。提交 324ba50。
 - [构建环境就绪](tickets/01-build-environment.md) — **已完成并全链验证**（fork = FAST-CERN/pico-bridge `feat/stereo-fpv`；Unity 2022.3.62f3 + Android 模块装 F 盘；CLI 构建入口一次通过；APK 已装 Pico 4，连接 + 彩条 + 追踪验证 OK）。关键坑：头显 USB 须选"传输文件"模式才枚举 ADB；wheel 0.2.1 的 PicoBridge() 必须显式 .start() 否则静默无监听；Unity Personal license 8/31 到期需续。
+
+- [端到端立体链路打通与延迟调优](tickets/06-e2e-stereo-latency.md) — **2026-08-29 全链真机验收通过，map 终点达成**：首次 220ms < 250ms 可用线，调优后 **~120ms < 150ms 目标线**。新增 `WebRtcHttpSignalingClient`（HTTP POST /offer offerer，候选实测自动内嵌）+ 双源沉浸控制器（pico-bridge `353d70c`）。根因：aiortc 无 pacer 的帧突发 → 到达抖动 → jitter buffer 抬升（8M/4M/2M 剂量效应 150/112/78ms）；定稿 bitrate 2M + GOP 30。修 2 个握手期 NRE。稳定性/重连/主观深度全过。后续候选：发送端 pacer、NVENC 硬编、60fps、专用 AP。
 
 ## Not yet specified
 
