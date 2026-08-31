@@ -39,20 +39,25 @@ teleimager 的 WebRTC 发送端具备帧内 pacing（把每帧 ~17KB 的 RTP 背
 2. 验收 = 双线制（如上），达标即收图。
 3. 实现 = **teleimager 内置 monkey-patch 优先**（部署走已踩熟的 scp 通道，机器人零新增依赖）；fork aiortc 仅当研究证明 patch 不可行时启用（git bundle 走 scp 安装）。
 
+**范围补充**（2026-08-29，经对比研究后用户批准）：+ `tickets/04-remb-bitrate-adaptation-fix`（REMB 码控闭环修复，≈3 行，源自 `research/videoserver-ref-comparison.md` §3.2/§9）。不阻塞 02/03，但须先于 02/03 的复测合入——否则 8M 档下 pacer 与码控的贡献无法分离。
+
 **部署事实**（必读，跨会话记忆 `jetson-teleimager-deploy-topology`）：Jetson 双 checkout 双 env（活体 = `/home/unitree/teleimager` + `teleimager` env），机器人无代理；scp 前先 import 定位活体、改完双推、运行 env 冒烟。
 
 **Tracker 约定**（同 zed-fpv map）：Ticket = `tickets/NN-*.md`（frontmatter labels/status/assignee/blocked-by）；Frontier = open 且依赖全闭且未认领；Resolve = 正文追加 `## Resolution` + status: closed + 本 map Decisions 追加一行；研究产物放 `research/`。
 
 ## Decisions so far
 
-（无——待首张 ticket resolve）
+- 2026-08-29 t01 CLOSED：pacer 挂点定为**替换 `_run_rtp` 主循环**（~90-110 行，teleimager 内置 monkey-patch，照 `_encode_frame` patch 先例）；encoder 层不可行、transport 层否决（会连 NACK/RTCP 一起 pace）；NACK 重传天然旁路、不受影响；`relay.subscribe(buffered=True)` 无界队列是 pacer 的新增堆积风险 → 须绝对时间表 + 落后追赶；实机 aiortc 1.14.0（pin 精确版本 + 启动锚点断言）；fork 不触发。产出 `research/01-send-path.md`。
+- 2026-08-29 t04 验收 a PASS（teleimager `6e738ac`+`e1a0e56` 已双推）：REMB→target_bitrate→codec 闭环双向打通——接收端钉 REMB=3M 后服务端**同秒**重建 7.758M→3M、46s 稳持零丢包、恢复 8s 爬回 ~12M；重建审计行常驻 image_server 日志。新发现：x264 ABR 无 VBV，8M 目标实测 15-28Mbps 过冲（3-4×）——t03 复测须记实际 outbound 码率。b/c 待 Pico 会话。
+- 2026-08-29 **新缺陷实锤（阻塞 t04-c，真机两轮复现+干预验证）**：运动后延迟 ~5s 钉死，仅重连可清。根因 = `relay.subscribe(buffered=True)` **无界订阅队列常驻化**（t01 §4 风险兑现）：运动瞬态灌入 ~150 帧后输入=输出=30fps、永不排空；接收端 buffer 仅 93ms 无辜；REMB 对内部排队无感。修复方向 = 订阅队列丢旧保新（有界），与 pacer 正交且**独立成 ticket**；「丢帧策略」从 Not-yet-specified 升格为硬需求。证据在 t04 Progress。
+- 2026-08-31 t02 实现 + PC 单机验证完成（teleimager `441a998`，部署待硬件会话与 t05 同批）：pacer = 逐包均匀摊平 + **每帧预算护栏** `budget = 帧间隔 − 实测编码耗时(h264 patch 上报) − 3ms`，预算不足缩窗、为零退化不 pace——**fps 永不换平滑**；k 默认 1.5、`webrtc.pacer` 默认 off + `TELEIMAGER_PACER` env 覆盖；启动锚点断言 fail-fast。PC A/B 反证了护栏必要性（编码饱和下无护栏 10.4fps → 护栏 29.9fps），E 锚定护栏在 720p 下摊平真正张开（帧到达跨度 median 2→11ms、max 226→58ms）且 fps/goodput 持平；Windows 15.6ms 定时器量化是 PC 残余突发根因，Linux 平滑度待 t03 实机判定。
 
 ## Not yet specified
 
-- pacing 算法参数：摊平粒度（按包/按字节预算）、帧间隔内分布（均匀/前紧后松）、码率超帧预算时的丢帧策略（与 BGRArrayVideoStreamTrack 队列 maxsize=1 最新帧语义的互动）
-- 与重传的互动：NACK/RTX 包是否走同一 pacer、pacer 是否拖慢重传导致丢包恢复变慢（可能抵消部分收益）
-- aiortc 版本锁定：patch 依赖内部结构，机器人 env 是否 pin aiortc 版本（防升级碎裂）
-- PLI 关键帧请求路径在 pacing 下的时延（入会首帧等待变化）
+- pacing 算法参数：（t02 已答，2026-08-31——逐包均匀摊平 + 每帧预算护栏 `budget=帧间隔−实测编码−3ms`，缩窗/为零退化不 pace，不丢帧；k 默认 1.5；详见 t02 Progress）
+- 与重传的互动：（t01 已答，`research/01-send-path.md` §3——重传在 DTLS 泵任务上直达 transport、绕过主循环，pacer 管不住也不该管；pacer 的 sleep 窗口即重传调度窗口，零额外延迟）
+- aiortc 版本锁定：（t01 已答 §8——实机 1.14.0 与本机 1.15.0 发送路径五文件 md5 一致；pin 精确版本 + patch 启动时锚点断言 fail-fast；t02 已实现锚点断言并接入配置门控）
+- PLI 关键帧请求路径在 pacing 下的时延（入会首帧等待变化；t02 已给上界 ≤ 一个摊平 span ≈22ms，实测归 t03）
 
 ## Out of scope
 
