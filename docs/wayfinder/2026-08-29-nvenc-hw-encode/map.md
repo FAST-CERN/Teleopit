@@ -52,6 +52,7 @@ Jetson Orin NX 的 NVENC 硬编（GStreamer `nvv4l2h264enc` 子进程，方案 A
 
 ## Decisions so far
 
+- 2026-08-31 t02 CLOSED：原型五项全裁决——**E 真值 = 带载 p50 15.2ms（I420 传输）/ 21.3ms（BGRx）**（摊平窗口 ~4.5→~17ms，预算重开论点量化成立）；解码闭环合成 300/300 + 真实内容 179/179 + PNG 目检；**force-IDR = action signal**（`enc.emit`，非属性；NULL 态 emit 的 C printf 污染 stdout 是坑，协议须噪声隔离）；真实内容降档无欠冲（满熵 65% 为源特性）、升档 1s 收敛；崩溃重启 268ms 恢复 + SPS/PPS/IDR 续流对账成立。**03 关键输入：传输格式定 I420**（BGRx 不敌软编孤立值）、p95 计预算、协议噪声隔离、lockstep 一帧一 AU 实证。ZED USB2 口问题复发一次（重插修复）。详见 `research/02-prototype-subprocess.md`。
 - 2026-08-31 **前置闸门解除（跨图依赖 `aiortc-pacer-map/t03` 已 CLOSED）**：pacer 图真机验收 e2e 拉平 120/200/220→80/80/80ms（2/4/8M），t06 的 e2e 基线 = 80ms +5ms 容差。**移交三件套**：①残余 buffer 下限归因软编 E≈26ms（摊平窗口被挤到 ~4.5ms）→ 硬编后预算重开是本图核心论点，02/03 设计按此展开；②x264 ABR 无 VBV 过冲（8M 目标 3-4×）的 outbound 实测量化欠账归本图复测；③ZED USB2 口故障已修（重插 USB3 后 30fps 稳），t01 环境事件注记已更新。工作参数基线：pacer on/k=1.5/4M/gop30/HD720 SBS。
 - 2026-08-31 t01 CLOSED：停机窗口四项全裁决——①PLAYING 态运行时改 `bitrate` **可行**（升档 2s 收敛；满熵下降档欠冲 ~65%，02 用真实内容复验 + force-IDR 备选）→ REMB 映射走实时设值；②编码 A/B：硬编往返 p50 **10.7ms**（含 VIC 转换，IPC 未计）vs 软编 p50 **15.6+2.1ms**——第 1 验收线数据点已齐；③**BGR 24 位被 nvvidconv 拒，集成格式 = BGRx**；首帧 47ms（会话建立，崩溃恢复常数）；④NVENC 零占用，SPS = Constrained Baseline/L4.0 与 SDP 42e01f profile 族对齐。产出 `research/01-offline-verification.md`。⚠️ ZED 相机当前打不开（外部启动尝试失败 ×5）——真源票与 pacer 图硬件会话前排期先修。
 
