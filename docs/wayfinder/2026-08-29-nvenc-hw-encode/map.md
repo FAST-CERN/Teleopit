@@ -12,14 +12,14 @@ Jetson Orin NX 的 NVENC 硬编（GStreamer `nvv4l2h264enc` 子进程，方案 A
 
 1. **编码段 A/B**：硬编延迟（同法实测）≤ 软编基线（量级预期 ~8ms vs 10-25ms 级）
 2. **CPU**：编码占用下降可观测（先量软编基线）
-3. **e2e 不劣化**：≤ aiortc-pacer 图 ticket 03 关闭后的基线 +5ms
+3. **e2e 不劣化**：≤ **85ms**（pacer-t03 基线 80ms + 5ms 容差）
 4. **主观画质不降**：Pico 同码率对比；同步记实际 outbound 码率对照（x264 无 VBV 过冲 vs NVENC CBR 收敛）
 
-达标即收图；e2e 改善（若有）记为红利，不设线。
+达标即收图；e2e 改善与 buffer 下探（预算重开论点）均记红利、不设线（2026-08-31 决策）。
 
 ## Notes
 
-**领域**：ZED FPV 链路发送端编码段换引擎。aiortc-pacer 图（2026-08-29 open）边界决策 1 已将 NVENC 列为独立成图——本图即那张图。
+**领域**：ZED FPV 链路发送端编码段换引擎。aiortc-pacer 图（**2026-08-31 CLOSED**，5/5 票）边界决策 1 已将 NVENC 列为独立成图——本图即那张图。
 
 **前置研究**（本图的直接输入，开图前已完成）：`docs/wayfinder/2026-08-29-aiortc-pacer/research/jetson-orin-nvenc-capability.md`。要点：设备 = Orin NX 16GB / JetPack 5.1.1，NVENC 在位，2560×720@30 仅占 680 MP/s 吞吐的 8%；推荐路径 = 系统 python3 + PyGObject 子进程跑 `appsrc ! nvvidconv ! nvv4l2h264enc ! appsink`，teleimager 照 `jetson_software_encode_frame` 先例替换 `h264.H264Encoder._encode_frame`（~150-250 行，零新增包、零 aiortc 改动）；ffmpeg-nvmpi/PyAV 重编路线已被证据否决。
 
@@ -30,11 +30,12 @@ Jetson Orin NX 的 NVENC 硬编（GStreamer `nvv4l2h264enc` 子进程，方案 A
 3. 验收 = **四线制**（见 Destination）。
 4. 范围 = 只换编码器；H.265（需给 aiortc 写整套新 codec 类、Pico 侧不确定）与 60fps（动 ZED 采集面与 Pico 解码面）双双出图，将来各自独立成图。
 
-**背景数据**（aiortc-pacer 图，2026-08-29）：
+**背景数据**（pacer 图 CLOSED 2026-08-31 后的现状）：
 
-- e2e 剂量效应（软编）：2M→120ms / 4M→~200ms / 8M→~220ms（jitter buffer 主导）。
-- **x264 ABR 无 VBV，8M 目标实测 15-28Mbps 过冲（3-4×）**（t04 验收 a 发现）——NVENC 的 CBR + `vbv-size` 是对症药，四线验收第 4 线的码率对照即部分验证此点。
-- NVENC `bitrate` 属性 PLAYING 态可运行时设（NVIDIA 员工书面确认，gst-inspect 标注有误）→ 硬编路径下 REMB 闭环从「漂移重建」升级为「实时设值、不重启」——待 01 实机裁决。
+- **e2e 全档拉平：2M/4M/8M 均 ~80ms**（pacer 前软编：120/200/220ms）。工作参数基线：pacer on / k=1.5 / 4M / gop30 / HD720 SBS。
+- **残余 jitter-buffer 下限 ~30-48ms 归因软编 E≈26ms**：摊平窗口 W = 33.3ms − E − margin 被挤到 ~4.5ms。硬编后 E → ~11-13ms（t01 同进程往返 10.7ms + IPC），W 重开至 ~17-20ms → **buffer 下探 = 本图核心论点**（红利观测不设线）。
+- **x264 ABR 无 VBV，8M 目标实测 15-28Mbps 过冲（3-4×）**（pacer t04 发现）——NVENC 的 CBR + `vbv-size` 是对症药；outbound 实测量化欠账归本图 06 第 4 线复测。
+- NVENC `bitrate` PLAYING 态可运行时设——t01 已实机裁决可行（升档 2s 收敛；满熵降档欠冲 ~65% 待 02 真实内容复验 + force-IDR 备选）。
 
 **组件与位置**：
 

@@ -14,7 +14,7 @@ blocked-by: [01-offline-verification]
 - 系统 `/usr/bin/python3`（gi + Gst 1.16.3，实机已验证）起 `appsrc ! nvvidconv ! nvv4l2h264enc ! appsink` 子进程；
 - teleimager 侧写 `_encode_frame` 替换 wrapper（照 `jetson_software_encode_frame` 先例）：喂帧 / 收 Annex-B AU / 控制行；
 - fake source 2560×720@30 连续编码，本机端（aiortc 本地回环或 OpenCV 解码）解出可看画面闭环；
-- 控制行验证：改码率（若 01 裁决可行）、force-IDR（PLI 语义）生效；
-- 记录：单帧往返延迟、子进程崩溃后重启的实际行为（重启→IDR→续流的语义雏形）。
+- 控制行验证：改码率运行时设值（01 已裁决可行；**用真实内容复验降档欠冲**——满熵下 4M→2M 只收敛到 ~65%，备选 = 设值后补 force-IDR）、force-IDR（PLI 语义）生效；
+- 记录：**子进程全路径单帧往返延迟 = pacer 预算公式的硬编 E**（budget = 33.3ms − E − margin；t01 量的是同进程 10.7ms，此处补 IPC 后真值，03 用它重算 W）、子进程崩溃后重启的实际行为（重启→IDR→续流的语义雏形）。
 
 原型代码挂 `research/prototype/`；暴露的问题清单（缓冲堆积、格式转换代价、控制时序）回流 03 设计票。
