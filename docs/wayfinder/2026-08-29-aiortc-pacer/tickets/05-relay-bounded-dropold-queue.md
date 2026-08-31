@@ -2,7 +2,7 @@
 id: 05-relay-bounded-dropold-queue
 title: "relay 订阅队列有界化：运动瞬态后延迟钉死 ~5s 的根因修复"
 labels: [wayfinder:fix]
-status: open
+status: closed
 assignee: claude
 blocked-by: []
 ---
@@ -29,8 +29,10 @@ blocked-by: []
 - **TDD 红**（stash 见证，未打补丁）：`tests/test_relay_bounded_queue.py` 滞后量不变量——「消费瞬间的帧距生产端头部 ≤ maxlen+slack」未打补丁 MAXLAG=50（100 帧全序列积压），断言失败。
 - **绿**：打补丁 MAXLAG=3、服务 51/100 帧（49 帧被丢旧）、REMB 回归 4/4。
 - **环境债**：本机（Windows/teleopit env）pytest 跑 asyncio 用例会挂死（连 faulthandler 都冻结，杀僵尸无效，原因未明）——asyncio 侧红绿用 standalone 脚本（`/tmp/dbg_relay2.py` 逻辑已写进 ticket 语境）见证；pytest 文件保留正确断言，机器人 Linux 侧待验证。
-- **待办**：①双推 image_server.py + tests；②机器人 env 冒烟（standalone 断言脚本）；③硬件验收（票面第 3 条：运动复现场景 ≤5s 回 <200ms 无需重连）。
+- **待办**：①双推 image_server.py + tests ✅（2026-08-31，与 t02 同批，md5 一致）；②机器人 env 冒烟 ✅（2026-08-31：teleimager env 无 pytest → 新增 `tests/standalone_relay_check.py`（`053fc7b`）镜像 pytest 断言；滞后不变量 **MAXLAG=1**（served 3/100、丢旧 90 帧计数日志正常）、保序直通 1→10 全绿——「Linux 侧待验证」债清偿）；③硬件验收（票面第 3 条：运动复现场景 ≤5s 回 <200ms 无需重连）——**唯一剩余项**。
 
 ## Resolution
 
-（待填）
+**2026-08-31 真机验收 PASS，票闭。**
+
+票面第 3 条场景（剧烈晃动 ~5s 后骤停）：延迟秒级追回、**无需重连**、无 fps 长时间归零（rx 侧仅 16 丢包 + decodeFps 一次 1.6 即刻恢复 30）。服务器侧同步证据：本轮 log **零 overflow 计数行**——8M/pacer-on 下发送端全程跟得上，队列根本没满过；t05 的有界丢旧在真机是**未触发的安全网**（兜底在 PC standalone 见证 MAXLAG=1）。附带：18:03-04 外部拥塞段（PC 下载）avgJB 飙到 127-167ms 也没钉死，下载停止后 18:07 重连即恢复——旧「5s 钉死仅重连可清」的病象全消。

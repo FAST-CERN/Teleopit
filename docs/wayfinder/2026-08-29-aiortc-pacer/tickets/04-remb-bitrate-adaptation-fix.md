@@ -2,7 +2,7 @@
 id: 04-remb-bitrate-adaptation-fix
 title: "REMB 码率自适应修复：接回补丁断开的码控闭环"
 labels: [wayfinder:fix]
-status: open
+status: closed
 assignee: claude
 blocked-by: []
 ---
@@ -60,6 +60,4 @@ if self.codec and (
 
 ## Resolution
 
-（待 b/c：b=2M 回归不劣于 ~120ms；c=8M 复测码率回退 + packetsLost，与 t03 剂量曲线合并——均需 Pico 会话）
-
-（待填）
+**2026-08-31 票闭（a/b/c 全过）。** 修复 `6e738ac`+`e1a0e56`：REMB→target_bitrate→codec 漂移重建闭环恢复，审计行常驻。PC 确定性钉 3M 同秒重建 46s 稳持（a，2026-08-29）；b ✅ 借 t03 会话清偿——2M 回归远优于线（off <100ms / on ~80ms vs 线 120ms）；c ✅ 8M 真机 REMB 同秒重建链活跃（运动期 6.5→8→5.655→7.0M）、packetsLost 合计 16、旧 1.5% 丢包 NACK 风暴消失（inst buffer 30-44ms）。遗留观察项移交 NVENC 图：x264 ABR 无 VBV 的过冲 outbound 实测量化。

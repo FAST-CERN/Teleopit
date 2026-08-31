@@ -2,7 +2,7 @@
 id: aiortc-pacer-map
 title: "aiortc 发送端 pacing：解耦码率与 FPV 延迟"
 labels: [wayfinder:map]
-status: open
+status: closed
 created: 2026-08-29
 ---
 
@@ -47,6 +47,7 @@ teleimager 的 WebRTC 发送端具备帧内 pacing（把每帧 ~17KB 的 RTP 背
 
 ## Decisions so far
 
+- 2026-08-31 **t03 真机验收 + map CLOSED（用户裁决）**：e2e 剂量曲线拉平 120/200/220 → **80/80/80ms**（2/4/8M × pacer-on，照片法）；可用线 e2e <100ms ✅、buffer inst ~30-48ms 边缘（累计 57-61）；良好线未全达。t05 运动恢复 ✅（零 overflow、秒级追回免重连）、9.5min 稳定 ✅、重连不劣化 ✅、8M NACK 风暴消失。**残余 buffer 下限归因 = 软编 E≈26ms 挤压摊平窗口至 ~4.5ms**（fps 底线守住）→ 结构性解法=NVENC 硬编（已开图，验收票前置 t03 就此解除）。最终参数：pacer on / k=1.5 / 工作点 4M / gop 30 / HD720 SBS。t02/t04/t05 同日闭票（01 前期已闭）——**全图 5/5 票闭，map 终点以「e2e 轴达成 + buffer 轴移交 NVENC」结算**。换轮工具 `entry/run_stack.sh` 入 teleimager 仓库。
 - 2026-08-29 t01 CLOSED：pacer 挂点定为**替换 `_run_rtp` 主循环**（~90-110 行，teleimager 内置 monkey-patch，照 `_encode_frame` patch 先例）；encoder 层不可行、transport 层否决（会连 NACK/RTCP 一起 pace）；NACK 重传天然旁路、不受影响；`relay.subscribe(buffered=True)` 无界队列是 pacer 的新增堆积风险 → 须绝对时间表 + 落后追赶；实机 aiortc 1.14.0（pin 精确版本 + 启动锚点断言）；fork 不触发。产出 `research/01-send-path.md`。
 - 2026-08-29 t04 验收 a PASS（teleimager `6e738ac`+`e1a0e56` 已双推）：REMB→target_bitrate→codec 闭环双向打通——接收端钉 REMB=3M 后服务端**同秒**重建 7.758M→3M、46s 稳持零丢包、恢复 8s 爬回 ~12M；重建审计行常驻 image_server 日志。新发现：x264 ABR 无 VBV，8M 目标实测 15-28Mbps 过冲（3-4×）——t03 复测须记实际 outbound 码率。b/c 待 Pico 会话。
 - 2026-08-29 **新缺陷实锤（阻塞 t04-c，真机两轮复现+干预验证）**：运动后延迟 ~5s 钉死，仅重连可清。根因 = `relay.subscribe(buffered=True)` **无界订阅队列常驻化**（t01 §4 风险兑现）：运动瞬态灌入 ~150 帧后输入=输出=30fps、永不排空；接收端 buffer 仅 93ms 无辜；REMB 对内部排队无感。修复方向 = 订阅队列丢旧保新（有界），与 pacer 正交且**独立成 ticket**；「丢帧策略」从 Not-yet-specified 升格为硬需求。证据在 t04 Progress。

@@ -2,7 +2,7 @@
 id: 02-teleimager-pacer-impl
 title: "teleimager 内置 pacer 实现与 PC 端单机验证"
 labels: [wayfinder:prototype]
-status: open
+status: closed
 assignee: claude
 blocked-by: [01-aiortc-send-path-research]
 ---
@@ -49,8 +49,10 @@ blocked-by: [01-aiortc-send-path-research]
 
 **测试**：`tests/test_pacer_impl.py` 22 例（pacer 数学 9 / 预算守卫 4 / 配置门控 6 / 锚点断言 3）+ REMB 回归 4 例全绿；`tests/standalone_pacer_check.py` 驱动真 `RTCRtpSender` 实例跑 patched 协程（每 payload 恰一次上线、帧跨度≈窗口、MediaStreamError 清理路径完整、`__rtp_exited` 置位）。本机 pytest asyncio 挂死债不变（t05），协程行为以 standalone 见证。
 
-**待办（硬件会话）**：①双推 + 冒烟（deploy-topology 流程，与 t05 部署同批）；②t03 剂量曲线复测（pacer on/off × 2M/4M/8M：Linux 定时器下的真实平滑度 + avgJitterBuffer 双线判定 + 实际 outbound 码率）。
+**待办（硬件会话）**：①双推 + 冒烟 ✅（2026-08-31，见下）；②t03 剂量曲线复测（pacer on/off × 2M/4M/8M：Linux 定时器下的真实平滑度 + avgJitterBuffer 双线判定 + 实际 outbound 码率）。
+
+**部署 + 机器人冒烟（2026-08-31）**：`image_server.py`（本地 `441a998`，md5 `de236b77`）scp 至 `/home/unitree/teleimager/src/teleimager/`，md5 一致；teleimager env import 定位确认活体即该文件；aiortc 1.14.0 上锚点断言通过（import 即校验）。`standalone_pacer_check.py` 机器人侧全绿：window 22.2ms、帧跨度 22.4–22.9ms、**包间隔 max gap 2.3ms**——Windows 的 15.6ms 量子印记在 Linux 上如预期消失，摊平平滑度显著优于 PC（PC max 58ms @720p）。**双 checkout 澄清**：真有第二个活体——`/home/unitree/eeg_humanoid/teleop/xr_teleoperate/teleop/teleimager/`（xr_tele env 的 import 目标，`launch_zed_bridge.sh` 默认 env；初查 `find -maxdepth 5` 漏掉了它，靠 import 定位才找到）。该 checkout 也已同 md5 推送，xr_tele env 下 pacer/relay 双 standalone 见证同绿（span 22.4–23.2ms、max gap 2.6ms、maxlag=1）。FPV 会话走 launch 脚本 = xr_tele 路径，两份都已就位。
 
 ## Resolution
 
-（待填）
+**2026-08-31 票闭。** 实现 `441a998`（PC 验证）→ 双 checkout 双推 + 双 env standalone 见证（pacer span 22.4–23.2ms / max gap 2.6ms，Windows 15.6ms 量子印记在 Linux 消失）→ 真机 6 轮 A/B 验收（详见 t03）：e2e 120/200/220 → **80/80/80**，fps 30 全程不动（预算护栏守住「fps 永不换平滑」底线），8M 档 NACK 风暴消失。运行开关 `TELEIMAGER_PACER=1` / `webrtc.pacer: true`，换轮工具 `entry/run_stack.sh`。
