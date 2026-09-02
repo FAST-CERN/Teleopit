@@ -2,7 +2,7 @@
 id: nvenc-hw-encode-map
 title: "NVENC 硬编替换软编：FPV 编码段换引擎并四线验收"
 labels: [wayfinder:map]
-status: open
+status: closed
 created: 2026-08-29
 ---
 
@@ -52,6 +52,7 @@ Jetson Orin NX 的 NVENC 硬编（GStreamer `nvv4l2h264enc` 子进程，方案 A
 
 ## Decisions so far
 
+- 2026-09-02 **map CLOSED**（t06 四线验收全过，用户裁决收图）：同日同法 A/B——①E 22.4-25.1（漂）→20.2-20.3ms（稳）；②CPU 135.0%→88.9%+11.5%=100.4%（−34.6 点）；③e2e 照片法两臂同 ~100ms，按**无线归因**判不劣化（85ms 线源于旧网络日 80ms 基线；本场机器人 WiFi 接入 RTT 19ms 实测，JB 反低于旧日排除编码/缓冲段；**欠账：回有线复测**）；④画质无差异 + outbound 6.8M 峰值超冲→3.15M 窄带收敛（x264 无 VBV 欠账补齐）。红利全兑现：JB inst 中位 17.7→11.8ms、budget 6.6-9.1→12.0ms。**encoder 默认档定案：yaml 默认仍 soft，运行侧 `TELEIMAGER_ENCODER=hard` 已验收可用；转默认待一段实跑观察后翻转**。部署事件：APK DefaultUrl 硬编码旧 IP（IL2CPP 等长改写+别名临时修，URL 可配置化欠 pico-bridge 重构建）。数据 `research/06-acceptance/`。
 - 2026-08-31 t05 CLOSED（双 checkout 部署 + teleimager env 冒烟全过）：9c0014a 双推 md5 一致；冒烟三层全绿——raw 直驱（R 握手 `vbv_set=true`、B 码率跟随、I 强制 IDR；**t03 Q6 vbv-size 欠账实机裁决清**）、wrapper 类（E p50 13.3ms、REMB 迟滞、SIGKILL 244ms 恢复、stop 无残孤）、栈级 hard（真源 30.1fps 0 丢、NVENC 零错误、pacer 摊平保持）+ 切回 soft 无损。方法论注记：随机噪声源打 QP 地板使 AU 尺寸对码率不敏感，B 码率正向观测须同帧重复源。Frontier → 06 四线验收。
 - 2026-08-31 t04 CLOSED（TDD 合入，teleimager `zed-bridge` `9c0014a` 已推 origin）：`_nvenc_child.py`（gi 延迟 import；POSIX pass_fds / Windows handle 继承双分支）+ `image_server.py` wrapper/开关/双面锚全按 t03 九项落实；19 测试三层之一二（mock 子进程真实驱动 + 生成器端到端过真 aiortc 编码器 + 配置锚单测），41 passed。TDD 修出两真 bug：2-D I420 数组 `len()`=行数 → 头实体不符流错位（改 nbytes）；`_kill_child` 不置 None → 重试死循环。Windows 无 pass_fds、pytest 唯一 env = conda teleopit 环境事实入档。实机部署冒烟归 05。
 - 2026-08-31 t03 CLOSED（设计 grilling 九项全定，实现规格见票 Resolution）：**协议 = AU 专线管道**（stdin 命令 + pass_fds 专线回 AU + stdout 专职收 C 噪声；ZMQ PAIR 否决——不省时/无 pyzmq/EOF 语义差）；**落位 = 包内自包含单文件** `_nvenc_child.py`（gi 延迟 import 供 PC 测试）；**REMB = 10% 迟滞直传**（永不重建，PLI 唯一 IDR 触发）；**开关 = yaml encoder:soft|hard 默认 soft + TELEIMAGER_ENCODER env 覆写**；**崩溃 = 无限重试+退避封顶 1s**（无自动回退，故障可见）；**参数定稿**（iframeinterval=_GOP_LENGTH 显式、vbv-size=bitrate/30 随码率运行时设、B=0 固化 lockstep）；**pacer 不动**（budget 15.1ms 不再被钳，t06 核实）；**锚断言双面+回退软编**；**测试三层**（mock 子进程/配置锚单测/05 冒烟）。
@@ -61,8 +62,8 @@ Jetson Orin NX 的 NVENC 硬编（GStreamer `nvv4l2h264enc` 子进程，方案 A
 
 ## Not yet specified
 
-- 验收通过后 `encoder: hard` 是否转为默认档、切换纪律怎么定（收图前一行定案即可）
-- 硬编路径下 PLI→force-IDR 的入会首帧时延变化（06 观测项，仅异常时展开成票）
+- ~~验收通过后 `encoder: hard` 是否转为默认档~~（2026-09-02 收图定案：yaml 默认仍 soft，`TELEIMAGER_ENCODER=hard` 运行侧已验收；转默认待实跑观察后翻转）
+- 硬编路径下 PLI→force-IDR 的入会首帧时延变化（06 观测项：未见异常，不展开）
 
 ## Out of scope
 

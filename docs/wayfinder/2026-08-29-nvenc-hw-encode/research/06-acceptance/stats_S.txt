@@ -1,0 +1,192 @@
+09-02 10:59:58.818  7160 10057 I Unity   : [HttpSignaling] offer SDP (embedded=True gathered=1):
+09-02 11:00:01.864  7160 10057 E Unity   : [HttpSignaling] POST failed: ConnectionError code=0 err=Cannot connect to destination host body=
+09-02 11:00:03.891  7160 10057 I Unity   : [HttpSignaling] Connection state: Closed
+09-02 11:00:03.891  7160 10057 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:00:13.892  7160 10057 W Unity   : [HttpSignaling] retrying (Stream interrupted)
+09-02 11:00:13.892  7160 10057 W Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:Update()
+09-02 11:00:17.096  7160 10057 E Unity   : [HttpSignaling] POST failed: ConnectionError code=0 err=Cannot connect to destination host body=
+09-02 11:00:19.118  7160 10057 I Unity   : [HttpSignaling] Connection state: Closed
+09-02 11:00:19.118  7160 10057 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:27:41.817  7163 14790 I Unity   : [HttpSignaling] offer SDP (embedded=True gathered=1):
+09-02 11:27:46.976  7163 14790 I Unity   : [HttpSignaling] answer applied (answer)
+09-02 11:27:46.977  7163 14790 I Unity   : [HttpSignaling] answer SDP:
+09-02 11:27:46.986  7163 14790 I Unity   : [HttpSignaling] Connection state: Connecting
+09-02 11:27:46.986  7163 14790 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:27:46.989  7163 14790 I Unity   : [HttpSignaling] Video track received
+09-02 11:27:47.055  7163 14790 I Unity   : [HttpSignaling] Connection state: Connected
+09-02 11:27:47.055  7163 14790 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:27:51.734  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=13.8 framesDecoded=139 avgJitterBuffer=24.1ms target=1953.0ms packetsLost=0 jitter=0.010s
+09-02 11:27:56.771  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=290 avgJitterBuffer=24.9ms target=4228.9ms packetsLost=0 jitter=0.010s
+09-02 11:28:01.811  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=441 avgJitterBuffer=25.6ms target=6533.8ms packetsLost=0 jitter=0.011s
+09-02 11:28:06.850  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=592 avgJitterBuffer=25.5ms target=8359.1ms packetsLost=0 jitter=0.013s
+09-02 11:28:11.890  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=744 avgJitterBuffer=25.1ms target=10218.7ms packetsLost=0 jitter=0.012s
+09-02 11:28:16.930  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=29.8 framesDecoded=894 avgJitterBuffer=26.0ms target=12901.8ms packetsLost=0 jitter=0.013s
+09-02 11:29:14.935  7163 14790 I Unity   : [HttpSignaling] Connection state: Connecting
+09-02 11:29:14.935  7163 14790 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:29:14.937  7163 14790 I Unity   : [HttpSignaling] answer applied (answer)
+09-02 11:29:14.949  7163 14790 I Unity   : [HttpSignaling] Video track received
+09-02 11:29:15.019  7163 14790 I Unity   : [HttpSignaling] Connection state: Connected
+09-02 11:29:15.019  7163 14790 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:29:17.145  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=0.0 framesDecoded=61 avgJitterBuffer=22.5ms target=1027.0ms packetsLost=0 jitter=0.011s
+09-02 11:29:22.184  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=212 avgJitterBuffer=26.8ms target=3527.1ms packetsLost=0 jitter=0.010s
+09-02 11:29:27.224  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=364 avgJitterBuffer=28.1ms target=6233.8ms packetsLost=0 jitter=0.012s
+09-02 11:29:32.264  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=515 avgJitterBuffer=28.5ms target=8864.9ms packetsLost=0 jitter=0.010s
+09-02 11:29:37.304  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=666 avgJitterBuffer=28.7ms target=11379.2ms packetsLost=0 jitter=0.011s
+09-02 11:29:42.343  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=817 avgJitterBuffer=29.1ms target=14050.7ms packetsLost=0 jitter=0.012s
+09-02 11:29:47.379  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=968 avgJitterBuffer=28.5ms target=16005.8ms packetsLost=0 jitter=0.012s
+09-02 11:29:52.422  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=29.9 framesDecoded=1119 avgJitterBuffer=28.6ms target=18442.1ms packetsLost=0 jitter=0.012s
+09-02 11:29:57.463  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=1270 avgJitterBuffer=28.8ms target=21119.9ms packetsLost=0 jitter=0.012s
+09-02 11:30:02.503  7163 14790 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=1422 avgJitterBuffer=28.7ms target=23613.4ms packetsLost=0 jitter=0.011s
+09-02 11:33:51.200 12726 16767 I Unity   : [HttpSignaling] offer SDP (embedded=True gathered=1):
+09-02 11:33:56.326 12726 16767 I Unity   : [HttpSignaling] Connection state: Connecting
+09-02 11:33:56.326 12726 16767 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:33:56.333 12726 16767 I Unity   : [HttpSignaling] answer applied (answer)
+09-02 11:33:56.333 12726 16767 I Unity   : [HttpSignaling] answer SDP:
+09-02 11:33:56.342 12726 16767 I Unity   : [HttpSignaling] Video track received
+09-02 11:33:56.423 12726 16767 I Unity   : [HttpSignaling] Connection state: Connected
+09-02 11:33:56.423 12726 16767 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:34:01.142 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=13.8 framesDecoded=139 avgJitterBuffer=26.4ms target=2319.8ms packetsLost=0 jitter=0.010s
+09-02 11:34:06.180 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=290 avgJitterBuffer=28.4ms target=5244.9ms packetsLost=0 jitter=0.010s
+09-02 11:34:11.221 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=441 avgJitterBuffer=28.9ms target=8048.9ms packetsLost=0 jitter=0.010s
+09-02 11:34:16.260 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=593 avgJitterBuffer=29.0ms target=10940.5ms packetsLost=0 jitter=0.009s
+09-02 11:34:39.139 12726 16767 I Unity   : [HttpSignaling] Connection state: Connecting
+09-02 11:34:39.139 12726 16767 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:34:39.140 12726 16767 I Unity   : [HttpSignaling] answer applied (answer)
+09-02 11:34:39.153 12726 16767 I Unity   : [HttpSignaling] Video track received
+09-02 11:34:39.208 12726 16767 I Unity   : [HttpSignaling] Connection state: Connected
+09-02 11:34:39.208 12726 16767 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:34:41.363 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=0.0 framesDecoded=62 avgJitterBuffer=25.0ms target=1464.3ms packetsLost=0 jitter=0.010s
+09-02 11:34:46.399 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=213 avgJitterBuffer=29.5ms target=4587.3ms packetsLost=0 jitter=0.011s
+09-02 11:34:56.751 12726 16767 I Unity   : [HttpSignaling] Connection state: Connecting
+09-02 11:34:56.751 12726 16767 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:34:56.755 12726 16767 I Unity   : [HttpSignaling] answer applied (answer)
+09-02 11:34:56.765 12726 16767 I Unity   : [HttpSignaling] Video track received
+09-02 11:34:56.834 12726 16767 I Unity   : [HttpSignaling] Connection state: Connected
+09-02 11:34:56.834 12726 16767 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:35:01.465 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=0.0 framesDecoded=136 avgJitterBuffer=27.7ms target=2460.1ms packetsLost=0 jitter=0.011s
+09-02 11:35:06.506 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=287 avgJitterBuffer=28.3ms target=4970.3ms packetsLost=0 jitter=0.012s
+09-02 11:35:11.546 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=438 avgJitterBuffer=28.3ms target=7492.4ms packetsLost=0 jitter=0.012s
+09-02 11:35:16.586 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=589 avgJitterBuffer=28.7ms target=10126.9ms packetsLost=0 jitter=0.012s
+09-02 11:35:21.624 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=740 avgJitterBuffer=29.2ms target=13002.9ms packetsLost=0 jitter=0.012s
+09-02 11:35:26.663 12726 16767 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=892 avgJitterBuffer=29.4ms target=15683.5ms packetsLost=0 jitter=0.012s
+09-02 11:36:16.271 12714 17603 I Unity   : [HttpSignaling] offer SDP (embedded=True gathered=1):
+09-02 11:36:21.327 12714 17603 I Unity   : [HttpSignaling] Connection state: Connecting
+09-02 11:36:21.327 12714 17603 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:36:21.332 12714 17603 I Unity   : [HttpSignaling] answer applied (answer)
+09-02 11:36:21.333 12714 17603 I Unity   : [HttpSignaling] answer SDP:
+09-02 11:36:21.344 12714 17603 I Unity   : [HttpSignaling] Video track received
+09-02 11:36:21.410 12714 17603 I Unity   : [HttpSignaling] Connection state: Connected
+09-02 11:36:21.410 12714 17603 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:36:26.201 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=13.9 framesDecoded=140 avgJitterBuffer=23.1ms target=2417.3ms packetsLost=0 jitter=0.009s
+09-02 11:36:31.239 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=292 avgJitterBuffer=30.8ms target=5006.0ms packetsLost=0 jitter=0.008s
+09-02 11:36:36.278 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=443 avgJitterBuffer=27.2ms target=7067.1ms packetsLost=0 jitter=0.006s
+09-02 11:36:41.318 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=595 avgJitterBuffer=24.6ms target=9056.1ms packetsLost=0 jitter=0.009s
+09-02 11:36:46.357 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=746 avgJitterBuffer=24.0ms target=11127.1ms packetsLost=0 jitter=0.009s
+09-02 11:36:51.397 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=897 avgJitterBuffer=22.8ms target=13036.0ms packetsLost=0 jitter=0.004s
+09-02 11:36:56.436 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=1048 avgJitterBuffer=22.2ms target=14811.7ms packetsLost=0 jitter=0.009s
+09-02 11:37:01.477 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=1199 avgJitterBuffer=22.0ms target=16753.0ms packetsLost=0 jitter=0.007s
+09-02 11:37:06.516 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=1350 avgJitterBuffer=21.6ms target=18922.2ms packetsLost=0 jitter=0.009s
+09-02 11:37:11.557 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=1502 avgJitterBuffer=21.7ms target=21085.7ms packetsLost=0 jitter=0.011s
+09-02 11:37:16.596 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=1653 avgJitterBuffer=22.0ms target=22974.3ms packetsLost=0 jitter=0.010s
+09-02 11:37:21.636 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=1804 avgJitterBuffer=22.1ms target=24950.1ms packetsLost=0 jitter=0.011s
+09-02 11:37:26.676 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=1955 avgJitterBuffer=22.3ms target=27154.8ms packetsLost=0 jitter=0.011s
+09-02 11:37:31.716 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=2107 avgJitterBuffer=22.4ms target=29059.8ms packetsLost=0 jitter=0.012s
+09-02 11:37:36.756 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=2258 avgJitterBuffer=22.5ms target=31145.3ms packetsLost=0 jitter=0.012s
+09-02 11:37:41.796 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=2409 avgJitterBuffer=22.9ms target=33699.5ms packetsLost=0 jitter=0.011s
+09-02 11:37:46.836 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=2560 avgJitterBuffer=23.2ms target=36457.0ms packetsLost=0 jitter=0.008s
+09-02 11:37:51.875 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=2711 avgJitterBuffer=23.0ms target=38779.5ms packetsLost=0 jitter=0.011s
+09-02 11:37:56.916 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=2862 avgJitterBuffer=23.2ms target=41217.0ms packetsLost=0 jitter=0.013s
+09-02 11:38:01.955 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=3014 avgJitterBuffer=23.5ms target=43788.8ms packetsLost=0 jitter=0.012s
+09-02 11:38:06.995 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=3165 avgJitterBuffer=23.6ms target=46181.7ms packetsLost=0 jitter=0.009s
+09-02 11:38:12.034 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=3316 avgJitterBuffer=23.6ms target=48173.8ms packetsLost=0 jitter=0.011s
+09-02 11:38:17.075 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=3467 avgJitterBuffer=23.7ms target=50224.7ms packetsLost=0 jitter=0.014s
+09-02 11:38:22.116 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=3618 avgJitterBuffer=24.0ms target=52533.9ms packetsLost=0 jitter=0.013s
+09-02 11:38:27.154 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=3770 avgJitterBuffer=24.2ms target=55316.0ms packetsLost=0 jitter=0.009s
+09-02 11:38:32.194 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=3921 avgJitterBuffer=24.1ms target=57537.4ms packetsLost=0 jitter=0.010s
+09-02 11:38:37.234 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=4072 avgJitterBuffer=24.2ms target=59934.4ms packetsLost=0 jitter=0.013s
+09-02 11:38:46.149 12714 17603 I Unity   : [HttpSignaling] Connection state: Connecting
+09-02 11:38:46.149 12714 17603 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:38:46.151 12714 17603 I Unity   : [HttpSignaling] answer applied (answer)
+09-02 11:38:46.163 12714 17603 I Unity   : [HttpSignaling] Video track received
+09-02 11:38:46.247 12714 17603 I Unity   : [HttpSignaling] Connection state: Connected
+09-02 11:38:46.247 12714 17603 I Unity   : PicoBridge.Camera.WebRtcHttpSignalingClient:<CreatePeer>b__49_1(RTCPeerConnectionState)
+09-02 11:38:47.301 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=0.0 framesDecoded=29 avgJitterBuffer=22.7ms target=467.8ms packetsLost=0 jitter=0.009s
+09-02 11:38:52.339 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=180 avgJitterBuffer=30.8ms target=3789.4ms packetsLost=0 jitter=0.009s
+09-02 11:38:57.381 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=331 avgJitterBuffer=31.3ms target=7145.4ms packetsLost=0 jitter=0.011s
+09-02 11:39:02.421 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=482 avgJitterBuffer=30.7ms target=9962.8ms packetsLost=0 jitter=0.009s
+09-02 11:39:07.460 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=634 avgJitterBuffer=30.8ms target=13077.0ms packetsLost=0 jitter=0.010s
+09-02 11:45:52.238 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=12767 avgJitterBuffer=43.8ms target=357046.4ms packetsLost=0 jitter=0.010s
+09-02 11:45:57.275 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=12918 avgJitterBuffer=43.6ms target=359846.4ms packetsLost=0 jitter=0.010s
+09-02 11:46:02.301 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=13069 avgJitterBuffer=43.4ms target=362223.3ms packetsLost=0 jitter=0.010s
+09-02 11:46:07.328 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=13220 avgJitterBuffer=43.3ms target=364914.0ms packetsLost=0 jitter=0.011s
+09-02 11:46:12.368 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=13371 avgJitterBuffer=43.1ms target=367501.8ms packetsLost=0 jitter=0.011s
+09-02 11:46:17.408 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=13522 avgJitterBuffer=43.0ms target=370245.8ms packetsLost=0 jitter=0.011s
+09-02 11:46:22.448 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=13674 avgJitterBuffer=42.8ms target=373008.6ms packetsLost=0 jitter=0.011s
+09-02 11:46:27.489 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=13825 avgJitterBuffer=42.7ms target=375652.8ms packetsLost=0 jitter=0.011s
+09-02 11:46:32.528 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=13976 avgJitterBuffer=42.6ms target=378586.5ms packetsLost=0 jitter=0.011s
+09-02 11:46:37.568 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=14127 avgJitterBuffer=42.5ms target=381833.3ms packetsLost=0 jitter=0.011s
+09-02 11:46:42.607 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=14278 avgJitterBuffer=42.4ms target=385170.0ms packetsLost=0 jitter=0.011s
+09-02 11:46:47.648 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=14430 avgJitterBuffer=42.3ms target=388281.5ms packetsLost=0 jitter=0.011s
+09-02 11:46:52.688 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=14581 avgJitterBuffer=42.2ms target=391216.0ms packetsLost=0 jitter=0.010s
+09-02 11:46:57.728 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=14732 avgJitterBuffer=42.0ms target=394237.3ms packetsLost=0 jitter=0.011s
+09-02 11:47:02.768 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=14883 avgJitterBuffer=41.9ms target=397153.7ms packetsLost=0 jitter=0.011s
+09-02 11:47:07.807 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=15034 avgJitterBuffer=41.8ms target=400561.3ms packetsLost=0 jitter=0.011s
+09-02 11:47:12.847 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=15186 avgJitterBuffer=41.7ms target=403632.5ms packetsLost=0 jitter=0.011s
+09-02 11:47:17.887 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=15337 avgJitterBuffer=41.6ms target=406814.7ms packetsLost=0 jitter=0.009s
+09-02 11:47:22.926 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=15488 avgJitterBuffer=41.5ms target=409913.5ms packetsLost=0 jitter=0.010s
+09-02 11:47:27.966 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=15639 avgJitterBuffer=41.4ms target=412513.5ms packetsLost=0 jitter=0.010s
+09-02 11:47:33.006 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=15790 avgJitterBuffer=41.3ms target=415436.3ms packetsLost=0 jitter=0.010s
+09-02 11:47:38.045 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=15942 avgJitterBuffer=41.2ms target=418357.8ms packetsLost=0 jitter=0.010s
+09-02 11:47:43.087 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=16093 avgJitterBuffer=41.1ms target=421349.9ms packetsLost=0 jitter=0.010s
+09-02 11:47:48.126 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=16244 avgJitterBuffer=41.0ms target=424602.6ms packetsLost=0 jitter=0.010s
+09-02 11:47:53.166 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=16395 avgJitterBuffer=40.9ms target=427539.7ms packetsLost=0 jitter=0.010s
+09-02 11:47:58.207 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=16546 avgJitterBuffer=40.8ms target=430720.4ms packetsLost=0 jitter=0.010s
+09-02 11:48:03.246 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=16697 avgJitterBuffer=40.8ms target=434446.0ms packetsLost=0 jitter=0.010s
+09-02 11:48:08.286 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=16849 avgJitterBuffer=40.7ms target=437827.9ms packetsLost=0 jitter=0.010s
+09-02 11:48:13.326 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=17000 avgJitterBuffer=40.6ms target=441096.3ms packetsLost=0 jitter=0.009s
+09-02 11:48:18.366 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=17151 avgJitterBuffer=40.6ms target=444241.1ms packetsLost=0 jitter=0.010s
+09-02 11:48:23.406 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=17302 avgJitterBuffer=40.5ms target=447640.2ms packetsLost=0 jitter=0.010s
+09-02 11:48:28.446 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=17454 avgJitterBuffer=40.4ms target=450526.7ms packetsLost=0 jitter=0.010s
+09-02 11:48:33.486 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=17605 avgJitterBuffer=40.3ms target=453468.3ms packetsLost=0 jitter=0.011s
+09-02 11:48:38.526 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=17756 avgJitterBuffer=40.3ms target=457163.6ms packetsLost=0 jitter=0.011s
+09-02 11:48:43.563 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=17907 avgJitterBuffer=40.2ms target=460133.8ms packetsLost=0 jitter=0.010s
+09-02 11:48:48.605 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=18058 avgJitterBuffer=40.1ms target=463193.1ms packetsLost=0 jitter=0.010s
+09-02 11:48:53.645 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=18209 avgJitterBuffer=40.0ms target=466077.1ms packetsLost=0 jitter=0.009s
+09-02 11:48:58.683 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=18361 avgJitterBuffer=39.9ms target=469084.7ms packetsLost=0 jitter=0.009s
+09-02 11:49:03.711 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=18512 avgJitterBuffer=39.8ms target=471557.7ms packetsLost=0 jitter=0.010s
+09-02 11:49:08.751 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=18663 avgJitterBuffer=39.7ms target=474272.9ms packetsLost=0 jitter=0.009s
+09-02 11:49:13.791 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=18814 avgJitterBuffer=39.6ms target=477404.5ms packetsLost=0 jitter=0.009s
+09-02 11:49:18.831 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=18965 avgJitterBuffer=39.6ms target=480513.3ms packetsLost=0 jitter=0.011s
+09-02 11:49:23.871 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=19116 avgJitterBuffer=39.5ms target=483469.3ms packetsLost=0 jitter=0.011s
+09-02 11:49:28.911 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=19268 avgJitterBuffer=39.4ms target=485869.7ms packetsLost=0 jitter=0.009s
+09-02 11:49:33.951 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=19419 avgJitterBuffer=39.4ms target=488748.4ms packetsLost=0 jitter=0.009s
+09-02 11:49:38.991 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=19570 avgJitterBuffer=39.3ms target=491856.2ms packetsLost=0 jitter=0.007s
+09-02 11:49:44.031 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=19721 avgJitterBuffer=39.2ms target=494865.2ms packetsLost=0 jitter=0.009s
+09-02 11:49:49.071 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=19872 avgJitterBuffer=39.1ms target=497919.4ms packetsLost=0 jitter=0.010s
+09-02 11:49:54.111 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=20024 avgJitterBuffer=39.1ms target=501415.7ms packetsLost=0 jitter=0.010s
+09-02 11:49:59.151 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=20175 avgJitterBuffer=39.0ms target=504037.2ms packetsLost=0 jitter=0.009s
+09-02 11:50:04.190 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=20326 avgJitterBuffer=38.9ms target=506476.9ms packetsLost=0 jitter=0.010s
+09-02 11:50:09.230 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=20477 avgJitterBuffer=38.9ms target=509323.2ms packetsLost=0 jitter=0.009s
+09-02 11:50:14.268 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=29.4 framesDecoded=20625 avgJitterBuffer=38.7ms target=512324.9ms packetsLost=0 jitter=0.006s
+09-02 11:50:19.310 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=28.4 framesDecoded=20768 avgJitterBuffer=38.5ms target=514691.1ms packetsLost=0 jitter=0.006s
+09-02 11:50:24.350 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=26.6 framesDecoded=20902 avgJitterBuffer=38.2ms target=516507.9ms packetsLost=0 jitter=0.005s
+09-02 11:50:29.390 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=28.2 framesDecoded=21044 avgJitterBuffer=38.3ms target=518445.2ms packetsLost=0 jitter=0.004s
+09-02 11:50:34.430 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=21196 avgJitterBuffer=38.5ms target=521150.7ms packetsLost=0 jitter=0.013s
+09-02 11:50:39.470 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=21348 avgJitterBuffer=38.6ms target=523893.4ms packetsLost=0 jitter=0.012s
+09-02 11:51:07.740 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=22195 avgJitterBuffer=38.8ms target=537684.1ms packetsLost=0 jitter=0.011s
+09-02 11:51:12.770 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=28.6 framesDecoded=22339 avgJitterBuffer=38.6ms target=539723.2ms packetsLost=0 jitter=0.008s
+09-02 11:51:17.812 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=26.2 framesDecoded=22471 avgJitterBuffer=38.4ms target=541218.9ms packetsLost=0 jitter=0.005s
+09-02 11:51:22.853 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=29.0 framesDecoded=22617 avgJitterBuffer=38.2ms target=543015.3ms packetsLost=0 jitter=0.005s
+09-02 11:51:27.892 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=22768 avgJitterBuffer=38.2ms target=545171.0ms packetsLost=0 jitter=0.012s
+09-02 11:51:32.933 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=22919 avgJitterBuffer=38.3ms target=548017.0ms packetsLost=0 jitter=0.013s
+09-02 11:51:37.973 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=23070 avgJitterBuffer=38.4ms target=550518.3ms packetsLost=0 jitter=0.011s
+09-02 11:51:43.013 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=23221 avgJitterBuffer=38.4ms target=553087.5ms packetsLost=0 jitter=0.010s
+09-02 11:51:48.053 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=23373 avgJitterBuffer=38.5ms target=555428.3ms packetsLost=0 jitter=0.012s
+09-02 11:51:53.093 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=23524 avgJitterBuffer=38.5ms target=557643.4ms packetsLost=0 jitter=0.011s
+09-02 11:51:58.132 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=23675 avgJitterBuffer=38.5ms target=559785.0ms packetsLost=0 jitter=0.012s
+09-02 11:52:03.172 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=23826 avgJitterBuffer=38.5ms target=561917.5ms packetsLost=0 jitter=0.012s
+09-02 11:52:08.212 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.2 framesDecoded=23978 avgJitterBuffer=38.5ms target=564310.0ms packetsLost=0 jitter=0.011s
+09-02 11:52:13.252 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=24129 avgJitterBuffer=38.5ms target=566699.7ms packetsLost=0 jitter=0.011s
+09-02 11:52:18.292 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=24280 avgJitterBuffer=38.5ms target=569051.1ms packetsLost=0 jitter=0.010s
+09-02 11:52:23.331 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=24431 avgJitterBuffer=38.5ms target=571758.9ms packetsLost=0 jitter=0.010s
+09-02 11:52:28.372 12714 17603 I Unity   : [HttpSignaling] stats: decodeFps=30.0 framesDecoded=24582 avgJitterBuffer=38.6ms target=574673.7ms packetsLost=0 jitter=0.010s
