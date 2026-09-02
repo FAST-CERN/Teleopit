@@ -31,6 +31,7 @@ ZED-M 采集面提到 **HD1080 模式（每眼 1920×1080，SBS 3840×1080 @30fp
 ## Decisions so far
 
 - [采集面事实：ZED-M HD1080 + bridge 参数](tickets/01-zed1080-capture-research.md)：fps 上限 30 三重确认（含实机诊断 OK）；**FOV 收窄 82°→66°H（中心裁剪非同 FOV 加像素）**，验收线③须 declare；bridge 全参数化零硬编码（04 收窄到 launcher 默认值+yaml）；协议天然支持 3840 宽，代价 373MB/s IPC；USB3 ~249MB/s 无根本限制。
+- [解码闸：Pico WebRTC 路径能否收 3840×1080@30 H.264（L5.x）](tickets/02-pico-decode-gate.md)：**GO**——attempt 2 低熵源全绿（decodeFps 30 稳、0 丢、目视设计图案完整、NVENC 零重启）；attempt 1 花屏 = 噪声源自伤（测解码必须用压缩性内容）。**直通车 03：E 31.5ms / budget 1.1ms（720p 20.2/12.0）**——摊平窗口 1080p 耗尽，shm/conv 优化裁决归 03。
 - 2026-09-02 用户 scoping：NVENC 图留账「pico-bridge URL 可配置化重构建」移入本图（多场真机会话持续踩别名摩擦）→ [pico-bridge URL 可配置化重构建](tickets/06-url-configurable-rebuild.md)；解码闸 attempt 1 花屏定性为噪声测试源自伤（AU ~440KB QP 地板压垮 WiFi + numpy 拖帧），闸门未裁决，attempt 2 低熵源备好。
 ## Not yet specified
 

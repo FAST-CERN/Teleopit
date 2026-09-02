@@ -2,7 +2,7 @@
 id: 02-pico-decode-gate
 title: "解码闸：Pico WebRTC 路径能否收 3840×1080@30 H.264（L5.x）"
 labels: [wayfinder:task]
-status: open
+status: closed
 assignee: "claude-code"
 blocked-by: []
 ---
@@ -18,7 +18,19 @@ blocked-by: []
 
 ## Resolution
 
-（进行中，第一次尝试记录 2026-09-02 15:31）
+**2026-09-02 attempt 2 裁决：GO。** Pico 经现有 APK/WebRTC 链路完整解码渲染 3840×1080 SBS：
+
+- 目视 = 设计图案完整（渐变场景 + 双眼锁步游走白框），无花屏；
+- `[HttpSignaling] stats`：**decodeFps 30.0-30.2 稳态、packetsLost=0、avgJB 11.9-17.4ms**（1103+ 帧递增）；
+- 机器人侧：NVENC 子进程 1080p 拉起零重启、产帧 30.0fps 满速、低熵内容出流 ~1.4Mbps（5 包/帧）。
+
+方法学沉淀：attempt 1 的纯噪声源自伤（QP 地板 AU~440KB + numpy 拖帧）已记上方；**测解码接受性必须用压缩性内容**。`synth1080_lowent.py`（预计算场景+memcpy 每帧）入 `research/` 可复用。
+
+**03 票直通车数据**（同场实测，合成低熵内容）：1080p `avg recv+encode 31.5ms`（720p 20.2）→ **pace budget 1.1ms**（720p 12.0）——摊平窗口在 1080p 基本耗尽；本场 JB 12-17ms 是 1.4Mbps 低码率+零丢包的产物，真实内容 8M 档下不可外推。E 分段拆解与 shm/conv 优化裁决归 03。
+
+---
+
+（attempt 1 记录 2026-09-02 15:31）
 
 **Attempt 1 判定为无效测试（自伤，非 Pico 判决）**：机器人侧合成源（纯随机噪声 3840×1080）+ hard NVENC + APK 实连——用户见**花屏**。机器人日志（`research/server_gate_attempt1.log`）：NVENC 子进程在 1080p 正常拉起零重启；但 **600 帧/48s=12.5fps、每帧 370 包**（720p 基线 ~14 包）——噪声源打 QP 地板（t05 已知源特性在 1080p 复现放大）→ AU ~440KB/帧 ≈ 100Mbps 级，WiFi 扛不住 → 丢包撕裂；且 numpy 每帧 4.1MP 随机数生成拖垮制造者侧帧率。**Pico 侧 logcat 未捕获**（USB 已拔，无 stats 行）。结论：测的是网络上限不是解码接受性。
 
