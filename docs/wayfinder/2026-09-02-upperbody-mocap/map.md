@@ -1,0 +1,61 @@
+---
+id: upperbody-mocap-map
+title: "Pico bridge 上半身动捕：体感追踪器×2 采集链实装 + sim ARMS 输入验证"
+labels: [wayfinder:map]
+status: open
+created: 2026-09-02
+---
+
+## Destination
+
+上半身动捕**采集链**实装并**仿真验证**过线：pico-bridge app 读取 2 个 Pico 体感追踪器（固定于 MANUS 动捕手套手背）+ HMD 位姿，经现有 TCP 追踪协议（cmd 0x6D 的 `Motion` 字段）上行 → pico_bridge Python 接收端解析暴露 → Teleopit 合成上半身参考喂现有重定向 → **sim 中以现有 ARMS 模式（单一 mocap arms，不动模式机）验证双臂跟随**。验收四线（采集质量 / 跟随稳定 / 断连安全 / 主观）过线即达。
+
+统一 policy（obs 吃 velocity+上半身动捕）与真机线**另开新图**。
+
+## Notes
+
+**领域**：上下半身解耦策略的第一段（采集 + 输入验证）。下半身（velocity/走路）本图不动；手指链路 manus_server（`F:\teleop\manus_server`）独占，本图零手指工作。
+
+**本图携带执行**（同 zed-fpv/nvenc/1080p 图惯例，覆盖 wayfinder 默认纯规划）：终点=采集链合入 + sim 验证过线。
+
+**开图定案**（2026-09-02 会话与用户对齐）：
+
+1. 硬件：**Pico 体感追踪器 ×2**（SN 绑定左右手），固定于 MANUS 动捕手套手背；手指数据走 manus_server 既有 DexPilot→DDS→Orin 链（已整链验证）。
+2. 手指仲裁：**manus_server 独占手指**，Teleopit 侧手输出静音——本图无手指面，真机图再处理 Teleopit 手 worker 配置。
+3. 覆盖范围：**仅双臂**（颈已有 HMD 主动跟随；腰 3DOF 不动）。
+4. 模式形态：**不动模式机**——sim 验证用现有 ARMS 模式（MOCAP 内 B 键切换）单独测；VELOCITY 臂开关 / 新 RobotMode / 颈白名单扩 velocity 全部留给统一 policy 图。
+5. 验收风格：四线（采集质量、跟随稳定、断连安全、主观），数值线在验收票内定稿。
+
+**术语**：「体感追踪器」= PICO 官方 motion tracker 配件（SDK `PXR_MotionTracking` 的 MotionTracker 系列 API）；「腕目标」= tracker 位姿经安装偏移折算的腕部位姿；「合成帧」= HMD+2 tracker 合成的上半身 HumanFrame（对照：现状全身 HumanFrame 来自 PICO body tracking 24 角色骨架）。
+
+**硬事实（开图侦察定案，约束全部票面）**：
+
+- Unity app 是**纯追踪串流桥**（无模式机；TCP 63901，`PackageHandle` 帧，JSON 信封 `{"functionName":"Tracking",...}`，trackingFps 默认 72Hz）。`PicoTrackingCollector.AppendMotion()` 是占位符（`"Motion":{"joints":[],"len":0}`），但 SDK 数据面 API 齐备（`GetMotionTrackerLocation(s)`/电池/SN 连接回调，`Packages/.../Runtime/Scripts/Features/PXR_MotionTracking.cs` ~320-566），信号门控 `TrackingSignalStatus.cs` 已在调连接状态——缺的只是数据采集。
+- Teleopit 侧 ARMS 模式已存在且整链验证过：`pico4_provider` 全身 HumanFrame → GMR/mink+daqp 重定向（`ik_configs/pico_bridge_to_g1.json`：`wrist_yaw_link↔Wrist` 姿态任务权重 10、臂 human scale 0.8）→ `arm_mocap.compose_arm_reference` 拼接 14 臂关节（idx 15–28）进站立位。**输入换源即可复用**。
+- PICO body tracking（`sendBody`，默认关）的臂估计依赖头显+手柄/相机手部追踪——**戴 MANUS 手套时两者皆不可用**，这正是腕部改用独立 tracker 的动因；本图臂源=tracker，不用 body tracking 臂。
+- sim 侧现状保持：`TOGGLE_ARMS` 在 VELOCITY 被忽略、`VALID_NECK_ACTIVE_MODES` 不含 velocity、MOCAP 入场需 10 帧连续有效 + 参考龄 ≤0.25s（`mocap_switch`）——合成帧须满足这些既有闸门。
+- Unity **Personal 许可 term 已于 2026-08-31 到期**（`C:\ProgramData\Unity\Unity_lic.ulf` StopDate，AlwaysOnline=false）→ 重编 APK 前须 Unity Hub 重新登录签发（票 02）。
+- 上次 APK 改 URL 走的等长二进制改写**加不了新代码**——本图必须从源重编。
+
+**部署/环境**：本机 teleopit conda env（3.10 全家桶）跑接收端测试与 sim；APK 装机 HITL。**停机窗口纪律**同前图（真机面本图无）。
+
+**Tracker 约定**（同前图）：Ticket = `tickets/NN-*.md`（frontmatter labels/status/assignee/blocked-by）；Frontier = open 且依赖全闭且未认领；Resolve = 正文追加 `## Resolution` + status: closed + 本 map Decisions 追加一行；研究产物放 `research/`。
+
+## Decisions so far
+
+- 2026-09-02 t01 闭（research/01）：活体 API=单数 `GetMotionTrackerLocation`（复数+`tobeContinued` 已废弃/不存在，SDK 3.4.0 无需升级）；位姿=HMD local 右手系→复用 AppendBody 翻转（−Z/−Qz/−Qw）标 `pico_tracker_local`，接收端+Teleopit 链零新约定；采样固定 50Hz、无 per-sample 时戳；左右绑定=app 层单只开机指认持久化（启动枚举走 `CheckMotionTrackerNumber` 完成回调）；腕部无 SDK 限制、真约束=HMD 光学可见性（06 加手臂扫掠、05 加 valid=false 策略）。
+
+## Not yet specified
+
+- tracker→腕中心**安装偏移标定流程**（手套手背固定偏移的测量与配置化）——等 01 SDK 语义 + 05 设计定形态，可能并入 05 或独立小票
+- APK 重编时是否顺手把硬编码 `/offer` URL 改可配置（清 1080p 图 06 票的同类欠账）——03 合入票定
+- receiver 追踪录制（recording）扩展 `Motion` 字段作为 06 验收的可重复输入工具——06 开票时按需毕业
+- 若 SDK 语义不符预期（如位姿只有 3DOF / 频率过低 / 坐标系非头显系）：合成方案的退化路线（保底肘启发式、双 tracker 融合权重）——05 的对局分支
+- 统一 policy 的 obs 接口（velocity+上半身动捕）——下一张图核心；本图产出（合成帧/腕目标格式）即其输入约定，05 定稿时留好快照
+
+## Out of scope
+
+- 真机上半身动捕（真机验收、estop/关节限位真机化、Teleopit 手 worker 静音配置落地）
+- 统一 policy 训练/接入（velocity+臂 obs 融合、模式机改动、VELOCITY 臂覆盖层）
+- 手指链路改动（manus_server 侧任何工作、haptics、手指-腕时间同步）
+- FPV 视频链路、腰/颈增强、60fps（各属既有出图）
