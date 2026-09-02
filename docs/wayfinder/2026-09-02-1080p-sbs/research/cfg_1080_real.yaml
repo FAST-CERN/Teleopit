@@ -1,0 +1,20 @@
+# sbs-1080p map ticket 03 (transport probe): REAL-source 3840x1080 config —
+# subscribes the live HD1080 bridge IPC feed; 8M working tier per the probe.
+head_camera:
+  enable_zmq: false
+  enable_webrtc: true
+  webrtc_port: 60001
+  webrtc_codec: h264
+  type: zed_bridge
+  endpoint: ipc:///tmp/zed_xr_head.ipc
+  image_shape: [1080, 3840]                   # packed [H, W] SBS (left 1920 + right 1920)
+  binocular: true
+  fps: 30
+  pixel_format: bgr8
+
+webrtc:
+  bitrate:
+    min: 2000000
+    default: 8000000
+    max: 12000000
+  gop_length: 30

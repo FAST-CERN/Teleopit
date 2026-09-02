@@ -30,15 +30,17 @@ ZED-M 采集面提到 **HD1080 模式（每眼 1920×1080，SBS 3840×1080 @30fp
 
 ## Decisions so far
 
+- [编码传输实测：1080p E 分段 / 码率档 / pacer 预算 / WiFi 容量](tickets/03-encode-transport-probe.md)：E 分段 conv 1.7-2.1 / write 4.7-5.3 / **enc 等待 17.8-18.7ms（大头）**，栈内 31.1ms / budget 0.8ms；**SPS L5.0 实锤**；静景码率三档全内容受限（AU 13-15KiB）；8M 真源佩戴 20 包/帧、5.2Mbps、**0 丢、JB ~15ms 不劣于 720p**。**04 参数定稿：8M/max12M/gop30/pacer on/hard**；shm 不转正（治标且无强制力），留雾区 E 优化包。
 - [采集面事实：ZED-M HD1080 + bridge 参数](tickets/01-zed1080-capture-research.md)：fps 上限 30 三重确认（含实机诊断 OK）；**FOV 收窄 82°→66°H（中心裁剪非同 FOV 加像素）**，验收线③须 declare；bridge 全参数化零硬编码（04 收窄到 launcher 默认值+yaml）；协议天然支持 3840 宽，代价 373MB/s IPC；USB3 ~249MB/s 无根本限制。
 - [解码闸：Pico WebRTC 路径能否收 3840×1080@30 H.264（L5.x）](tickets/02-pico-decode-gate.md)：**GO**——attempt 2 低熵源全绿（decodeFps 30 稳、0 丢、目视设计图案完整、NVENC 零重启）；attempt 1 花屏 = 噪声源自伤（测解码必须用压缩性内容）。**直通车 03：E 31.5ms / budget 1.1ms（720p 20.2/12.0）**——摊平窗口 1080p 耗尽，shm/conv 优化裁决归 03。
 - 2026-09-02 用户 scoping：NVENC 图留账「pico-bridge URL 可配置化重构建」移入本图（多场真机会话持续踩别名摩擦）→ [pico-bridge URL 可配置化重构建](tickets/06-url-configurable-rebuild.md)；解码闸 attempt 1 花屏定性为噪声测试源自伤（AU ~440KB QP 地板压垮 WiFi + numpy 拖帧），闸门未裁决，attempt 2 低熵源备好。
 ## Not yet specified
 
-- E/预算张力若挤爆（budget < ~6ms 且 JB 回吐）：shm 环形缓冲优化（t02 原型估 −3.5~4ms）是否进本图作为补票——看 03 实测再定
-- 解码闸若 NO-GO：无 1080 SBS 变体可走（L4.2 上限硬顶），需改双流架构或维持 720p 关图——届时重画目的地
+- E 优化包（仅当 05 的 e2e A/B 线失败才启）：enc 等待 17.8-18.7ms 拆解（appsrc→nvvidconv VIC I420→NV12→enc→appsink 全链时延）+ shm 环形缓冲（省 write ~5ms，budget 0.8→~6ms）——03 已裁定单独 shm 无强制力
+- 运动场景码率行为（静景内容受限不代表运动档位有效）：05 观测项，异常才展开
 - overlay 时钟在新分辨率的字号/位置适配（小事，合入票顺手带）
 - e2e 绝对值欠账（回有线复测）与 NVENC 图共用一笔，本图 A/B 线不依赖它
+- ~~解码闸若 NO-GO 的双流重设计~~（闸门已 GO，作废）
 
 ## Out of scope
 
