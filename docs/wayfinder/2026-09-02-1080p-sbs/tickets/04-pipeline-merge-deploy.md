@@ -11,7 +11,7 @@ blocked-by: [01-zed1080-capture-research, 02-pico-decode-gate, 03-encode-transpo
 
 按 01/02/03 的结论实装合入（TDD 纪律同 NVENC 图 t04）：
 
-1. `zed_xr_bridge` 输出尺寸参数化确认/改动（若 01 发现硬编码假设）；
+1. `zed_xr_bridge` 输出尺寸参数化确认/改动（01 已证：**全参数化零硬编码**——本项收敛为 launcher 默认值改 1080 + usage 文本漂移消除，二进制无需重编）；
 2. `cam_config_zed.yaml`：`image_shape: [1080, 3840]`、fps、码率档（03 定稿）；
 3. aiortc codec prefs / SDP level 面：2560×720 曾需强制——3840×1080 是否同样需要显式 codec prefs（及 Pico 侧 fmtp level 接受性，02 已证）；
 4. overlay 时钟字号/位置适配（顺手）；

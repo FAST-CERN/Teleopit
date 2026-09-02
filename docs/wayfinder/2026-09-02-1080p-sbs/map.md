@@ -30,6 +30,7 @@ ZED-M 采集面提到 **HD1080 模式（每眼 1920×1080，SBS 3840×1080 @30fp
 
 ## Decisions so far
 
+- [采集面事实：ZED-M HD1080 + bridge 参数](tickets/01-zed1080-capture-research.md)：fps 上限 30 三重确认（含实机诊断 OK）；**FOV 收窄 82°→66°H（中心裁剪非同 FOV 加像素）**，验收线③须 declare；bridge 全参数化零硬编码（04 收窄到 launcher 默认值+yaml）；协议天然支持 3840 宽，代价 373MB/s IPC；USB3 ~249MB/s 无根本限制。
 ## Not yet specified
 
 - E/预算张力若挤爆（budget < ~6ms 且 JB 回吐）：shm 环形缓冲优化（t02 原型估 −3.5~4ms）是否进本图作为补票——看 03 实测再定
