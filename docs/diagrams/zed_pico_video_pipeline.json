@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ZED → Pico 图传链路",
+    "locale": "zh-CN",
+    "output": "zed_pico_video_pipeline.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "capture-encode",
+        "label": "采集与硬编",
+        "focus": [
+          "zed_mini",
+          "zed_bridge",
+          "teleimager",
+          "nvenc"
+        ],
+        "note": "ZED Mini 校正 SBS 帧经 ZMQ IPC 进入 NVENC 硬编子进程"
+      },
+      {
+        "id": "transmit",
+        "label": "整形与传输",
+        "focus": [
+          "nvenc",
+          "webrtc_send",
+          "pico_client"
+        ],
+        "note": "H.264 AU 经 pacer 整形，WiFi 单跳送达 Pico"
+      },
+      {
+        "id": "render",
+        "label": "渲染与延迟",
+        "focus": [
+          "pico_client",
+          "stereo_render"
+        ],
+        "note": "SBS 半采样立体渲染，端到端 80~100ms（接入方式定）"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "zed_mini",
+      "type": "external",
+      "label": "ZED Mini",
+      "sublabel": "双目相机",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        112,
+        64
+      ]
+    },
+    {
+      "id": "zed_bridge",
+      "type": "backend",
+      "label": "zed_xr_bridge",
+      "sublabel": "ZED SDK 采集",
+      "pos": [
+        188,
+        300
+      ],
+      "size": [
+        122,
+        64
+      ]
+    },
+    {
+      "id": "teleimager",
+      "type": "backend",
+      "label": "teleimager-server",
+      "sublabel": "帧订阅 · 信令端",
+      "pos": [
+        346,
+        300
+      ],
+      "size": [
+        132,
+        64
+      ]
+    },
+    {
+      "id": "nvenc",
+      "type": "backend",
+      "label": "NVENC 硬编子进程",
+      "sublabel": "nvv4l2h264enc",
+      "pos": [
+        514,
+        300
+      ],
+      "size": [
+        132,
+        64
+      ]
+    },
+    {
+      "id": "webrtc_send",
+      "type": "backend",
+      "label": "aiortc WebRTC 发送",
+      "sublabel": "pacer · 有界队列",
+      "pos": [
+        682,
+        300
+      ],
+      "size": [
+        132,
+        64
+      ]
+    },
+    {
+      "id": "pico_client",
+      "type": "frontend",
+      "label": "pico-bridge APK",
+      "sublabel": "WebRTC 解码",
+      "pos": [
+        974,
+        300
+      ],
+      "size": [
+        128,
+        64
+      ]
+    },
+    {
+      "id": "stereo_render",
+      "type": "frontend",
+      "label": "立体渲染",
+      "sublabel": "SBS 半采样着色器",
+      "tag": "e2e 80~100ms",
+      "pos": [
+        1132,
+        300
+      ],
+      "size": [
+        122,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Jetson Orin NX 16GB（G1 机器人）",
+      "wraps": [
+        "zed_bridge",
+        "teleimager",
+        "nvenc",
+        "webrtc_send"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Pico 4 头显",
+      "wraps": [
+        "pico_client",
+        "stereo_render"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "cap-usb",
+      "from": "zed_mini",
+      "to": "zed_bridge",
+      "label": "USB 3.x",
+      "variant": "emphasis",
+      "labelDy": 56
+    },
+    {
+      "id": "bridge-zmq",
+      "from": "zed_bridge",
+      "to": "teleimager",
+      "label": "ZMQ IPC",
+      "labelDy": 56
+    },
+    {
+      "id": "sub-nvenc",
+      "from": "teleimager",
+      "to": "nvenc",
+      "label": "原始帧 I420",
+      "labelDy": -26
+    },
+    {
+      "id": "nvenc-au",
+      "from": "nvenc",
+      "to": "webrtc_send",
+      "label": "H.264 AU · CBR",
+      "labelDy": -26
+    },
+    {
+      "id": "rtp-media",
+      "from": "webrtc_send",
+      "to": "pico_client",
+      "label": "DTLS-SRTP · UDP · WiFi 单跳",
+      "variant": "emphasis"
+    },
+    {
+      "id": "decode-render",
+      "from": "pico_client",
+      "to": "stereo_render",
+      "label": "解码帧",
+      "labelDy": -26
+    },
+    {
+      "id": "signaling",
+      "from": "pico_client",
+      "to": "teleimager",
+      "label": "HTTPS :60001 · POST /offer",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "链路",
+      "items": [
+        "ZED Mini → Jetson Orin NX → WiFi 单跳 → Pico 4 头显",
+        "H.264 · 2560×720 SBS @30fps · 4Mbps CBR"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "延迟",
+      "items": [
+        "端到端 80~100ms：有线 ~80 / WiFi 接入 ~100（拍照法实测）",
+        "硬编红利：jitter buffer 中位 17.7→11.8ms"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "稳定机制",
+      "items": [
+        "REMB 拥塞控制 · PLI 关键帧请求",
+        "NVENC 子进程崩溃自恢复",
+        "有界中继队列防积压"
+      ]
+    }
+  ]
+}
