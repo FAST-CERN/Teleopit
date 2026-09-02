@@ -32,6 +32,8 @@ created: 2026-09-02
 
 ## Decisions so far
 
+- [720/1080 切换接口 + bridge↔server 帧头协商](tickets/04-pipeline-merge-deploy.md)：**offer 驱动 managed bridge**（`TELEIMAGER_MANAGE_BRIDGE=1`，teleimager `118555f`）——APK 的 resolution 提示重启 bridge 换档，SDP 不等帧、编码器按首帧自适应；用户实机切换成功（FOV 82↔66° 可辨）。run_stack 命令行换档形态被 app 内药丸取代。
+- [pico-bridge URL 可配置化重构建](tickets/06-url-configurable-rebuild.md)：**完成**（`af50f5f`）——双八位组 IP 输入+持久化（hex 补丁与 .250 别名退役）、Resolution 药丸、沉浸加载环、全英文化；Unity 许可有效批量构建直跑通。残留 UI 微调三件在后续 grill。
 - [编码传输实测：1080p E 分段 / 码率档 / pacer 预算 / WiFi 容量](tickets/03-encode-transport-probe.md)：E 分段 conv 1.7-2.1 / write 4.7-5.3 / **enc 等待 17.8-18.7ms（大头）**，栈内 31.1ms / budget 0.8ms；**SPS L5.0 实锤**；静景码率三档全内容受限（AU 13-15KiB）；8M 真源佩戴 20 包/帧、5.2Mbps、**0 丢、JB ~15ms 不劣于 720p**。**04 参数定稿：8M/max12M/gop30/pacer on/hard**；shm 不转正（治标且无强制力），留雾区 E 优化包。
 - [采集面事实：ZED-M HD1080 + bridge 参数](tickets/01-zed1080-capture-research.md)：fps 上限 30 三重确认（含实机诊断 OK）；**FOV 收窄 82°→66°H（中心裁剪非同 FOV 加像素）**，验收线③须 declare；bridge 全参数化零硬编码（04 收窄到 launcher 默认值+yaml）；协议天然支持 3840 宽，代价 373MB/s IPC；USB3 ~249MB/s 无根本限制。
 - [解码闸：Pico WebRTC 路径能否收 3840×1080@30 H.264（L5.x）](tickets/02-pico-decode-gate.md)：**GO**——attempt 2 低熵源全绿（decodeFps 30 稳、0 丢、目视设计图案完整、NVENC 零重启）；attempt 1 花屏 = 噪声源自伤（测解码必须用压缩性内容）。**直通车 03：E 31.5ms / budget 1.1ms（720p 20.2/12.0）**——摊平窗口 1080p 耗尽，shm/conv 优化裁决归 03。

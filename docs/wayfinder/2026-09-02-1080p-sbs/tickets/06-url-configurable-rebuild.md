@@ -2,8 +2,8 @@
 id: 06-url-configurable-rebuild
 title: "pico-bridge URL 可配置化重构建（退役等长补丁 + .250 别名）"
 labels: [wayfinder:task]
-status: open
-assignee: ""
+status: closed
+assignee: "claude-code"
 blocked-by: []
 ---
 
@@ -18,3 +18,13 @@ NVENC 图部署事故留的根治欠账（用户 2026-09-02 决定移入本图�
 验收：机器人重启（无别名）后 app 手输 `192.168.5.5:60001` 直连成功出图。
 
 ## Resolution
+
+2026-09-02 用户实机验收**成功**（pico-bridge `af50f5f`，feat/stereo-fpv 已推；Unity 2022.3.62f3 批量构建管线 `PicoBridgeStereoBuild.RebuildPrefabAndBuildApk` 直跑通，许可有效——「8/31 过期」记忆过时）。
+
+交付四件：
+1. **URL 可配置**：面板 Server 行 `192.168.[A].[B]` 双八位组框 + Connect（控制器拼装 `https://192.168.A.B:60001/offer`），PlayerPrefs 持久化（`pico_bridge.teleimager_url`），`WebRtcHttpSignalingClient.SetServerUrl/Awake 加载`；DefaultUrl 更新为 `.5`。**hex 补丁 APK + `.250` 别名正式退役**。
+2. **Resolution 药丸**（720p/1080p）：持久化（`..._resolution`）+ 随 offer body 发送 → 配 04 的 managed bridge 现场切换成功。
+3. **沉浸加载环**：`StereoImmersiveLoadingSpinner`（三段 dash 环，Sprites/Default 无字体依赖，Bootstrap 自装、Controller 驱动）——无帧即转，首帧即隐；也盖住 04 的换档间隙。
+4. 面板全英文化（TMP 字体无 CJK 字形——中文渲染为 □）。
+
+过程教训：UI 层级改动必须走 `PicoBridgeSceneUiTemplate`（AGENTS.md 规则，runtime 脚本禁建 UI）；APK 签名与 hex 补丁版不同需卸载重装。残留小项（用户后续 UI grill）：面板底部包不住 UI、透明度 bar 过窄长、加载环样式微调。
