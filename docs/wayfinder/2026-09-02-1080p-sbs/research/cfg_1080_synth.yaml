@@ -1,0 +1,21 @@
+# sbs-1080p map ticket 02 (decode gate): synthetic-source 3840x1080 probe
+# config, modeled on the pacer-map PC A/B config. Serves on the robot so the
+# patched APK URL (192.168.5.250:60001) reaches it and the REAL NVENC child
+# emits the true L5.x SPS the gate must adjudicate.
+synth:
+  type: zed_bridge
+  endpoint: "tcp://127.0.0.1:15558"
+  image_shape: [1080, 3840]   # packed [H, W] SBS (left 1920 + right 1920)
+  fps: 30
+  enable_zmq: false
+  enable_webrtc: true
+  webrtc_port: 60001
+  webrtc_codec: h264
+  binocular: true
+
+webrtc:
+  bitrate:
+    min: 2000000
+    default: 8000000
+    max: 12000000
+  gop_length: 30
