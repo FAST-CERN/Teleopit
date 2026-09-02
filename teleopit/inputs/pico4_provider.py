@@ -106,6 +106,26 @@ class PicoHeadPoseSnapshot:
     seq: int
 
 
+@dataclass(frozen=True)
+class PicoTrackerState:
+    """One motion tracker bound to a body side, pose kept in pico_native xyzw."""
+
+    sn: int
+    valid: bool
+    position: NDArray[np.float64] | None
+    rotation_xyzw: NDArray[np.float64] | None
+
+
+@dataclass(frozen=True)
+class PicoTrackerSnapshot:
+    """Latest per-side motion tracker poses for the arm synthesizer."""
+
+    left: PicoTrackerState | None
+    right: PicoTrackerState | None
+    timestamp_s: float
+    seq: int
+
+
 _PAUSE_BUTTON_MAP: dict[str, tuple[str, str]] = {
     "A": ("right", "primaryButton"),
     "B": ("right", "secondaryButton"),
@@ -250,9 +270,9 @@ class Pico4InputProvider(RealtimeInputProvider):
                     "for example: pip install -e '.[pico4]'"
                 ) from exc
             installed_version = _installed_pico_bridge_version()
-            if installed_version is None or installed_version < (0, 2, 1):
+            if installed_version is None or installed_version < (0, 2, 2):
                 raise RuntimeError(
-                    "pico_bridge >= 0.2.1 is required for Pico4 input. Reinstall the Pico extra with "
+                    "pico_bridge >= 0.2.2 is required for Pico4 input (motion tracker support). Reinstall the Pico extra with "
                     "pip install -e '.[pico4]' so Teleopit receives pico_native tracking semantics."
                 )
             bridge_cls = PicoBridge
@@ -308,6 +328,7 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._controller_snapshot: PicoControllerSnapshot | None = None
         self._hand_snapshot: PicoHandSnapshot | None = None
         self._head_pose_snapshot: PicoHeadPoseSnapshot | None = None
+        self._tracker_snapshot: PicoTrackerSnapshot | None = None
         self._ground_alignment_offset: float | None = None
         self._bridge = bridge_cls(
             host=bridge_host,
@@ -409,6 +430,11 @@ class Pico4InputProvider(RealtimeInputProvider):
         with self._lock:
             return self._head_pose_snapshot
 
+    def get_tracker_snapshot(self) -> PicoTrackerSnapshot | None:
+        """Return the latest per-side motion tracker snapshot, if one has arrived."""
+        with self._lock:
+            return self._tracker_snapshot
+
     def push_video_frame(self, frame: NDArray[np.uint8]) -> int:
         """Push one RGB camera frame to pico-bridge 0.2.1 video output."""
         push_video_frame = getattr(self._bridge, "push_video_frame", None)
@@ -476,6 +502,7 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._accept_head_pose_snapshot(frame, timestamp=timestamp)
         self._accept_controller_snapshot(frame, timestamp=timestamp)
         self._accept_hand_snapshot(frame, timestamp=timestamp)
+        self._accept_tracker_snapshot(frame, timestamp=timestamp)
         self._poll_control_events(frame, timestamp=timestamp)
 
         body = getattr(frame, "body", None)
@@ -569,6 +596,32 @@ class Pico4InputProvider(RealtimeInputProvider):
         )
         with self._lock:
             self._head_pose_snapshot = snapshot
+
+    def _accept_tracker_snapshot(self, frame: Any, *, timestamp: float) -> None:
+        seq = int(getattr(frame, "seq", self._last_source_seq or -1))
+
+        def read_tracker(state: Any) -> PicoTrackerState | None:
+            if state is None:
+                return None
+            pose = getattr(state, "pose", None)
+            position = None if pose is None else getattr(pose, "position", None)
+            rotation = None if pose is None else getattr(pose, "rotation", None)
+            return PicoTrackerState(
+                sn=int(getattr(state, "sn", 0)),
+                valid=bool(getattr(state, "valid", False)),
+                position=None if position is None else np.asarray(position, dtype=np.float64).reshape(-1).copy(),
+                rotation_xyzw=None if rotation is None else np.asarray(rotation, dtype=np.float64).reshape(-1).copy(),
+            )
+
+        trackers = getattr(frame, "trackers", None)
+        snapshot = PicoTrackerSnapshot(
+            left=read_tracker(None if trackers is None else getattr(trackers, "left", None)),
+            right=read_tracker(None if trackers is None else getattr(trackers, "right", None)),
+            timestamp_s=float(timestamp),
+            seq=seq,
+        )
+        with self._lock:
+            self._tracker_snapshot = snapshot
 
     def _poll_control_events(self, frame: Any, *, timestamp: float) -> bool:
         emitted = False

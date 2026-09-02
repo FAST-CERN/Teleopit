@@ -45,6 +45,7 @@ created: 2026-09-02
 
 - 2026-09-02 t01 闭（research/01）：活体 API=单数 `GetMotionTrackerLocation`（复数+`tobeContinued` 已废弃/不存在，SDK 3.4.0 无需升级）；位姿=HMD local 右手系→复用 AppendBody 翻转（−Z/−Qz/−Qw）标 `pico_tracker_local`，接收端+Teleopit 链零新约定；采样固定 50Hz、无 per-sample 时戳；左右绑定=app 层单只开机指认持久化（启动枚举走 `CheckMotionTrackerNumber` 完成回调）；腕部无 SDK 限制、真约束=HMD 光学可见性（06 加手臂扫掠、05 加 valid=false 策略）。
 - 2026-09-02 t05 闭（grilling 六问，research/05）：合成形态=**完整合成 body 等价帧**（方案 A，ik 表零改动）住 **provider 层**（`tracker_arm_synth.py`；03 哑传感器、04 只透传）；肩锚=HMD 刚体常数、肘=中点+外偏（k=0.05 配置，swivel 留 06 对局）；安装偏移=静态测量 YAML（tracker 系，`p_腕=p_tracker−R·offset`，06 ±2cm 灵敏度）；坐标全链复用零新变换；失效=hold 0.3s→整帧 invalid→现有闸门链（新语义=0）；时间=03 同帧结构保证、有效 50Hz。06 实装清单+接口签名在 research/05 §1–2。
+- 2026-09-02 t04 闭（TDD；pico-bridge `7e83469` 0.2.2 + Teleopit `71e3588`）：wire 契约 side-first（`Motion.left/right{sn,p,valid}`）；`PicoFrame.trackers` 容错解析（无 Motion/占位=inactive）；recording 零改动透写往返锁契约；provider `get_tracker_snapshot()` pico_native xyzw 原样透传（body 拒帧时照常捕获）；版本闸抬 (0,2,2)（gate 测试原传 bridge_cls 绕闸缺陷一并修）。真机回放补验欠账回写 03 票面。pc_receiver 108 过、Teleopit 589 过（4 失败+11 收集错均为预置欠账）。
 
 ## Not yet specified
 

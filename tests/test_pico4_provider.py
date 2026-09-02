@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from teleopit.inputs import pico4_provider
 from teleopit.inputs.pico4_provider import BODY_JOINT_NAMES, Pico4InputProvider
 from teleopit.inputs.realtime_frame_cache import RealtimeFrameCache
 from teleopit.inputs.realtime_packet import ControlEventType
@@ -101,6 +102,7 @@ def _make_provider() -> Pico4InputProvider:
     provider._controller_snapshot = None
     provider._hand_snapshot = None
     provider._head_pose_snapshot = None
+    provider._tracker_snapshot = None
     provider._closed = False
     return provider
 
@@ -175,7 +177,13 @@ def test_pico4_provider_starts_pico_bridge_receiver_with_config() -> None:
     assert bridge.closed is True
 
 
-def test_pico4_provider_requires_pico_bridge_0_2_1_signature() -> None:
+def test_pico4_provider_requires_pico_bridge_0_2_2_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pico4_provider, "_installed_pico_bridge_version", lambda: (0, 2, 1))
+    with pytest.raises(RuntimeError, match=r"pico_bridge >= 0\.2\.2"):
+        Pico4InputProvider(timeout=0.01)
+
+
+def test_pico4_provider_requires_video_enabled_signature() -> None:
     with pytest.raises(RuntimeError, match=r"pico_bridge >= 0\.2\.1"):
         Pico4InputProvider(timeout=0.01, bridge_cls=_LegacyBridge)
 
@@ -489,3 +497,48 @@ def test_controller_state_absent_controller_defaults_zero_axis():
     assert state.axis_x == 0.0
     assert state.axis_y == 0.0
     assert state.present is False
+
+
+def test_pico4_provider_exposes_tracker_snapshot_raw_pose() -> None:
+    provider = _make_provider()
+    frame = _pico_frame(_body_poses(1.0), seq=3, timestamp=1.0)
+    frame.trackers = SimpleNamespace(
+        left=SimpleNamespace(
+            sn=12345678901,
+            valid=True,
+            pose=SimpleNamespace(
+                position=np.array([0.1, 0.2, 0.3]),
+                rotation=np.array([0.0, 0.0, 0.0, 1.0]),
+            ),
+        ),
+        right=SimpleNamespace(sn=98765432109, valid=False, pose=None),
+    )
+
+    assert provider._accept_pico_frame(frame) is True
+
+    snapshot = provider.get_tracker_snapshot()
+    assert snapshot is not None
+    assert snapshot.seq == 3
+    assert snapshot.timestamp_s == pytest.approx(1.0)
+    assert snapshot.left is not None
+    assert snapshot.left.sn == 12345678901
+    assert snapshot.left.valid is True
+    np.testing.assert_allclose(snapshot.left.position, [0.1, 0.2, 0.3])
+    np.testing.assert_allclose(snapshot.left.rotation_xyzw, [0.0, 0.0, 0.0, 1.0])
+    assert snapshot.right is not None
+    assert snapshot.right.sn == 98765432109
+    assert snapshot.right.valid is False
+    assert snapshot.right.position is None
+    assert snapshot.right.rotation_xyzw is None
+
+
+def test_pico4_provider_tracker_snapshot_defaults_when_frame_lacks_trackers() -> None:
+    provider = _make_provider()
+    assert provider.get_tracker_snapshot() is None
+
+    assert provider._accept_pico_frame(_pico_frame(_body_poses(1.0), seq=1, timestamp=1.0)) is True
+
+    snapshot = provider.get_tracker_snapshot()
+    assert snapshot is not None
+    assert snapshot.left is None
+    assert snapshot.right is None

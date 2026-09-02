@@ -18,3 +18,5 @@ blocked-by: ["01-tracker-sdk-semantics", "02-unity-build-env"]
 5. 顺手项（开票后定）：硬编码 `/offer` URL 改可配置——若做，清 1080p 图同款欠账。
 
 验收：真机 TCP 流里 `Motion` 字段带 2 tracker 位姿、72Hz 帧率不塌、与 Head/Controller 同帧串流。
+
+**欠账带入**（04 已闭挂此）：装机后真机 Motion 流录一段 JSONL → `from_tracking_payload` 回放，确认 `trackers` 解析通过（04 Resolution §6）。
