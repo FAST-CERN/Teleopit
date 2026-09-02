@@ -8,7 +8,9 @@ created: 2026-09-02
 
 ## Destination
 
-ZED-M 采集面提到 **HD1080 模式（每眼 1920×1080，SBS 3840×1080 @30fps）**，全链路（bridge 采集 → NVENC 硬编 → pacer/WebRTC → Pico 解码立体渲染）实装上线并**四线验收**：① e2e 同日 A/B 不劣化（vs 720p 同日基线 +5ms 容差）② 30fps 不掉 ③ 画质主观提升可辨（正向判定，本次升级的意义）④ 码率按选定档 CBR 窄带收敛。
+**（2026-09-02 用户重画）** ZED-M 采集面 720p/1080p **可切换实验态**：留下两样东西——①修改 720P/1080P 配置的**切换接口**（launcher env / run_stack 参数），②bridge↔server 的**程序间协商机制**（帧头驱动、配置不漂移）。跳过正式合入部署与四线验收（e2e 现状体感 ~200-300ms，延迟长路另图另日）。附带收束 [pico-bridge URL 可配置化重构建](tickets/06-url-configurable-rebuild.md) 与 [ZED 半枚举查因](tickets/07-zed-half-enumeration-rca.md)。
+
+**原目的地（作废存档）**：全链路实装上线 + 四线验收（A/B 不劣化 +5ms / 30fps / 画质正向可辨 declare FOV / 码率收敛）。
 
 ## Notes
 
@@ -44,6 +46,7 @@ ZED-M 采集面提到 **HD1080 模式（每眼 1920×1080，SBS 3840×1080 @30fp
 
 ## Out of scope
 
+- [Pico 实机四线验收](tickets/05-e2e-acceptance.md)：**2026-09-02 重画目的地时出范围关闭**（跳过部署+验收；e2e 现状体感 ~200-300ms、长路另图；四线框架留档可复用）
 - 60fps（ZED-M HD1080 物理上限 30fps；60fps 欠账仍属 720p 独立图）
 - H.265/AV1（NVENC 图已出图，不变）
 - 接收端 pico-bridge 渲染逻辑改动（中点拆分对 3840 宽天然成立；仅解码接受性问题属本图）

@@ -2,7 +2,7 @@
 id: 05-e2e-acceptance
 title: "Pico 实机四线验收：A/B 不劣化 + 30fps + 画质提升 + 码率收敛"
 labels: [wayfinder:task]
-status: open
+status: closed
 assignee: ""
 blocked-by: [04-pipeline-merge-deploy]
 ---
@@ -19,4 +19,6 @@ blocked-by: [04-pipeline-merge-deploy]
 
 四线全过 → 收图；画质不可辨 → 回流码率档（03）；fps 掉 → 回流采集/编码（01/03）；e2e 劣化超容差 → 回流预算（03/shm 票）。
 
-## Resolution
+## Resolution（关票：重画出范围）
+
+2026-09-02 用户重画目的地时裁决**出范围关闭**（非验收通过）：跳过正式部署与四线验收——e2e 现状体感 ~200-300ms（未走照片法，与 720p 日 ~100ms 读数差距显著）、延迟长路另图另日。四线框架与 FOV declare 口径保留在 git 历史里，将来重开验收图时直接复用（01/02/03 的事实与 03 定稿参数仍是有效输入）。
