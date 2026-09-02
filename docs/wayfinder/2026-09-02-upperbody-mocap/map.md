@@ -44,14 +44,12 @@ created: 2026-09-02
 ## Decisions so far
 
 - 2026-09-02 t01 闭（research/01）：活体 API=单数 `GetMotionTrackerLocation`（复数+`tobeContinued` 已废弃/不存在，SDK 3.4.0 无需升级）；位姿=HMD local 右手系→复用 AppendBody 翻转（−Z/−Qz/−Qw）标 `pico_tracker_local`，接收端+Teleopit 链零新约定；采样固定 50Hz、无 per-sample 时戳；左右绑定=app 层单只开机指认持久化（启动枚举走 `CheckMotionTrackerNumber` 完成回调）；腕部无 SDK 限制、真约束=HMD 光学可见性（06 加手臂扫掠、05 加 valid=false 策略）。
+- 2026-09-02 t05 闭（grilling 六问，research/05）：合成形态=**完整合成 body 等价帧**（方案 A，ik 表零改动）住 **provider 层**（`tracker_arm_synth.py`；03 哑传感器、04 只透传）；肩锚=HMD 刚体常数、肘=中点+外偏（k=0.05 配置，swivel 留 06 对局）；安装偏移=静态测量 YAML（tracker 系，`p_腕=p_tracker−R·offset`，06 ±2cm 灵敏度）；坐标全链复用零新变换；失效=hold 0.3s→整帧 invalid→现有闸门链（新语义=0）；时间=03 同帧结构保证、有效 50Hz。06 实装清单+接口签名在 research/05 §1–2。
 
 ## Not yet specified
 
-- tracker→腕中心**安装偏移标定流程**（手套手背固定偏移的测量与配置化）——等 01 SDK 语义 + 05 设计定形态，可能并入 05 或独立小票
 - APK 重编时是否顺手把硬编码 `/offer` URL 改可配置（清 1080p 图 06 票的同类欠账）——03 合入票定
 - receiver 追踪录制（recording）扩展 `Motion` 字段作为 06 验收的可重复输入工具——06 开票时按需毕业
-- 若 SDK 语义不符预期（如位姿只有 3DOF / 频率过低 / 坐标系非头显系）：合成方案的退化路线（保底肘启发式、双 tracker 融合权重）——05 的对局分支
-- 统一 policy 的 obs 接口（velocity+上半身动捕）——下一张图核心；本图产出（合成帧/腕目标格式）即其输入约定，05 定稿时留好快照
 
 ## Out of scope
 
