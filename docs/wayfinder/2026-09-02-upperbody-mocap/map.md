@@ -47,11 +47,13 @@ created: 2026-09-02
 - 2026-09-02 t05 闭（grilling 六问，research/05）：合成形态=**完整合成 body 等价帧**（方案 A，ik 表零改动）住 **provider 层**（`tracker_arm_synth.py`；03 哑传感器、04 只透传）；肩锚=HMD 刚体常数、肘=中点+外偏（k=0.05 配置，swivel 留 06 对局）；安装偏移=静态测量 YAML（tracker 系，`p_腕=p_tracker−R·offset`，06 ±2cm 灵敏度）；坐标全链复用零新变换；失效=hold 0.3s→整帧 invalid→现有闸门链（新语义=0）；时间=03 同帧结构保证、有效 50Hz。06 实装清单+接口签名在 research/05 §1–2。
 - 2026-09-02 t04 闭（TDD；pico-bridge `7e83469` 0.2.2 + Teleopit `71e3588`）：wire 契约 side-first（`Motion.left/right{sn,p,valid}`）；`PicoFrame.trackers` 容错解析（无 Motion/占位=inactive）；recording 零改动透写往返锁契约；provider `get_tracker_snapshot()` pico_native xyzw 原样透传（body 拒帧时照常捕获）；版本闸抬 (0,2,2)（gate 测试原传 bridge_cls 绕闸缺陷一并修）。真机回放补验欠账回写 03 票面。pc_receiver 108 过、Teleopit 589 过（4 失败+11 收集错均为预置欠账）。
 - 2026-09-03 t02 闭（research/02-build-env）：许可已重签（UnityPersonal，StopDate 2026-09-07，Hub 周滚签）；干净树 `7e83469` 批处理 Validate 全绿 + IL2CPP 出包 Success（59.2 MiB，热缓存 41s）；**坑=批处理成功后 Unity.exe 挂死须 taskkill+删锁**；出包命令在 notes §3，t03 增量包直接复用。sbs-1080p spinner WIP 已 stash 隔离，归该图处置。
+- 2026-09-03 t03 代码面落地（pico-bridge `fdefb58` 0.2.3，装机验收待 HITL）：用户定序「先 t03 核心避开 panel」——SN 绑定走 MotionTrackerBinding 自动指认（先左后右+JSON 持久化），panel 面推迟；sendMotion 真机开启走 BridgeControl tracking/set_motion（接收端 `--motion-trackers`）；wire 契约以 t04 side-first 为准（t01 数组形 sketch 作废）；mock+dump 端到端验证过，109 测试（1 预置 aiortc 败）。APK 已出待装机（票内 runbook）。
 
 ## Not yet specified
 
-- APK 重编时是否顺手把硬编码 `/offer` URL 改可配置（清 1080p 图 06 票的同类欠账）——03 合入票定
-- receiver 追踪录制（recording）扩展 `Motion` 字段作为 06 验收的可重复输入工具——06 开票时按需毕业
+- ~~APK 重编时是否顺手把硬编码 `/offer` URL 改可配置~~——已被 pico-bridge `af50f5f`（1080p 图 t06）清掉，03 无剩余顺手项
+- receiver 追踪录制（recording）扩展 `Motion` 字段作为 06 验收的可重复输入工具——recording 零改动透写已天然覆盖（t04 已锁往返），06 直接用
+- t03 panel 面（SN 绑定显示 + sendMotion 面板开关）——推迟到 sbs-1080p UI WIP（pico-bridge stash）合流后的小票；当前用 BridgeControl tracking/set_motion 远程开关
 
 ## Out of scope
 
