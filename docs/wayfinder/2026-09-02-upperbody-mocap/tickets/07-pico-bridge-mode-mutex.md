@@ -56,6 +56,12 @@ t06 主观轮诊断出 body 流「发但空」三因（panel `EnableAutomaticTra
 - 头盔未佩戴时 PICO 会冻结/回收 3D app（am start 后进程消失）——装机轮需佩戴。
 - **多接收端发现竞争**：app 锁定首个发现包（Jetson `.5` 的幽灵广播曾抢占 → 连接被拒死循环）；force-stop app 重发现即可解。Jetson 侧当时无广播进程，来源待查。
 
+**标定可视化增补（2026-09-04 深夜，用户需求：tracker 重绑扎后安装朝向需重标，可视化须标明方向；pico-bridge `763f480`）**：
+
+- `MotionTrackerVisualizer`（设备端常驻）：每个 tracker 位姿处渲染小 Cube + **RGB 三轴杆（带箭头尖端）**，轴向=**`pico_tracker_local`**（与 `tracker_synth_config.tracker_offset` 写入坐标系严格一致——对屏量出 `offset = p_tracker − p_腕`（gizmo 轴分量）直接贴 YAML，零换算）。
+- FOV 反馈：valid=侧色（左橙/右绿）；丢追=**灰色 ghost 冻在末位姿**（操作员可见丢在哪、往哪收）；断连=隐藏。panel SN 行补 `?` 后缀=光学 invalid（`!`=蓝牙断连语义不变）。
+- 编辑器冒烟扩到 22 检查全过；APK **t07b**（62,071,856B）已出待装机。
+
 **HITL runbook（待人工，续）**：
 
 1. 装机：`adb -s PA8A10MGJ2280107D install -r F:\Chufan_Rui\teleop\t02-verify\pico-bridge-t07a.apk`
