@@ -16,3 +16,15 @@ blocked-by: ["01-sonic-interface-recon"]
 - **仿真闭环**：复用 `MuJoCoRobot` + `VelocitySimSession` 模式（**pd_hz 200 不变量**），`g1_29dof.xml` 基线 + RH56E2 腕端配重变体；
 - **指标采集**：指令/上身跟踪误差、稳定时长、端到端延迟（日志法）；
 - 契约测试 + 冒烟（回放坐标冒烟段，viewer 观察）。
+
+## Progress
+
+**2026-09-04 lines 1-3 落地（Teleopit `5156b74` + 后续 commit；45 测试全绿）**：
+
+1. **策略适配层** `teleopit/policies/sonic/`：`joint_order`（映射数组 verbatim 自 policy_parameters.hpp:100-104；方向以 upper-body 交叉表裁决——变量名与注释相反，TDD 当场抓到一次方向反写）；`observation`（994D decoder + 1247D encoder 装配：块序、偏差坐标、oldest→newest、钳尾前瞻、6D=旋转矩阵前两列行展开、vr/smpl 支路置零=官方 v1 流对齐）；`params`（SONIC 自有 default/scale，hip_pitch 用新 7520_22 表与本地 g1.yaml 不同）；`runtime`（onnxruntime enc/dec 封装 + 加载期维度校验，checkpoint 落 `assets/policies/sonic/low_latency/` gitignored）。
+2. **闭环** `teleopit/sim/sonic_session.py`：50Hz 策略 + 4×0.005 物理（pd_hz 200 不变量）+ 骨盆高度跌倒保护 + 上身跟踪/根高/action 量级指标。
+3. **变体** `teleopit/sim/sonic_variants.py`：锁腰（三腰关节 range 0 0）+ RH56E2 配重（**改 `<inertial>`**：mass/CoM 平行轴精确/diaginertia 点档+0 盒档+m/12 项——本地 XML 腕 body 显式 inertial 使 geom 质量无效，research/01 §7"碰撞 geom 有质量"论断对本地 XML 不成立，已修正）。
+4. **端到端冒烟（真 low_latency checkpoint）**：站姿参考 4s 三变体全稳——基线/锁腰 root_z≈0.765 平直、+0.5kg 盒 RMSE 0.0464（基线 0.0593）action 1.52（1.30）、锁腰+配重同稳。**对照实验：纯被动 PD 保持 1.5s 塌（plant 属性，策略必须主动平衡）——Python 复刻链数值正确性由此反证**。
+5. **风险项消除一条**：low_latency 的 994/1247 obs 里无 root_z 字段（研究 §1.3 风险只适用于 default 变体 obs），root_z 恒 0 风险对本 checkpoint 不存在。
+
+**剩余线（待续）**：真实输入源（JSONL 回放→tracker_arm_synth→GMR/mink 重定向→上身 qpos，依赖 mocap 图 t06 产出）；cmd_vel 步态线（恒值持尾前瞻的参考生成器 + BSI 映射）；腕力矩饱和率指标；viewer 冒烟。

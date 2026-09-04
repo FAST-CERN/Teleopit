@@ -42,6 +42,7 @@ created: 2026-09-04
 
 - 2026-09-04 开图：选型 GEAR-SONIC（Top1）+ AMO fallback + unitree_rl_lab 自训回退（预研排名，用户确认）；sim2sim 先行、真机另议。
 - 2026-09-04 t01 闭（research/01）：直灌可行免 FK（`pose` topic v1，ZMQ 5556，IsaacLab 交错序，映射表进 harness 常量）；checkpoint 主线 **low_latency**+对照 v1_1，**inference 无需 Isaac Lab**（onnxruntime）；锁腰=参考置 0 无需钳输出；腕直灌、颈旁路实锤；RH56E2 四档配重对照设计在档；sim2sim=Python+onnxruntime+MuJoCoRobot（200/50Hz 同构 pd_hz 200）。**速度线用户定案：cmd_vel 直造前瞻（恒值持尾），不引官方 planner**。frontier→t02。
+- 2026-09-04 t02 lines 1-3 落地（45 测试绿）：策略适配层+闭环+锁腰/配重变体；真 checkpoint 端到端 4s 三变体全稳（root_z≈0.765 平直，纯被动 PD 1.5s 塌的对照反证 obs 复刻数值正确）；**两处勘误**：映射数组方向以交叉表裁决（源码变量名与注释相反）、本地 XML 腕显式 inertial 使 geom 质量无效（配重须改 inertial，research/01 §7 修正）；low_latency obs 无 root_z 字段，恒 0 风险消除。剩：回放输入源、cmd_vel 步态线、腕力矩饱和指标。
 
 ## Not yet specified
 
