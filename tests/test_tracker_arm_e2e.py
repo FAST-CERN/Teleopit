@@ -28,6 +28,7 @@ import pytest
 from teleopit.inputs.pico4_provider import Pico4InputProvider
 from teleopit.inputs.realtime_frame_cache import RealtimeFrameCache
 from teleopit.inputs.tracker_arm_synth import SynthConfig, TrackerArmSynthesizer
+from teleopit.inputs.tracker_replay import frame_from_record
 
 SLICE_PATH = Path(__file__).parent / "data" / "tracker_replay_slice.jsonl"
 ARM_JOINT_SLICE = slice(7 + 15, 7 + 29)  # qpos arm joints (robot side, idx 15-28)
@@ -90,35 +91,9 @@ def _provider() -> Pico4InputProvider:
     return provider
 
 
-def _pose(raw: dict[str, Any] | None) -> SimpleNamespace | None:
-    if raw is None:
-        return None
-    values = [float(v) for v in str(raw["p"]).split(",")]
-    return SimpleNamespace(
-        position=np.asarray(values[0:3], dtype=np.float64),
-        rotation=np.asarray(values[3:7], dtype=np.float64),
-    )
-
-
-def _replay_frame(payload: dict[str, Any], *, receive_time_s: float | None = None) -> SimpleNamespace:
-    head_raw = payload.get("Head", {})
-    head_pose = _pose({"p": head_raw.get("pose", "0,1.7,0,0,0,0,1")} if head_raw else None)
-    motion = payload.get("Motion", {})
-    return SimpleNamespace(
-        seq=int(payload.get("seq", 0)),
-        receive_time_s=float(payload["timeStampNs"] / 1e9) if receive_time_s is None else receive_time_s,
-        head=head_pose,
-        body=SimpleNamespace(active=False, joints=None),
-        trackers=SimpleNamespace(
-            left=None
-            if "left" not in motion
-            else SimpleNamespace(sn=int(motion["left"].get("sn", 0)), valid=bool(motion["left"].get("valid")), pose=_pose(motion["left"])),
-            right=None
-            if "right" not in motion
-            else SimpleNamespace(sn=int(motion["right"].get("sn", 0)), valid=bool(motion["right"].get("valid")), pose=_pose(motion["right"])),
-        ),
-        controllers=SimpleNamespace(left=SimpleNamespace(buttons={}), right=SimpleNamespace(buttons={})),
-    )
+def _replay_frame(record: dict[str, Any], *, receive_time_s: float | None = None) -> SimpleNamespace:
+    """Recording envelope -> pico_bridge frame (shared with the replay tool)."""
+    return frame_from_record(record, receive_time_s=receive_time_s)
 
 
 def _load_slice() -> list[dict[str, Any]]:
@@ -149,8 +124,7 @@ def replay_results(retargeter):
     processing_s: list[float] = []
 
     for record in records:
-        payload = record["payload"]
-        frame = _replay_frame(payload)
+        frame = _replay_frame(record)
         start = time.perf_counter()
         ok = provider._accept_pico_frame(frame)
         human = provider.get_frame() if ok else None
@@ -206,22 +180,22 @@ def test_dropout_beyond_hold_starves_then_recovers(retargeter) -> None:
     records = _load_slice()
     provider = _provider()
 
-    warmup = _replay_frame(records[0]["payload"])
+    warmup = _replay_frame(records[0])
     assert provider._accept_pico_frame(warmup) is True
 
     # invalidate both trackers with time running past the hold window
     base_s = float(records[0]["payload"]["timeStampNs"] / 1e9)
-    invalid_frame = _replay_frame(records[1]["payload"], receive_time_s=base_s + 0.1)
+    invalid_frame = _replay_frame(records[1], receive_time_s=base_s + 0.1)
     for side in (invalid_frame.trackers.left, invalid_frame.trackers.right):
         side.valid = False
     assert provider._accept_pico_frame(invalid_frame) is True  # still inside hold
 
-    expired_frame = _replay_frame(records[2]["payload"], receive_time_s=base_s + 0.5)
+    expired_frame = _replay_frame(records[2], receive_time_s=base_s + 0.5)
     for side in (expired_frame.trackers.left, expired_frame.trackers.right):
         side.valid = False
     assert provider._accept_pico_frame(expired_frame) is False  # whole frame invalid
 
-    recovered_frame = _replay_frame(records[3]["payload"], receive_time_s=base_s + 0.6)
+    recovered_frame = _replay_frame(records[3], receive_time_s=base_s + 0.6)
     assert provider._accept_pico_frame(recovered_frame) is True
     qpos = retargeter.retarget(provider.get_frame())
     assert np.all(np.isfinite(qpos))
