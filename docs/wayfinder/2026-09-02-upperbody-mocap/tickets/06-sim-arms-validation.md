@@ -3,8 +3,8 @@ id: 06-sim-arms-validation
 title: "sim ARMS 模式四线验收：合成输入喂现有重定向，双臂跟随过线"
 labels: [wayfinder:prototype]
 status: open
-assignee: ""
-blocked-by: ["04-receiver-motion-parse", "05-teleopit-synthesis-design"]
+assignee: claude
+blocked-by: []
 ---
 
 ## Question

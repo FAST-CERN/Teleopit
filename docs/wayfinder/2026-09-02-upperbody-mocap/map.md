@@ -49,12 +49,13 @@ created: 2026-09-02
 - 2026-09-03 t02 闭（research/02-build-env）：许可已重签（UnityPersonal，StopDate 2026-09-07，Hub 周滚签）；干净树 `7e83469` 批处理 Validate 全绿 + IL2CPP 出包 Success（59.2 MiB，热缓存 41s）；**坑=批处理成功后 Unity.exe 挂死须 taskkill+删锁**；出包命令在 notes §3，t03 增量包直接复用。sbs-1080p spinner WIP 已 stash 隔离，归该图处置。
 - 2026-09-03 t03 代码面落地（pico-bridge `fdefb58` 0.2.3，装机验收待 HITL）：用户定序「先 t03 核心避开 panel」——SN 绑定走 MotionTrackerBinding 自动指认（先左后右+JSON 持久化），panel 面推迟；sendMotion 真机开启走 BridgeControl tracking/set_motion（接收端 `--motion-trackers`）；wire 契约以 t04 side-first 为准（t01 数组形 sketch 作废）；mock+dump 端到端验证过，109 测试（1 预置 aiortc 败）。APK 已出待装机（票内 runbook）。
 - 2026-09-04 t03 闭（HITL 真机四项全过；APK 链 `fdefb58`→`ec5c73d`(UI)→`cb46907`(fix)）：中位 69.4Hz 零间隙、坐标冒烟三轴符号全对（y+2.02/x−0.98/z+0.38）、valid 遮挡语义活、27451 帧全量回放零错误（**04 §6 欠账清**）。**SN 实测=trackerid 1/2**。HITL 暴露启动竞态（预连接 tracker 惰性订阅漏绑→power-cycle 才绑）已修（早订阅）并装机回归通过。录制数据留 pc_receiver（坐标冒烟段可作 05/06 输入）。frontier→t06。
+- 2026-09-04 t06 验收线 1–3 过（回放验收车 `48012c2`+合成器 `cc18266`+真机 streaming 使能 `656b1e1`：e2e 27k 帧回放、肘连续化修复、±2cm 安装偏移灵敏度在档）；**主观线卡真机轮**（tracker 出头显 FOV→valid=false），另诊断出 body 流「发但空」三因（panel `EnableAutomaticTrackingStreams` 全开覆盖默认/手套挡相机/未调 `StartBodyTracking`）。grilling 定案增开两票（全按推荐 settled）：**t08**（先做：`replay_tracker_mocap.py` JSONL→合成→`mocap_viewer_proc` 同框 viewer + receiver Rerun side-first，无 APK）与 **t07**（pico-bridge 模式互斥切换：panel 二态+SN 显示吸收 t03 panel 欠账、接收端权威 `arm_source` 三态、`StartBodyTracking(BODY_JOINT_SET_BODY_FULL)`+骨长=比例表×human_height、0.2.4 版本闸、重编 APK+t03 冒烟回归）。**序 08→07→t06 主观→CLOSED**。
 
 ## Not yet specified
 
 - ~~APK 重编时是否顺手把硬编码 `/offer` URL 改可配置~~——已被 pico-bridge `af50f5f`（1080p 图 t06）清掉，03 无剩余顺手项
 - receiver 追踪录制（recording）扩展 `Motion` 字段作为 06 验收的可重复输入工具——recording 零改动透写已天然覆盖（t04 已锁往返），06 直接用
-- t03 panel 面（SN 绑定显示 + sendMotion 面板开关）——推迟到 sbs-1080p UI WIP（pico-bridge stash）合流后的小票；当前用 BridgeControl tracking/set_motion 远程开关
+- ~~t03 panel 面（SN 绑定显示 + sendMotion 面板开关）~~——已吸收进 t07（模式互斥切换 panel 二态按钮含 SN 绑定显示），不再单独开票
 
 ## Out of scope
 
