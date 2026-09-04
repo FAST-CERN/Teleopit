@@ -275,6 +275,11 @@ class Pico4InputProvider(RealtimeInputProvider):
                     "pico_bridge >= 0.2.2 is required for Pico4 input (motion tracker support). Reinstall the Pico extra with "
                     "pip install -e '.[pico4]' so Teleopit receives pico_native tracking semantics."
                 )
+            if str(arm_source) == "tracker" and installed_version < (0, 2, 3):
+                raise RuntimeError(
+                    "pico_bridge >= 0.2.3 is required for arm_source='tracker' (BridgeControl motion streaming). "
+                    "Reinstall the Pico extra with pip install -e '.[pico4]'."
+                )
             bridge_cls = PicoBridge
         if not _bridge_accepts_video_enabled(bridge_cls):
             raise RuntimeError(
@@ -342,6 +347,7 @@ class Pico4InputProvider(RealtimeInputProvider):
             advertise_ip=bridge_advertise_ip,
             video=bridge_video,
             video_enabled=bridge_video_enabled,
+            motion_enabled=self._arm_synth is not None,
             history_size=int(bridge_history_size),
             start_timeout=float(bridge_start_timeout),
         )

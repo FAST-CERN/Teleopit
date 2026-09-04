@@ -169,6 +169,7 @@ def test_pico4_provider_starts_pico_bridge_receiver_with_config() -> None:
             "advertise_ip": "127.0.0.1",
             "video": "frames",
             "video_enabled": True,
+            "motion_enabled": False,
             "history_size": 7,
             "start_timeout": 1.5,
         }
@@ -182,6 +183,34 @@ def test_pico4_provider_requires_pico_bridge_0_2_2_signature(monkeypatch: pytest
     monkeypatch.setattr(pico4_provider, "_installed_pico_bridge_version", lambda: (0, 2, 1))
     with pytest.raises(RuntimeError, match=r"pico_bridge >= 0\.2\.2"):
         Pico4InputProvider(timeout=0.01)
+
+
+def test_pico4_provider_enables_motion_tracking_when_arm_source_tracker() -> None:
+    _FakeBridge.instances.clear()
+
+    provider = Pico4InputProvider(timeout=0.01, arm_source="tracker", bridge_cls=_FakeBridge)
+    try:
+        bridge = _FakeBridge.instances[-1]
+        assert bridge.kwargs["motion_enabled"] is True
+    finally:
+        provider.close()
+
+
+def test_pico4_provider_default_passes_motion_disabled() -> None:
+    _FakeBridge.instances.clear()
+
+    provider = Pico4InputProvider(timeout=0.01, bridge_cls=_FakeBridge)
+    try:
+        bridge = _FakeBridge.instances[-1]
+        assert bridge.kwargs["motion_enabled"] is False
+    finally:
+        provider.close()
+
+
+def test_pico4_provider_tracker_mode_requires_pico_bridge_0_2_3(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pico4_provider, "_installed_pico_bridge_version", lambda: (0, 2, 2))
+    with pytest.raises(RuntimeError, match=r"pico_bridge >= 0\.2\.3"):
+        Pico4InputProvider(timeout=0.01, arm_source="tracker")
 
 
 def test_pico4_provider_requires_video_enabled_signature() -> None:

@@ -15,6 +15,14 @@ bridge_discovery: true
 bridge_advertise_ip: null
 bridge_start_timeout: 10.0
 bridge_history_size: 120
+# Upper-body mocap source (mocap map): "body" = PICO body tracking (default,
+# unchanged behavior); "tracker" = synthesize arms from HMD + 2 motion
+# trackers (requires pico-bridge >= 0.2.3; device gets motion streaming on
+# via BridgeControl). Synthesizer constants (neck_shoulder_m,
+# shoulder_width_m, chest_offset_m, elbow_lateral_m, tracker_offset, hold_s)
+# override via tracker_synth_config.
+arm_source: body
+tracker_synth_config: null
 video:
   enabled: false
   source: null
