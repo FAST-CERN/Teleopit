@@ -52,6 +52,7 @@ created: 2026-09-02
 - 2026-09-04 t06 验收线 1–3 过（回放验收车 `48012c2`+合成器 `cc18266`+真机 streaming 使能 `656b1e1`：e2e 27k 帧回放、肘连续化修复、±2cm 安装偏移灵敏度在档）；**主观线卡真机轮**（tracker 出头显 FOV→valid=false），另诊断出 body 流「发但空」三因（panel `EnableAutomaticTrackingStreams` 全开覆盖默认/手套挡相机/未调 `StartBodyTracking`）。grilling 定案增开两票（全按推荐 settled）：**t08**（先做：`replay_tracker_mocap.py` JSONL→合成→`mocap_viewer_proc` 同框 viewer + receiver Rerun side-first，无 APK）与 **t07**（pico-bridge 模式互斥切换：panel 二态+SN 显示吸收 t03 panel 欠账、接收端权威 `arm_source` 三态、`StartBodyTracking(BODY_JOINT_SET_BODY_FULL)`+骨长=比例表×human_height、0.2.4 版本闸、重编 APK+t03 冒烟回归）。**序 08→07→t06 主观→CLOSED**。
 - 2026-09-04 晚 t08 代码面全落地（Teleopit `5c2bbc7`：`tracker_replay.py` 回放桥+`replay_tracker_mocap.py` viewer 工具，e2e 测试共享解析器；pico-bridge `d1df51f`：Rerun side-first 渲染+Track-L/R 徽章+跟随相机收编）：单测 14+4 新增全绿、双仓已推；剩人工视觉确认（骨架窗方向可辨、真机 `--viz` Rerun 显示）后闭票。
 - 2026-09-04 21:49 t08 闭（用户确认骨架窗视觉过线；Rerun 真机显示留 t07 轮顺带验）。frontier→t07。
+- 2026-09-04 晚 t07 代码面全落地（pico-bridge `8f105fc`：设备端 armStream 互斥+`StartBodyTracking(BODY_JOINT_SET_BODY_FULL_START)` 骨长比例表×身高+panel 代码自建 Trackers/Body pill+SN 显示+`set_body` 远程+panel 无脑全开删除；接收端 0.2.4 `arm_source` 三态（tracker/body/auto 粘性回退 15s）+`--operator-height`；Teleopit `2fa7dcd` body 模式推 set_body+网关 (0,2,4)）：receiver 118/Teleopit 620 过（各自预置欠账不变）；APK `pico-bridge-t07a.apk` 已出。**剩 HITL**：装机+t03 冒烟回归+panel 检查+body 轮（runbook 在 07 票内）。
 
 ## Not yet specified
 

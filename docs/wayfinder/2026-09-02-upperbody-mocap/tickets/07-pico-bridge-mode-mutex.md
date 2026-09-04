@@ -22,4 +22,21 @@ t06 主观轮诊断出 body 流「发但空」三因（panel `EnableAutomaticTra
 
 ## Resolution
 
-（待填）
+代码面全落地（2026-09-04 晚，pico-bridge `8f105fc` + Teleopit `2fa7dcd`；APK 已出待装机）：
+
+- **设备端模式互斥**：`PicoBridgeManager.armStream`（Trackers 默认 / Body）独占 `sendBody`/`sendMotion`（至多一开）；Body 模式调 `StartBodyTracking(BODY_JOINT_SET_BODY_FULL_START)`+骨长=比例表×`operatorHeight`（11 段人体测量分数，1.0–2.2m 夹紧），离开时 `StopBodyTracking`；panel 无脑全开 body/motion 的行为删除（「发但空」根因）；初始模式在 Start 应用（Trackers 默认=两流皆关直到 receiver/panel 请求，保 cb46907 回归契约）。
+- **远程**：`BridgeControl tracking/set_body {enabled,height}` 切 Body；`set_motion(true)` 现在同时离开 Body 模式。
+- **panel**：代码自建 pill 行（Trackers/Body + SN 绑定显示 `L:1 R:2`，断连标 `!`）挂在 server-URL 行下——零 prefab YAML 手术；点击 Trackers=开 motion，点击 Body=开 body。
+- **接收端 0.2.4**：`PicoBridge(arm_source=…)`/CLI `--arm-source {tracker,body,auto}` + `--operator-height`；body 连接即推 set_body（motion off）；**auto** 先请求 trackers、回退窗（默认 15s）内无 valid 侧则粘性回退 body；`set_body_enabled()` 运行时切换；CHANGELOG 回填 0.2.3。
+- **Teleopit**：`arm_source='body'` 传 `arm_source`/`operator_height_m`（=cfg `input.human_height`）给 in-process bridge，网关抬 (0,2,4)（tracker 模式保持 0.2.3 签名兼容）；teleopit env 已重装 0.2.4。
+- **测试**：receiver 118 过（+7 runtime-control，1 预置 aiortc 败）；Teleopit 620 过（+3 provider，4 预置败不变）。
+- **APK**：`F:\Chufan_Rui\teleop\t02-verify\pico-bridge-t07a.apk`（62,069,240B，热缓存构建 Success）。
+
+**HITL runbook（待人工）**：
+
+1. 装机：`adb -s PA8A10MGJ2280107D install -r F:\Chufan_Rui\teleop\t02-verify\pico-bridge-t07a.apk`
+2. **t03 冒烟回归**（不得回退）：接收端 `--motion-trackers --print-tracking`；tracker 免 power-cycle 自动绑 SN 1/2；~69Hz；遮挡→valid=false 语义活。
+3. **panel 检查**：server-URL 行下出现 Trackers/Body pill 行+SN 显示；默认 Trackers 亮。
+4. **body 轮**：摘 MANUS 手套+双手柄；接收端重启用 `--arm-source body --operator-height <身高>`；确认 Body 帧有效（joints len=24、头显内可见骨架视觉）；panel 点 Body 亦可本地切。
+5. **auto 轮（可选）**：tracker 关机状态下 `--arm-source auto` → 15s 后日志出现 fallback、Body 帧起。
+6. Rerun side-first 顺带验（t08 遗留）：`--viz` 时 Track-L/Track-R 徽章+左右 puck（本机需装 rerun viewer）。
