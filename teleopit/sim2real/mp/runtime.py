@@ -679,6 +679,8 @@ def _build_pico_input_provider(input_cfg: dict[str, Any], video_cfg: Any, bridge
         bridge_video_enabled=video_cfg.enabled,
         bridge_start_timeout=float(cfg_get(input_cfg, "bridge_start_timeout", 10.0)),
         bridge_history_size=int(cfg_get(input_cfg, "bridge_history_size", 120)),
+        arm_source=str(cfg_get(input_cfg, "arm_source", "body")),
+        tracker_synth_config=cfg_get(input_cfg, "tracker_synth_config", None),
         bridge_cls=bridge_cls,
     )
 

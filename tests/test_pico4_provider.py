@@ -104,6 +104,7 @@ def _make_provider() -> Pico4InputProvider:
     provider._head_pose_snapshot = None
     provider._tracker_snapshot = None
     provider._closed = False
+    provider._arm_synth = None
     return provider
 
 

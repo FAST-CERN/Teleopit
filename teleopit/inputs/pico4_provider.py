@@ -20,6 +20,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 
+from teleopit.inputs.pico_body_joints import BODY_JOINT_NAMES, BODY_JOINT_PARENTS
 from teleopit.inputs.realtime_frame_cache import RealtimeFrameCache
 from teleopit.inputs.realtime_packet import (
     ControlEvent,
@@ -28,6 +29,7 @@ from teleopit.inputs.realtime_packet import (
     RealtimeInputPacket,
 )
 from teleopit.inputs.rot_utils import quat_mul_np
+from teleopit.inputs.tracker_arm_synth import SynthConfig, TrackerArmSynthesizer
 from teleopit.interfaces import RealtimeInputProvider
 from teleopit.sim.reference_motion import interpolate_human_frames
 
@@ -36,23 +38,6 @@ logger = logging.getLogger(__name__)
 # PICO native -> Teleopit retarget input space.
 _INPUT_TO_TELEOPIT_MATRIX = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=np.float64)
 _INPUT_TO_TELEOPIT_QUAT = R.from_matrix(_INPUT_TO_TELEOPIT_MATRIX).as_quat(scalar_first=True)
-
-BODY_JOINT_NAMES = [
-    "Pelvis", "Left_Hip", "Right_Hip", "Spine1", "Left_Knee", "Right_Knee",
-    "Spine2", "Left_Ankle", "Right_Ankle", "Spine3", "Left_Foot", "Right_Foot",
-    "Neck", "Left_Collar", "Right_Collar", "Head", "Left_Shoulder", "Right_Shoulder",
-    "Left_Elbow", "Right_Elbow", "Left_Wrist", "Right_Wrist", "Left_Hand", "Right_Hand",
-]
-BODY_JOINT_PARENTS = np.array(
-    [
-        -1,
-        0, 0, 0, 1, 2,
-        3, 4, 5, 6, 7, 8,
-        9, 12, 12, 12, 13, 14,
-        16, 17, 18, 19, 20, 21,
-    ],
-    dtype=np.int32,
-)
 
 
 @dataclass(frozen=True)
@@ -189,6 +174,19 @@ def _installed_pico_bridge_version() -> tuple[int, ...] | None:
     return tuple(parts) if parts else None
 
 
+def _synth_config_from_dict(raw: dict[str, Any] | None) -> SynthConfig:
+    """Build a SynthConfig from config/YAML (lists normalized to tuples)."""
+    data = dict(raw or {})
+    if "chest_offset_m" in data:
+        data["chest_offset_m"] = tuple(float(v) for v in data["chest_offset_m"])
+    if "tracker_offset" in data:
+        data["tracker_offset"] = {
+            str(side): tuple(float(v) for v in offset)
+            for side, offset in dict(data["tracker_offset"]).items()
+        }
+    return SynthConfig(**data)
+
+
 def _coordinate_transform_input(body_pose_dict: dict[str, list]) -> dict[str, list]:
     """Transform provider-space poses into Teleopit's expected coordinates."""
     for body_name, value in body_pose_dict.items():
@@ -259,6 +257,8 @@ class Pico4InputProvider(RealtimeInputProvider):
         bridge_video_enabled: bool | None = None,
         bridge_start_timeout: float = 10.0,
         bridge_history_size: int = 120,
+        arm_source: str = "body",
+        tracker_synth_config: dict[str, Any] | None = None,
         bridge_cls: type[Any] | None = None,
     ) -> None:
         if bridge_cls is None:
@@ -330,6 +330,11 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._head_pose_snapshot: PicoHeadPoseSnapshot | None = None
         self._tracker_snapshot: PicoTrackerSnapshot | None = None
         self._ground_alignment_offset: float | None = None
+        self._arm_synth: TrackerArmSynthesizer | None = None
+        if str(arm_source) == "tracker":
+            self._arm_synth = TrackerArmSynthesizer(_synth_config_from_dict(tracker_synth_config))
+        elif str(arm_source) != "body":
+            raise ValueError(f"arm_source must be 'body' or 'tracker', got {arm_source!r}")
         self._bridge = bridge_cls(
             host=bridge_host,
             port=int(bridge_port),
@@ -506,11 +511,18 @@ class Pico4InputProvider(RealtimeInputProvider):
         self._poll_control_events(frame, timestamp=timestamp)
 
         body = getattr(frame, "body", None)
-        if body is None or not bool(getattr(body, "active", False)):
+        body_joints: NDArray[np.float64] | None = None
+        if body is not None and bool(getattr(body, "active", False)):
+            body_joints = np.asarray(getattr(body, "joints"), dtype=np.float64)
+        elif self._arm_synth is not None:
+            # mocap map t06: synthesize a body-equivalent frame from HMD +
+            # motion trackers when PICO body tracking is inactive.
+            body_joints = self._arm_synth.synthesize(frame)
+
+        if body_joints is None:
             self._last_source_seq = int(getattr(frame, "seq", self._last_source_seq or -1))
             return False
 
-        body_joints = np.asarray(getattr(body, "joints"), dtype=np.float64)
         if body_joints.shape != (len(BODY_JOINT_NAMES), 7):
             logger.warning("Unexpected pico_bridge body joint shape: %s", body_joints.shape)
             self._last_source_seq = int(getattr(frame, "seq", self._last_source_seq or -1))
