@@ -17,7 +17,7 @@ import pytest
 
 from teleopit.policies.sonic.joint_order import to_isaaclab_order
 from teleopit.policies.sonic.params import SONIC_DEFAULT_ANGLES_MJ
-from teleopit.sim.sonic_gait import build_gait_stream, load_gait_clip
+from teleopit.sim.sonic_gait import build_gait_stream, load_gait_clip, phase_aligned_period
 
 _NPZ = Path("assets/policies/sonic/sample_data/walk_forward_50hz.npz")
 requires_npz = pytest.mark.skipif(not _NPZ.exists(), reason="walk clip npz not converted")
@@ -53,7 +53,7 @@ class TestBuildGaitStream:
     def test_double_speed_advances_double_frames(self):
         clip = load_gait_clip(_NPZ)
         stream = build_gait_stream(clip, speed_mps=2.0 * clip.native_speed, duration_s=1.0, policy_hz=50.0)
-        k = 20
+        k = 10  # 2k stays inside the first phase-aligned lap (~40 frames)
         np.testing.assert_allclose(
             stream.joint_pos_il[k], to_isaaclab_order(clip.joint_pos_mj[2 * k]), atol=1e-6
         )
@@ -81,25 +81,45 @@ class TestBuildGaitStream:
         t = np.arange(100) / 50.0
         np.testing.assert_allclose(yaw, w * t, atol=1e-6)
 
-    def test_blend_in_starts_from_standing_default(self):
+    def test_phase_aligned_loop_makes_seam_continuous(self):
         clip = load_gait_clip(_NPZ)
+        src = clip.joint_pos_mj
+        period = phase_aligned_period(src, min_frames=40)
+        assert 40 <= period < src.shape[0]
+        seam = float(np.linalg.norm(src[period] - src[0]))
+        raw_seam = float(np.linalg.norm(src[-1] - src[0]))  # naive modulo loop
+        assert seam < 0.3 * raw_seam  # phase match, not a mid-stride wrap
+
+        # The stream loops with that period: frame k+period repeats frame k.
+        stream = build_gait_stream(clip, speed_mps=clip.native_speed, duration_s=6.0, policy_hz=50.0)
+        n_check = min(period, stream.joint_pos_il.shape[0] - period)
+        np.testing.assert_allclose(
+            stream.joint_pos_il[period:period + n_check], stream.joint_pos_il[:n_check], atol=1e-9
+        )
+
+    def test_blend_in_starts_from_standing_default(self):
+        # The real clip's gait cycle is ~40 frames, so keep blend and probe
+        # frames inside the first lap.
+        clip = load_gait_clip(_NPZ)
+        period = phase_aligned_period(clip.joint_pos_mj, min_frames=40)
         stream = build_gait_stream(
-            clip, speed_mps=clip.native_speed, duration_s=3.0, policy_hz=50.0, blend_in_s=1.0
+            clip, speed_mps=clip.native_speed, duration_s=3.0, policy_hz=50.0, blend_in_s=0.5
         )
         default_il = to_isaaclab_order(SONIC_DEFAULT_ANGLES_MJ)
         # First frame is the pure standing default — no startup transient.
         np.testing.assert_allclose(stream.joint_pos_il[0], default_il, atol=1e-9)
-        # After the blend the reference is the pure gait frame (the gait
-        # sample index keeps advancing through the blend).
-        k_gait = 50 + 10
+        # After the blend (25 frames) and before the loop point: pure gait.
+        k_gait = period - 8
+        assert k_gait > 25
         np.testing.assert_allclose(
             stream.joint_pos_il[k_gait],
             to_isaaclab_order(clip.joint_pos_mj[k_gait]),
             atol=1e-6,
         )
         # Mid-blend sits between the two (smoothstep weight ~0.5).
-        mid = (stream.joint_pos_il[25] - default_il) / (
-            to_isaaclab_order(clip.joint_pos_mj[25]) - default_il + 1e-12
+        k_mid = 12
+        mid = (stream.joint_pos_il[k_mid] - default_il) / (
+            to_isaaclab_order(clip.joint_pos_mj[k_mid]) - default_il + 1e-12
         )
         assert np.nanmedian(mid) == pytest.approx(0.5, abs=0.05)
         assert np.all(np.isfinite(stream.joint_vel_il))

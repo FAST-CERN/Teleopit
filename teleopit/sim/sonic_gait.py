@@ -52,6 +52,22 @@ def load_gait_clip(npz_path: Path | str) -> GaitClip:
     )
 
 
+def phase_aligned_period(src: np.ndarray, min_frames: int = 40) -> int:
+    """Frame index whose pose best matches frame 0 — the natural loop point.
+
+    A raw modulo loop wraps mid-stride (measured 1.22 rad seam vs 0.22 rad
+    max inner step on the walk clip — the mid-run stumble in the operator's
+    visual round). Repeating over the phase-matched period keeps the seam
+    inside the gait's own step-to-step envelope. ``min_frames`` floors the
+    search below one gait cycle.
+    """
+    src = np.asarray(src)
+    if src.shape[0] <= min_frames + 1:
+        return max(src.shape[0] - 1, 1)
+    dists = np.linalg.norm(src[min_frames:] - src[0], axis=1)
+    return int(np.argmin(dists)) + min_frames
+
+
 def build_gait_stream(
     clip: GaitClip,
     *,
@@ -70,7 +86,8 @@ def build_gait_stream(
     n = int(round(duration_s * policy_hz))
     t = np.arange(n) / policy_hz
     src = clip.joint_pos_mj
-    index = (t * speed_mps / clip.native_speed * policy_hz) % src.shape[0]
+    loop_len = phase_aligned_period(src)
+    index = (t * speed_mps / clip.native_speed * policy_hz) % loop_len
 
     pos_mj = np.stack(
         [np.interp(index, np.arange(src.shape[0]), src[:, k]) for k in range(29)], axis=1
