@@ -50,6 +50,7 @@ created: 2026-09-02
 - 2026-09-03 t03 代码面落地（pico-bridge `fdefb58` 0.2.3，装机验收待 HITL）：用户定序「先 t03 核心避开 panel」——SN 绑定走 MotionTrackerBinding 自动指认（先左后右+JSON 持久化），panel 面推迟；sendMotion 真机开启走 BridgeControl tracking/set_motion（接收端 `--motion-trackers`）；wire 契约以 t04 side-first 为准（t01 数组形 sketch 作废）；mock+dump 端到端验证过，109 测试（1 预置 aiortc 败）。APK 已出待装机（票内 runbook）。
 - 2026-09-04 t03 闭（HITL 真机四项全过；APK 链 `fdefb58`→`ec5c73d`(UI)→`cb46907`(fix)）：中位 69.4Hz 零间隙、坐标冒烟三轴符号全对（y+2.02/x−0.98/z+0.38）、valid 遮挡语义活、27451 帧全量回放零错误（**04 §6 欠账清**）。**SN 实测=trackerid 1/2**。HITL 暴露启动竞态（预连接 tracker 惰性订阅漏绑→power-cycle 才绑）已修（早订阅）并装机回归通过。录制数据留 pc_receiver（坐标冒烟段可作 05/06 输入）。frontier→t06。
 - 2026-09-04 t06 验收线 1–3 过（回放验收车 `48012c2`+合成器 `cc18266`+真机 streaming 使能 `656b1e1`：e2e 27k 帧回放、肘连续化修复、±2cm 安装偏移灵敏度在档）；**主观线卡真机轮**（tracker 出头显 FOV→valid=false），另诊断出 body 流「发但空」三因（panel `EnableAutomaticTrackingStreams` 全开覆盖默认/手套挡相机/未调 `StartBodyTracking`）。grilling 定案增开两票（全按推荐 settled）：**t08**（先做：`replay_tracker_mocap.py` JSONL→合成→`mocap_viewer_proc` 同框 viewer + receiver Rerun side-first，无 APK）与 **t07**（pico-bridge 模式互斥切换：panel 二态+SN 显示吸收 t03 panel 欠账、接收端权威 `arm_source` 三态、`StartBodyTracking(BODY_JOINT_SET_BODY_FULL)`+骨长=比例表×human_height、0.2.4 版本闸、重编 APK+t03 冒烟回归）。**序 08→07→t06 主观→CLOSED**。
+- 2026-09-04 晚 t08 代码面全落地（Teleopit `5c2bbc7`：`tracker_replay.py` 回放桥+`replay_tracker_mocap.py` viewer 工具，e2e 测试共享解析器；pico-bridge `d1df51f`：Rerun side-first 渲染+Track-L/R 徽章+跟随相机收编）：单测 14+4 新增全绿、双仓已推；剩人工视觉确认（骨架窗方向可辨、真机 `--viz` Rerun 显示）后闭票。
 
 ## Not yet specified
 
