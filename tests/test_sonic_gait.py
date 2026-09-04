@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from teleopit.policies.sonic.joint_order import to_isaaclab_order
+from teleopit.policies.sonic.params import SONIC_DEFAULT_ANGLES_MJ
 from teleopit.sim.sonic_gait import build_gait_stream, load_gait_clip
 
 _NPZ = Path("assets/policies/sonic/sample_data/walk_forward_50hz.npz")
@@ -79,6 +80,29 @@ class TestBuildGaitStream:
         yaw = r.as_euler("xyz")[:, 2]
         t = np.arange(100) / 50.0
         np.testing.assert_allclose(yaw, w * t, atol=1e-6)
+
+    def test_blend_in_starts_from_standing_default(self):
+        clip = load_gait_clip(_NPZ)
+        stream = build_gait_stream(
+            clip, speed_mps=clip.native_speed, duration_s=3.0, policy_hz=50.0, blend_in_s=1.0
+        )
+        default_il = to_isaaclab_order(SONIC_DEFAULT_ANGLES_MJ)
+        # First frame is the pure standing default — no startup transient.
+        np.testing.assert_allclose(stream.joint_pos_il[0], default_il, atol=1e-9)
+        # After the blend the reference is the pure gait frame (the gait
+        # sample index keeps advancing through the blend).
+        k_gait = 50 + 10
+        np.testing.assert_allclose(
+            stream.joint_pos_il[k_gait],
+            to_isaaclab_order(clip.joint_pos_mj[k_gait]),
+            atol=1e-6,
+        )
+        # Mid-blend sits between the two (smoothstep weight ~0.5).
+        mid = (stream.joint_pos_il[25] - default_il) / (
+            to_isaaclab_order(clip.joint_pos_mj[25]) - default_il + 1e-12
+        )
+        assert np.nanmedian(mid) == pytest.approx(0.5, abs=0.05)
+        assert np.all(np.isfinite(stream.joint_vel_il))
 
     def test_upper_body_override_replaces_arms_only(self):
         clip = load_gait_clip(_NPZ)

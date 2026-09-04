@@ -21,8 +21,9 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
 
-from teleopit.policies.sonic.joint_order import MUJOCO_TO_ISAACLAB, UPPER17_ISAACLAB
+from teleopit.policies.sonic.joint_order import MUJOCO_TO_ISAACLAB, UPPER17_ISAACLAB, to_isaaclab_order
 from teleopit.policies.sonic.observation import SonicReferenceStream
+from teleopit.policies.sonic.params import SONIC_DEFAULT_ANGLES_MJ
 
 # IsaacLab order interleaves arms and legs: the arm-14 set is the upper-17
 # minus the waist trio (2, 5, 8). A contiguous 11..28 slice would clobber
@@ -59,9 +60,12 @@ def build_gait_stream(
     policy_hz: float = 50.0,
     yaw_rate: float = 0.0,
     upper_body_pos_il: np.ndarray | None = None,
+    blend_in_s: float = 0.0,
 ) -> SonicReferenceStream:
     if speed_mps <= 0 or duration_s <= 0 or policy_hz <= 0:
         raise ValueError("speed_mps, duration_s and policy_hz must be positive")
+    if blend_in_s < 0:
+        raise ValueError("blend_in_s must be non-negative")
 
     n = int(round(duration_s * policy_hz))
     t = np.arange(n) / policy_hz
@@ -72,6 +76,17 @@ def build_gait_stream(
         [np.interp(index, np.arange(src.shape[0]), src[:, k]) for k in range(29)], axis=1
     )
     pos_il = pos_mj[:, _PERM_TO_IL]
+
+    if blend_in_s > 0:
+        # Smoothstep blend from the standing default into the gait so the
+        # robot (initialized at the default pose, zero velocity) starts
+        # walking instead of lurching into a mid-stride reference.
+        n_blend = min(int(round(blend_in_s * policy_hz)), n - 1)
+        w = np.ones(n)
+        s = np.arange(n_blend) / max(n_blend - 1, 1)
+        w[:n_blend] = 3 * s**2 - 2 * s**3
+        default_il = to_isaaclab_order(SONIC_DEFAULT_ANGLES_MJ)
+        pos_il = (1.0 - w)[:, None] * default_il[None, :] + w[:, None] * pos_il
 
     if upper_body_pos_il is not None:
         override = np.asarray(upper_body_pos_il, dtype=np.float64).reshape(-1, 29)

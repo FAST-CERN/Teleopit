@@ -73,6 +73,8 @@ def main() -> int:
     parser.add_argument("--speed-scale", type=float, default=1.0,
                         help="gait source: multiplier on the segment native speed")
     parser.add_argument("--yaw-rate", type=float, default=0.0, help="gait source: reference yaw rate rad/s")
+    parser.add_argument("--blend-in", type=float, default=1.5,
+                        help="gait source: smoothstep blend from standing default (s)")
     parser.add_argument("--period-s", type=float, default=2.0, help="synthetic arm-swing period")
     parser.add_argument("--elbow-rad", type=float, default=0.6, help="elbow swing amplitude")
     parser.add_argument("--no-viewer", action="store_true")
@@ -105,8 +107,10 @@ def main() -> int:
             speed_mps=speed,
             duration_s=args.seconds + 2.0,
             yaw_rate=args.yaw_rate,
+            blend_in_s=args.blend_in,
         )
-        print(f"gait source: segment native {seg_speed:.3f} m/s, cmd {speed:.3f} m/s, yaw {args.yaw_rate}")
+        print(f"gait source: segment native {seg_speed:.3f} m/s, cmd {speed:.3f} m/s, "
+              f"yaw {args.yaw_rate}, blend-in {args.blend_in}s")
     else:
         stream = make_synthetic_upperbody_stream(
             duration_s=args.seconds + 2.0,
