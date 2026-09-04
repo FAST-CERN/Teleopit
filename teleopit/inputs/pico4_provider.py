@@ -259,6 +259,7 @@ class Pico4InputProvider(RealtimeInputProvider):
         bridge_history_size: int = 120,
         arm_source: str = "body",
         tracker_synth_config: dict[str, Any] | None = None,
+        operator_height_m: float = 1.75,
         bridge_cls: type[Any] | None = None,
     ) -> None:
         if bridge_cls is None:
@@ -279,6 +280,12 @@ class Pico4InputProvider(RealtimeInputProvider):
                 raise RuntimeError(
                     "pico_bridge >= 0.2.3 is required for arm_source='tracker' (BridgeControl motion streaming). "
                     "Reinstall the Pico extra with pip install -e '.[pico4]'."
+                )
+            if str(arm_source) == "body" and installed_version < (0, 2, 4):
+                raise RuntimeError(
+                    "pico_bridge >= 0.2.4 is required for arm_source='body' (BridgeControl set_body: the device app "
+                    "defaults to tracker mode and must be asked for body tracking). Reinstall the Pico extra with "
+                    "pip install -e '.[pico4]'."
                 )
             bridge_cls = PicoBridge
         if not _bridge_accepts_video_enabled(bridge_cls):
@@ -340,6 +347,13 @@ class Pico4InputProvider(RealtimeInputProvider):
             self._arm_synth = TrackerArmSynthesizer(_synth_config_from_dict(tracker_synth_config))
         elif str(arm_source) != "body":
             raise ValueError(f"arm_source must be 'body' or 'tracker', got {arm_source!r}")
+        # Body mode asks the device for PICO body tracking over BridgeControl
+        # (mocap map t07): the app defaults to tracker mode, so without the
+        # set_body push the Body field stays empty. Tracker mode keeps the
+        # 0.2.3 signature (motion_enabled only) for older installs.
+        body_bridge_kwargs: dict[str, Any] = (
+            {} if self._arm_synth is not None else {"arm_source": "body", "operator_height_m": float(operator_height_m)}
+        )
         self._bridge = bridge_cls(
             host=bridge_host,
             port=int(bridge_port),
@@ -350,6 +364,7 @@ class Pico4InputProvider(RealtimeInputProvider):
             motion_enabled=self._arm_synth is not None,
             history_size=int(bridge_history_size),
             start_timeout=float(bridge_start_timeout),
+            **body_bridge_kwargs,
         )
         self._bridge.start()
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True, name="pico4_input")

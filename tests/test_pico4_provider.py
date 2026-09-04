@@ -170,6 +170,8 @@ def test_pico4_provider_starts_pico_bridge_receiver_with_config() -> None:
             "video": "frames",
             "video_enabled": True,
             "motion_enabled": False,
+            "arm_source": "body",
+            "operator_height_m": 1.75,
             "history_size": 7,
             "start_timeout": 1.5,
         }
@@ -211,6 +213,42 @@ def test_pico4_provider_tracker_mode_requires_pico_bridge_0_2_3(monkeypatch: pyt
     monkeypatch.setattr(pico4_provider, "_installed_pico_bridge_version", lambda: (0, 2, 2))
     with pytest.raises(RuntimeError, match=r"pico_bridge >= 0\.2\.3"):
         Pico4InputProvider(timeout=0.01, arm_source="tracker")
+
+
+def test_pico4_provider_body_mode_requires_pico_bridge_0_2_4(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Body mode must push BridgeControl set_body (arm-source mutex on device)."""
+    monkeypatch.setattr(pico4_provider, "_installed_pico_bridge_version", lambda: (0, 2, 3))
+    with pytest.raises(RuntimeError, match=r"pico_bridge >= 0\.2\.4"):
+        Pico4InputProvider(timeout=0.01, arm_source="body")
+
+
+def test_pico4_provider_body_mode_requests_device_body_tracking() -> None:
+    _FakeBridge.instances.clear()
+
+    provider = Pico4InputProvider(
+        timeout=0.01, arm_source="body", operator_height_m=1.82, bridge_cls=_FakeBridge
+    )
+    try:
+        bridge = _FakeBridge.instances[-1]
+        assert bridge.kwargs["arm_source"] == "body"
+        assert bridge.kwargs["operator_height_m"] == 1.82
+        assert bridge.kwargs["motion_enabled"] is False
+    finally:
+        provider.close()
+
+
+def test_pico4_provider_tracker_mode_keeps_0_2_3_bridge_signature() -> None:
+    """Tracker mode passes only 0.2.3 kwargs (arm_source kwarg is body-mode only)."""
+    _FakeBridge.instances.clear()
+
+    provider = Pico4InputProvider(timeout=0.01, arm_source="tracker", bridge_cls=_FakeBridge)
+    try:
+        bridge = _FakeBridge.instances[-1]
+        assert "arm_source" not in bridge.kwargs
+        assert "operator_height_m" not in bridge.kwargs
+        assert bridge.kwargs["motion_enabled"] is True
+    finally:
+        provider.close()
 
 
 def test_pico4_provider_requires_video_enabled_signature() -> None:

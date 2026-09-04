@@ -681,6 +681,7 @@ def _build_pico_input_provider(input_cfg: dict[str, Any], video_cfg: Any, bridge
         bridge_history_size=int(cfg_get(input_cfg, "bridge_history_size", 120)),
         arm_source=str(cfg_get(input_cfg, "arm_source", "body")),
         tracker_synth_config=cfg_get(input_cfg, "tracker_synth_config", None),
+        operator_height_m=float(cfg_get(input_cfg, "human_height", 1.75)),
         bridge_cls=bridge_cls,
     )
 
