@@ -31,9 +31,15 @@ from omegaconf import OmegaConf  # noqa: E402
 
 from teleopit.policies.sonic.runtime import SONIC_CKPT_DIR, SonicOnnxPolicy  # noqa: E402
 from teleopit.robots.mujoco_robot import MuJoCoRobot  # noqa: E402
+from teleopit.sim.sonic_gait import GaitClip, build_gait_stream, load_gait_clip  # noqa: E402
 from teleopit.sim.sonic_session import SonicSimSession  # noqa: E402
 from teleopit.sim.sonic_synthetic import make_synthetic_upperbody_stream  # noqa: E402
 from teleopit.sim.sonic_variants import write_ballast_xml, write_locked_waist_xml  # noqa: E402
+
+# The clip's first ~25 s is a standing segment (ticket 02 Progress #8);
+# frame 1250 (t=25 s) starts the real walking stretch.
+_GAIT_START_FRAME = 1250
+_GAIT_NPZ = _REPO_ROOT / "assets" / "policies" / "sonic" / "sample_data" / "walk_forward_50hz.npz"
 
 
 def _resolve_robot_cfg(variant: str) -> OmegaConf:
@@ -61,7 +67,13 @@ def main() -> int:
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--variant", default="base",
                         choices=["base", "locked", "ballast025p", "ballast05p", "ballast05b", "combo"])
-    parser.add_argument("--period-s", type=float, default=2.0, help="arm-swing period")
+    parser.add_argument("--source", default="synthetic", choices=["synthetic", "gait"])
+    parser.add_argument("--speed", type=float, default=None,
+                        help="gait source: cmd speed m/s (default = clip segment native speed)")
+    parser.add_argument("--speed-scale", type=float, default=1.0,
+                        help="gait source: multiplier on the segment native speed")
+    parser.add_argument("--yaw-rate", type=float, default=0.0, help="gait source: reference yaw rate rad/s")
+    parser.add_argument("--period-s", type=float, default=2.0, help="synthetic arm-swing period")
     parser.add_argument("--elbow-rad", type=float, default=0.6, help="elbow swing amplitude")
     parser.add_argument("--no-viewer", action="store_true")
     parser.add_argument("--no-realtime", action="store_true")
@@ -76,18 +88,38 @@ def main() -> int:
     policy_hz = 50.0
     robot = MuJoCoRobot(_resolve_robot_cfg(args.variant))
     policy = SonicOnnxPolicy()
-    stream = make_synthetic_upperbody_stream(
-        duration_s=args.seconds + 2.0,
-        policy_hz=policy_hz,
-        elbow_amplitude_rad=args.elbow_rad,
-        period_s=args.period_s,
-    )
+    if args.source == "gait":
+        if not _GAIT_NPZ.exists():
+            logger.error("walk clip npz missing: %s (convert via tmp_convert_walk.py)", _GAIT_NPZ)
+            return 2
+        import numpy as np
+
+        data = np.load(_GAIT_NPZ)
+        dof = np.asarray(data["dof"])[_GAIT_START_FRAME:]
+        trans = np.asarray(data["root_trans"])[_GAIT_START_FRAME:]
+        n_seg = min(dof.shape[0], 600)  # 12 s of real walking
+        seg_speed = float(np.linalg.norm(trans[n_seg] - trans[0]) / (n_seg * 0.02))
+        speed = args.speed if args.speed is not None else args.speed_scale * seg_speed
+        stream = build_gait_stream(
+            GaitClip(joint_pos_mj=dof[:n_seg].copy(), native_speed=seg_speed),
+            speed_mps=speed,
+            duration_s=args.seconds + 2.0,
+            yaw_rate=args.yaw_rate,
+        )
+        print(f"gait source: segment native {seg_speed:.3f} m/s, cmd {speed:.3f} m/s, yaw {args.yaw_rate}")
+    else:
+        stream = make_synthetic_upperbody_stream(
+            duration_s=args.seconds + 2.0,
+            policy_hz=policy_hz,
+            elbow_amplitude_rad=args.elbow_rad,
+            period_s=args.period_s,
+        )
     session = SonicSimSession(robot=robot, policy=policy)
     session.attach_reference(stream)
 
     total_steps = int(round(args.seconds * policy_hz))
     viewer_ctx = None
-    print(f"SONIC sim2sim: {args.seconds:.0f} s synthetic arm swing, variant={args.variant}, "
+    print(f"SONIC sim2sim: {args.seconds:.0f} s source={args.source}, variant={args.variant}, "
           f"policy=low_latency")
 
     if not args.no_viewer:
