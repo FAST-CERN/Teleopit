@@ -53,6 +53,7 @@ created: 2026-09-02
 - 2026-09-04 晚 t08 代码面全落地（Teleopit `5c2bbc7`：`tracker_replay.py` 回放桥+`replay_tracker_mocap.py` viewer 工具，e2e 测试共享解析器；pico-bridge `d1df51f`：Rerun side-first 渲染+Track-L/R 徽章+跟随相机收编）：单测 14+4 新增全绿、双仓已推；剩人工视觉确认（骨架窗方向可辨、真机 `--viz` Rerun 显示）后闭票。
 - 2026-09-04 21:49 t08 闭（用户确认骨架窗视觉过线；Rerun 真机显示留 t07 轮顺带验）。frontier→t07。
 - 2026-09-04 晚 t07 代码面全落地（pico-bridge `8f105fc`：设备端 armStream 互斥+`StartBodyTracking(BODY_JOINT_SET_BODY_FULL_START)` 骨长比例表×身高+panel 代码自建 Trackers/Body pill+SN 显示+`set_body` 远程+panel 无脑全开删除；接收端 0.2.4 `arm_source` 三态（tracker/body/auto 粘性回退 15s）+`--operator-height`；Teleopit `2fa7dcd` body 模式推 set_body+网关 (0,2,4)）：receiver 118/Teleopit 620 过（各自预置欠账不变）；APK `pico-bridge-t07a.apk` 已出。**剩 HITL**：装机+t03 冒烟回归+panel 检查+body 轮（runbook 在 07 票内）。
+- 2026-09-04 深夜 t07 HITL 第一轮**主线全过**：装机/t03 回归（69.5Hz 零间隙、SN 1→L/2→R、valid 活）/panel pill+SN 显示/set_body 互斥生效/body 数据 len=24（1514 帧，OS 切全身动捕后）。**定案三层模式栈**：OS tracker 工作模式（人工切，SDK 无静默口）→ app 流互斥 → receiver 推送。离机验证同夜补齐（`e31f5bb`：编辑器 prefab 冒烟 17 检查全过+真 TCP 回环 3/3+APK 符号）。**未决**：body 期间 ~2s 断连抖动未归因、auto 真机轮、Rerun `--viz`。换 tracker 单元流程（配对→pm clear→先左后右）与多接收端发现竞争坑记入 07 票台账。
 
 ## Not yet specified
 

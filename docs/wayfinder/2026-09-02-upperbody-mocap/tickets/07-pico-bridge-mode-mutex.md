@@ -40,7 +40,23 @@ t06 主观轮诊断出 body 流「发但空」三因（panel `EnableAutomaticTra
 
 **仍需真机**（SDK 原生行为无法离机模拟）：`StartBodyTracking` 返回码与实际骨架质量、panel 在头盔内的视觉排版、tracker 绑定/频率回归。
 
-**HITL runbook（待人工）**：
+**HITL 第一轮（2026-09-04 晚，用户在机）**：
+
+- ✅ 装机 t07a（62,069,240B）。
+- ✅ **t03 冒烟回归**：69.5Hz 中位（基线 69.4）、零 >1s 间隙、SN 自动绑 1→LEFT/2→RIGHT、遮挡 valid 语义活。
+- ✅ **panel**：Trackers/Body pill + `L:1 R:2` SN 显示在头盔内正常（用户确认）。
+- ✅ **set_body 远程链**：设备日志 `set_body=True height=1.75` 解析、互斥生效（sendMotion=false/sendBody=true、AppendBody 每帧跑）。
+- ✅ **body 数据线**：OS 切全身动捕后 1514 帧 Body 关节、**len=24**（`tracking_20260904_231338.jsonl`）。
+- **三层模式栈定案**：臂源=OS tracker 工作模式（独立追踪↔全身动捕，**人工切换**——SDK 无静默口，`CheckMotionTrackerNumber` 仅弹引导面板）→ app 流互斥（已验）→ receiver 权威推送（已验）。
+- ⚠️ **未决**：① body 请求期间（OS 尚在独立模式）出现规整 ~2.06s 断连抖动，未归因（OS 模式不匹配相关？切模式后未复测连接稳定性）；② auto 真机轮未跑；③ Rerun `--viz` 显示未验（本机无 viewer 二进制）。
+
+**操作台账（本轮新坑，后续轮受益）**：
+- adb=`C:/Program Files (x86)/Android/android-sdk/platform-tools/adb.exe`；接收端必须以 `teleopit` env 的 **python.exe** 形态跑（防火墙有放行），console-script exe 会被 RST（111）。
+- **换 tracker 单元**后：先在系统设置配对新单元，再 `pm clear com.picobridge.app` 清旧 SN 绑定，然后**先开左后开右**重新指认。
+- 头盔未佩戴时 PICO 会冻结/回收 3D app（am start 后进程消失）——装机轮需佩戴。
+- **多接收端发现竞争**：app 锁定首个发现包（Jetson `.5` 的幽灵广播曾抢占 → 连接被拒死循环）；force-stop app 重发现即可解。Jetson 侧当时无广播进程，来源待查。
+
+**HITL runbook（待人工，续）**：
 
 1. 装机：`adb -s PA8A10MGJ2280107D install -r F:\Chufan_Rui\teleop\t02-verify\pico-bridge-t07a.apk`
 2. **t03 冒烟回归**（不得回退）：接收端 `--motion-trackers --print-tracking`；tracker 免 power-cycle 自动绑 SN 1/2；~69Hz；遮挡→valid=false 语义活。
