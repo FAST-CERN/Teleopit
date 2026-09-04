@@ -29,4 +29,7 @@ blocked-by: ["01-sonic-interface-recon"]
 
 6. **2026-09-04 line 4 落地（`9e470aa`）**：合成挥臂源 `sonic_synthetic.py`（站姿模板+腰 0+双肘反相 ±0.6 rad/2s 周期+肩摆，差分速度，6 测试）+ 入口 `scripts/run/run_sonic_sim2sim.py`（变体选择/managed viewer/realtime pacing）。**20s 目视运行：1000 步零跌落，root_z 0.757-0.767 呈摆臂节律起伏，RMSE 0.062**。**主观目视结论：操作员 2026-09-04 确认"没问题"（方向/幅度/节律跟手）——line 4 过线。**
 
-**剩余线（待续）**：真实输入源（JSONL 回放→tracker_arm_synth→GMR/mink 重定向→上身 qpos，依赖 mocap 图 t06 产出）；cmd_vel 步态线（恒值持尾前瞻的参考生成器 + BSI 映射）；腕力矩饱和率指标。
+7. **2026-09-04 line 5 落地（cmd_vel 步态线）**：官方 walk clip（`sample_data/robot_filtered`）经**用户手跑** `tmp_convert_walk.py`（joblib 反序列化按约定操作员执行；sha256 已对 HF LFS 验证）洗成纯 numpy npz @50Hz——**下游管线零 pickle**。格式判定：`dof` 为 **MuJoCo blocked 序**（统计拟合 + hpp 自述"reference motions 用 MuJoCo order"双证）、`root_rot` 为 xyzw（yaw−87° 与 y 向位移一致）。`sonic_gait.py`（8 测试）：速度缩放播放（rate=cmd/native）、clip 循环、朝向剥除 + yaw_rate 积分成 wxyz、上身 override（**ARM 集=UPPER17−腰{2,5,8}，交错序陷阱：连续 11..28 切片会覆盖踝关节，测试抓到**）。**行为验证（真策略 10s 三档）**：0.6×/1.0×/1.5× → 0.121/0.241/0.396 m/s 单调可控、全不摔；**系统性欠跟踪 ~0.37**（v1 无根位移通道，位移语义缺位的预期代价）→ t03 指令线标定补偿（cmd 播放率 ×1/0.37）或 planner 对照。
+8. **行为面发现（约束 t03 与 mocap 线）**：① clip 片头 ~25s 为站立段（位移 0.01m/5s），选段错会得出"策略不走"的假象——验证须用中段（frame≥1250）；② encode-0 下**臂参考低权重**（肩 pitch 跟踪差 0.77 rad、肘 0.47，腿 0.03-0.08 精跟）→ 上身动捕注入若跟踪差，启用输出侧 q_target 腕/臂直发（research/01 §6 备选）；③ yaw 积分面仅单测覆盖，转弯行为实测待 t03。
+
+**剩余线（待续）**：真实输入源（JSONL 回放→tracker_arm_synth→GMR/mink 重定向→上身 qpos，依赖 mocap 图 t06 产出；注意发现 8② 的臂权重问题）；腕力矩饱和率指标；速度标定补偿系数固化。
