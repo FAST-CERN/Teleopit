@@ -2,7 +2,7 @@
 id: 03-unity-motion-collection
 title: "Unity 采集实装：Motion 数据面上行（2 tracker + SN 绑定 + panel 开关）"
 labels: [wayfinder:prototype]
-status: open
+status: closed
 assignee: ""
 blocked-by: ["01-tracker-sdk-semantics", "02-unity-build-env"]
 ---
@@ -46,3 +46,20 @@ adb logcat -s Unity
 ```
 
 验收点：① Motion 流 72Hz 不塌、与 Head 同帧；② t01 §5 冒烟——平移/抬举核对翻转方向；③ valid=false 出现在遮挡时；④ `--record` JSONL → `from_tracking_payload` 回放（04 Resolution §6 欠账）。
+
+## Resolution
+
+**closed 2026-09-04**，HITL 真机四项全过（Pico + tracker sn=1 左 / sn=2 右，APK 链 `fdefb58`→`ec5c73d`→`cb46907`）：
+
+1. **帧率**：设备时戳中位 dt 14.40ms = **69.4Hz**（72Hz 目标内），p95 28.7ms，**全程零 >1s 间隙**；Motion 与 Head 同帧串流（占帧 97.1%，双侧 15836 帧）。
+2. **坐标冒烟（t01 §5）**：举高 y→+2.02m；左侧平伸 x→−0.98m；前平举 z→+0.38m（背后 −0.33m）——翻转后右手系 +x右/+y上/+z前 全对，量级合理。
+3. **valid 语义**：臂放低/出视野 valid 率 ~12%，举起 ~70%，位姿照发——t05 hold 策略输入面符合设计。
+4. **回放（04 §6 欠账清）**：`tracking_20260904_104418.jsonl`（25.9MB / 27451 帧）全量过 `PicoFrame.from_tracking_payload` 零错误，left/right sn=1/2 解析正确。
+
+**HITL 暴露并修复的缺陷**（`cb46907`）：tracker 在 app 启动前已连接时，惰性订阅（首次 Motion 帧才订阅）错过连接事件 → 只能 power-cycle 绑定。修复=manager `Start()` 早订阅（`EnsureSubscribed()`），装机回归通过（重启 app 双 tracker 预开机、无 power-cycle，双侧直接出现在流中）。
+
+**SN 实测**：左右 tracker 的 SDK trackerid 即 **1 / 2**（非机身印刷 SN）——绑文件持久化 `motion_tracker_binding.json`（left:1, right:2），纠错路径=adb 推文件或删除重绑（未启用）。
+
+**产物**：APK `F:\Chufan_Rui\teleop\t02-verify\pico-bridge-t03c.apk`（含全部修复）；录制数据留在 pc_receiver `pico_bridge_recordings/tracking_20260904_104418.jsonl`（含坐标冒烟动作段，可作 05/06 的偏移标定与合成回放输入）。
+
+**遗留（推迟项不变）**：panel 绑定显示 + sendMotion 面板开关 → sbs-1080p WIP 合流后小票。

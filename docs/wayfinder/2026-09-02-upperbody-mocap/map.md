@@ -48,6 +48,7 @@ created: 2026-09-02
 - 2026-09-02 t04 闭（TDD；pico-bridge `7e83469` 0.2.2 + Teleopit `71e3588`）：wire 契约 side-first（`Motion.left/right{sn,p,valid}`）；`PicoFrame.trackers` 容错解析（无 Motion/占位=inactive）；recording 零改动透写往返锁契约；provider `get_tracker_snapshot()` pico_native xyzw 原样透传（body 拒帧时照常捕获）；版本闸抬 (0,2,2)（gate 测试原传 bridge_cls 绕闸缺陷一并修）。真机回放补验欠账回写 03 票面。pc_receiver 108 过、Teleopit 589 过（4 失败+11 收集错均为预置欠账）。
 - 2026-09-03 t02 闭（research/02-build-env）：许可已重签（UnityPersonal，StopDate 2026-09-07，Hub 周滚签）；干净树 `7e83469` 批处理 Validate 全绿 + IL2CPP 出包 Success（59.2 MiB，热缓存 41s）；**坑=批处理成功后 Unity.exe 挂死须 taskkill+删锁**；出包命令在 notes §3，t03 增量包直接复用。sbs-1080p spinner WIP 已 stash 隔离，归该图处置。
 - 2026-09-03 t03 代码面落地（pico-bridge `fdefb58` 0.2.3，装机验收待 HITL）：用户定序「先 t03 核心避开 panel」——SN 绑定走 MotionTrackerBinding 自动指认（先左后右+JSON 持久化），panel 面推迟；sendMotion 真机开启走 BridgeControl tracking/set_motion（接收端 `--motion-trackers`）；wire 契约以 t04 side-first 为准（t01 数组形 sketch 作废）；mock+dump 端到端验证过，109 测试（1 预置 aiortc 败）。APK 已出待装机（票内 runbook）。
+- 2026-09-04 t03 闭（HITL 真机四项全过；APK 链 `fdefb58`→`ec5c73d`(UI)→`cb46907`(fix)）：中位 69.4Hz 零间隙、坐标冒烟三轴符号全对（y+2.02/x−0.98/z+0.38）、valid 遮挡语义活、27451 帧全量回放零错误（**04 §6 欠账清**）。**SN 实测=trackerid 1/2**。HITL 暴露启动竞态（预连接 tracker 惰性订阅漏绑→power-cycle 才绑）已修（早订阅）并装机回归通过。录制数据留 pc_receiver（坐标冒烟段可作 05/06 输入）。frontier→t06。
 
 ## Not yet specified
 
