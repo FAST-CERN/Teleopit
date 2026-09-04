@@ -32,6 +32,14 @@ t06 主观轮诊断出 body 流「发但空」三因（panel `EnableAutomaticTra
 - **测试**：receiver 118 过（+7 runtime-control，1 预置 aiortc 败）；Teleopit 620 过（+3 provider，4 预置败不变）。
 - **APK**：`F:\Chufan_Rui\teleop\t02-verify\pico-bridge-t07a.apk`（62,069,240B，热缓存构建 Success）。
 
+**不带真机的验证（2026-09-04 晚补齐，pico-bridge `e31f5bb`）**：
+
+1. **APK 内容**：`global-metadata.dat` 含 `ArmSourceControl`/`set_body`/`operatorHeight`/`DescribeSides`——新代码确实入包。
+2. **编辑器 prefab 冒烟**（`PicoBridge.Editor.PicoBridgeT07Smoke.Run`，headless executeMethod）：真 panel prefab 上构建 pill 行成功；默认双流皆关（cb46907 契约）；接收端格式 JSON 驱动互斥全对（set_body on/off+height 1.82 解析、set_motion(true) 离开 Body、pill 高亮刷新）——**`[T07SMOKE] PASS (17 checks)`**。
+3. **真 TCP 回环**（`test_arm_source_loopback.py`，假设备=裸 socket 说线协议）：body 连接即收 `[set_motion(false), set_body(true,1.66)]`、tracker 只收 `set_motion(true)`、auto 0.5s 无 valid 回退推 set_body——3/3 过。
+
+**仍需真机**（SDK 原生行为无法离机模拟）：`StartBodyTracking` 返回码与实际骨架质量、panel 在头盔内的视觉排版、tracker 绑定/频率回归。
+
 **HITL runbook（待人工）**：
 
 1. 装机：`adb -s PA8A10MGJ2280107D install -r F:\Chufan_Rui\teleop\t02-verify\pico-bridge-t07a.apk`
