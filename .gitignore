@@ -111,3 +111,14 @@ data/modelscope_upload/
 .claude/settings.local.json
 # MCP server config is machine-local (env paths / dds-probe python exe); not tracked
 .mcp.json
+# Scratch diagnostics from wayfinder maps (knowledge lands in docs/wayfinder, artifacts stay local)
+tmp_*.py
+tmp_*/
+# Teaching workspace (local, references docs/wayfinder; kept out of the repo)
+MISSION.md
+NOTES.md
+RESOURCES.md
+lessons/
+reference/
+assets/quiz.js
+assets/style.css
