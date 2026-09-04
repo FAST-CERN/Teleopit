@@ -41,12 +41,13 @@ created: 2026-09-04
 ## Decisions so far
 
 - 2026-09-04 开图：选型 GEAR-SONIC（Top1）+ AMO fallback + unitree_rl_lab 自训回退（预研排名，用户确认）；sim2sim 先行、真机另议。
+- 2026-09-04 t01 闭（research/01）：直灌可行免 FK（`pose` topic v1，ZMQ 5556，IsaacLab 交错序，映射表进 harness 常量）；checkpoint 主线 **low_latency**+对照 v1_1，**inference 无需 Isaac Lab**（onnxruntime）；锁腰=参考置 0 无需钳输出；腕直灌、颈旁路实锤；RH56E2 四档配重对照设计在档；sim2sim=Python+onnxruntime+MuJoCoRobot（200/50Hz 同构 pd_hz 200）。**速度线用户定案：cmd_vel 直造前瞻（恒值持尾），不引官方 planner**。frontier→t02。
 
 ## Not yet specified
 
 - 四线数值线（03 票内定稿）
-- checkpoint 三选一（01 票定：低延迟遥操作版 vs v1.1 腕增强 vs 基础）
-- AMO 对照线是否开票（SONIC sim2sim 受阻时）
+- ~~checkpoint 三选一~~——t01 已决：主线 low_latency+对照 v1_1
+- AMO 对照线是否开票（SONIC sim2sim 受阻时）；官方 planner 对照线（用户已定主线不引，留备选）
 - 真机 Onboard 部署/验收、模式机整合（本图闭后另议或另图）
 - Isaac Lab 复训线是否启用（仅 sim2sim 不过线时评估）
 
