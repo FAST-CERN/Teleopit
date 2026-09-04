@@ -3,7 +3,7 @@ id: 07-pico-bridge-mode-mutex
 title: "pico-bridge 模式互斥切换：上半身默认 vs 全身 body tracking，panel 二态 + 远程 set_body"
 labels: [wayfinder:prototype]
 status: open
-assignee: ""
+assignee: claude
 blocked-by: []
 ---
 

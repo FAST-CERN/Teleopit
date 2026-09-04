@@ -2,7 +2,7 @@
 id: 08-replay-viewer-rerun
 title: "回放驱动的合成骨架 viewer + receiver Rerun side-first 补齐"
 labels: [wayfinder:prototype]
-status: open
+status: closed
 assignee: claude
 blocked-by: []
 ---
@@ -30,4 +30,4 @@ t06 主观轮与调参需要一个**不开 sim 全链**的可视化：录制 JSO
 - **viewer 工具** `scripts/run/replay_tracker_mocap.py`：`PYTHONPATH=. python scripts/run/replay_tracker_mocap.py <recording.jsonl> [--speed S] [--no-loop] [--synth-yaml offsets.yaml] [--max-duration S]`——驱动未改动的 provider body 路径（合成→坐标变换→贴地）再喂 `mocap_viewer_proc` 骨架窗，无设备无 sim。冒烟：120 帧切片 1x 回放 provider 50.5Hz、渲染/退出干净；teleopit env 相关套件 59/59，全量=基线（4 预置败+11 收集错）。
 - **Rerun side-first**（pico-bridge `d1df51f`）：`_log_motion` 从 t01 数组形草稿改为 side-first——`world/motion/{left,right}` 位姿 puck、分侧配色、invalid=末位姿半透明 ghost、Track-L/Track-R 徽章、跟随相机 bounds 收编 tracker；pc_receiver 113 过（+4 新，1 预置 aiortc 败）。
 
-**剩余**：视觉确认轮（人工）：① MuJoCo 骨架窗对 `tracking_20260904_104418.jsonl` 坐标冒烟段方向可辨；② Rerun 面真机 `--viz` 时 left/right 各自 valid/位姿显示（本机未装 rerun viewer 二进制，`rr.spawn` 起不来——前置装 viewer 或用 `--connect`）。
+**剩余**：~~视觉确认轮（人工）~~：① MuJoCo 骨架窗冒烟——用户 2026-09-04 21:49 确认过线（`replay_tracker_mocap.py` 渲染方向正确可辨）；② Rerun 面留待 t07 真机轮顺带验证（本机无 rerun viewer 二进制；届时装 viewer 或 `--connect`）。票闭。
