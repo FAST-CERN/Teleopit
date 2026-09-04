@@ -112,14 +112,17 @@ def test_shoulder_anchor_from_head_and_elbow_at_midpoint_plus_lateral() -> None:
     np.testing.assert_allclose(joints[ls_idx, 0:3], expected_left_shoulder, atol=1e-9)
     np.testing.assert_allclose(joints[rs_idx, 0:3], expected_right_shoulder, atol=1e-9)
 
-    # elbow = midpoint(shoulder, wrist) + k * outward_lateral (world-up cross arm dir, signed per side)
+    # elbow = midpoint(shoulder, wrist) + k * cross(up, arm_dir)/|arm_dir| * side_sign.
+    # Unnormalized (k*sin(theta) magnitude): the lateral hint fades smoothly to
+    # zero as the arm approaches vertical instead of flipping 180 degrees at
+    # the degenerate direction (IK-chased elbow jumps, HITL replay t=74).
     shoulder = joints[ls_idx, 0:3]
     wrist = joints[lw_idx, 0:3]
     mid = 0.5 * (shoulder + wrist)
     arm_dir = wrist - shoulder
     up = np.array([0.0, 1.0, 0.0])
     cross = np.cross(up, arm_dir)
-    lateral = -cross / np.linalg.norm(cross) * CONFIG.elbow_lateral_m  # left side sign
+    lateral = -cross / np.linalg.norm(arm_dir) * CONFIG.elbow_lateral_m  # left side sign
     np.testing.assert_allclose(joints[le_idx, 0:3], mid + lateral, atol=1e-9)
 
     # head/neck ride the HMD pose

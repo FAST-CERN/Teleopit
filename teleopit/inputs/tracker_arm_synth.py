@@ -177,14 +177,20 @@ def _elbow_position(
     side_sign: float,
     lateral_m: float,
 ) -> NDArray[np.float64]:
-    """midpoint(shoulder, wrist) + outward lateral offset (t05 决议 2)."""
+    """midpoint(shoulder, wrist) + outward lateral offset (t05 决议 2).
+
+    The lateral hint uses ``cross(up, arm_dir) / |arm_dir|`` (magnitude
+    ``k*sin(theta)`` from vertical) instead of a normalized direction: it fades
+    smoothly to zero as the arm approaches vertical, so the elbow never jumps
+    when the arm sweeps through the degenerate direction (IK-chased elbow
+    flips seen in the t06 replay).
+    """
     mid = 0.5 * (shoulder + wrist)
     arm_dir = wrist - shoulder
-    cross = np.cross(_WORLD_UP, arm_dir)
-    cross_norm = float(np.linalg.norm(cross))
-    if cross_norm <= 1e-6:  # arm along the vertical: lateral direction degenerates
+    arm_len = float(np.linalg.norm(arm_dir))
+    if arm_len <= 1e-9:
         return mid
-    return mid + side_sign * (cross / cross_norm) * lateral_m
+    return mid + side_sign * (np.cross(_WORLD_UP, arm_dir) / arm_len) * lateral_m
 
 
 def _align_quat(canonical: NDArray[np.float64], direction: NDArray[np.float64]) -> NDArray[np.float64]:
