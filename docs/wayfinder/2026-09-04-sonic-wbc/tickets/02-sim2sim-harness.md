@@ -27,6 +27,6 @@ blocked-by: ["01-sonic-interface-recon"]
 4. **端到端冒烟（真 low_latency checkpoint）**：站姿参考 4s 三变体全稳——基线/锁腰 root_z≈0.765 平直、+0.5kg 盒 RMSE 0.0464（基线 0.0593）action 1.52（1.30）、锁腰+配重同稳。**对照实验：纯被动 PD 保持 1.5s 塌（plant 属性，策略必须主动平衡）——Python 复刻链数值正确性由此反证**。
 5. **风险项消除一条**：low_latency 的 994/1247 obs 里无 root_z 字段（研究 §1.3 风险只适用于 default 变体 obs），root_z 恒 0 风险对本 checkpoint 不存在。
 
-6. **2026-09-04 line 4 落地（`9e470aa`）**：合成挥臂源 `sonic_synthetic.py`（站姿模板+腰 0+双肘反相 ±0.6 rad/2s 周期+肩摆，差分速度，6 测试）+ 入口 `scripts/run/run_sonic_sim2sim.py`（变体选择/managed viewer/realtime pacing）。**20s 目视运行：1000 步零跌落，root_z 0.757-0.767 呈摆臂节律起伏，RMSE 0.062**。主观目视结论待操作员回填。
+6. **2026-09-04 line 4 落地（`9e470aa`）**：合成挥臂源 `sonic_synthetic.py`（站姿模板+腰 0+双肘反相 ±0.6 rad/2s 周期+肩摆，差分速度，6 测试）+ 入口 `scripts/run/run_sonic_sim2sim.py`（变体选择/managed viewer/realtime pacing）。**20s 目视运行：1000 步零跌落，root_z 0.757-0.767 呈摆臂节律起伏，RMSE 0.062**。**主观目视结论：操作员 2026-09-04 确认"没问题"（方向/幅度/节律跟手）——line 4 过线。**
 
 **剩余线（待续）**：真实输入源（JSONL 回放→tracker_arm_synth→GMR/mink 重定向→上身 qpos，依赖 mocap 图 t06 产出）；cmd_vel 步态线（恒值持尾前瞻的参考生成器 + BSI 映射）；腕力矩饱和率指标。
